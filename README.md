@@ -11,3 +11,7 @@ Installation:
 
 Currently you'll have to build it yourself with Xcode in order to run it. There
 are no signed binary releases.
+
+A little screenshot:
+
+![a screenshot showing the electric sheep in action](https://github.com/zacharyhamm/electrange/raw/main/screenshot.png)
