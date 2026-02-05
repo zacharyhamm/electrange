@@ -147,11 +147,116 @@ class PetViewModel {
     }
 
     func startJumping() {
+        guard let window = petWindow,
+              let screen = NSScreen.main else {
+            return
+        }
+
+        stopMovementTimer()
+        stopIdleTimer()
         state = .jumping
+
+        // Calculate jump start position
+        jumpStartX = window.frame.origin.x
+        jumpStartY = window.frame.origin.y
+
+        // Calculate jump target position
+        // Horizontal: continue forward with momentum
+        let jumpDistance: CGFloat = 120  // Distance to travel forward during jump
+        let screenWidth = screen.frame.width
+        let petSize = window.frame.width
+
+        if isMovingRight {
+            jumpTargetX = min(jumpStartX + jumpDistance, screenWidth - petSize)
+        } else {
+            jumpTargetX = max(jumpStartX - jumpDistance, 0)
+        }
+
+        // Vertical: return to ground level
+        jumpTargetY = 0
+
+        // Initialize jump progress
+        jumpProgress = 0
+
+        // Start animation timer to advance sprite frames
+        startDynamicAnimationTimer()
+
+        // Start jump physics timer
+        startBasicJumpTimer()
+    }
+
+    private func startBasicJumpTimer() {
+        movementTimer?.invalidate()
+        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
+            self?.updateBasicJumpMovement()
+        }
+    }
+
+    private func updateBasicJumpMovement() {
+        guard let window = petWindow,
+              let screen = NSScreen.main else { return }
+
+        // Use the animation's built-in movement values (like desktopPet)
+        // The jump animation has startY=-15 (up) to endY=+15 (down) which creates the arc
+        let moveX = abs(animationManager.getCurrentMoveX())
+        let moveY = animationManager.getCurrentMoveY()
+
+        let screenWidth = screen.frame.width
+        let petSize = window.frame.width
+        var newX = window.frame.origin.x
+        var newY = window.frame.origin.y
+
+        // Apply horizontal movement based on direction
+        if isMovingRight {
+            newX += moveX
+        } else {
+            newX -= moveX
+        }
+
+        // Apply vertical movement from animation (creates the arc)
+        // Multiply by scale factor to make the jump more impressive
+        let jumpScale: CGFloat = 3.0
+        newY -= moveY * jumpScale  // Subtract because screen Y is inverted (negative moveY = up)
+
+        // Clamp to screen bounds
+        newX = max(0, min(newX, screenWidth - petSize))
+        newY = max(0, newY)  // Don't go below ground
+
+        // Update window position
+        window.setFrameOrigin(NSPoint(x: newX, y: newY))
     }
 
     func endJumping() {
+        guard let window = petWindow,
+              let screen = NSScreen.main else {
+            state = .walking
+            return
+        }
+
+        // Stop jump timer
+        movementTimer?.invalidate()
+
+        // Reset jump progress
+        jumpProgress = 0
+
+        // Ensure pet is on ground and within screen bounds
+        let screenWidth = screen.frame.width
+        let petSize = window.frame.width
+        var finalX = window.frame.origin.x
+        let finalY: CGFloat = 0
+
+        // Clamp to screen bounds
+        if finalX < 0 {
+            finalX = 0
+        } else if finalX > screenWidth - petSize {
+            finalX = screenWidth - petSize
+        }
+
+        window.setFrameOrigin(NSPoint(x: finalX, y: finalY))
+
+        // Resume walking state and start movement timer
         state = .walking
+        startMovementTimer()
     }
 
     // MARK: - Dock State Transitions
@@ -502,12 +607,14 @@ class PetViewModel {
 
     private func handleAnimationComplete() {
         guard !state.isDragging && !state.isFalling && !state.isSleeping && !state.isOnDock else { return }
-        guard case .walking = state else { return }  // Only handle for normal walking
 
-        // Check if we just finished jumping
-        if animationManager.currentAnimation?.name == "jump" {
+        // Check if we just finished jumping - handle before the walking guard
+        if state.isJumping && animationManager.currentAnimation?.name == "jump" {
             endJumping()
+            return
         }
+
+        guard case .walking = state else { return }  // Only handle for normal walking
 
         let currentName = animationManager.currentAnimation?.name ?? ""
         var nextID = animationManager.selectNextAnimation()
@@ -744,10 +851,6 @@ class PetViewModel {
             newX -= moveX
         }
 
-        if state.isJumping {
-            newY -= moveY
-        }
-
         // Refresh dock info
         cachedDockInfo = dockDetector.getDockInfo()
 
@@ -788,12 +891,8 @@ class PetViewModel {
             isMovingRight = true
         }
 
-        // Keep on ground unless jumping
-        if !state.isJumping {
-            newY = 0
-        } else if newY < 0 {
-            newY = 0
-        }
+        // Keep on ground when walking
+        newY = 0
 
         window.setFrameOrigin(NSPoint(x: newX, y: newY))
     }
