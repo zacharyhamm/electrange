@@ -215,7 +215,7 @@ class PetViewModel {
 
         // Apply vertical movement from animation (creates the arc)
         // Multiply by scale factor to make the jump more impressive
-        let jumpScale: CGFloat = 3.0
+        let jumpScale: CGFloat = 2.0
         newY -= moveY * jumpScale  // Subtract because screen Y is inverted (negative moveY = up)
 
         // Clamp to screen bounds
@@ -840,7 +840,6 @@ class PetViewModel {
         let currentX = window.frame.origin.x
 
         let moveX = abs(animationManager.getCurrentMoveX())  // Use absolute value
-        let moveY = animationManager.getCurrentMoveY()
 
         var newX = currentX
         var newY = window.frame.origin.y

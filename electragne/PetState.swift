@@ -159,7 +159,7 @@ enum BehaviorConstants {
     static let pissChance: Int = 2      // 2% chance
     static let eatChance: Int = 3       // 3% chance
     static let runChance: Int = 20 // 20% chance
-    static let jumpWhileRunningChance: Int = 60  // 60% chance while running (we like the jumping!)
+    static let jumpWhileRunningChance: Int = 30  // 30% chance while running (we like the jumping!)
 }
 
 /// Pet window size constants
