@@ -92,7 +92,7 @@ class AnimationManager {
 
     func getCurrentFrameNumber() -> Int? {
         guard let animation = currentAnimation,
-              currentFrameIndex < animation.frames.count else {
+              animation.frames.indices.contains(currentFrameIndex) else {
             return nil
         }
         return animation.frames[currentFrameIndex]
@@ -179,7 +179,7 @@ class AnimationManager {
             if repeatCountRemaining > 0 {
                 // Loop back to repeatFrom position
                 repeatCountRemaining -= 1
-                currentFrameIndex = min(animation.repeatFrom, animation.frames.count - 1)
+                currentFrameIndex = min(max(0, animation.repeatFrom), animation.frames.count - 1)
             } else if shouldLoop {
                 // Standard looping (restart from beginning)
                 currentFrameIndex = 0

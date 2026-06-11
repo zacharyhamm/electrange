@@ -125,6 +125,7 @@ class PetViewModel {
     }
 
     func endDragging() {
+        guard state.isDragging else { return }
         state = .falling(velocity: 0, bounceCount: 0)
         recordInteraction()
         playFallAnimation()
@@ -954,8 +955,9 @@ class PetViewModel {
         guard let window = petWindow, let screen = NSScreen.main else { return }
 
         let petSize = window.frame.width
-        let maxX = screen.visibleFrame.maxX - petSize
         let minX = screen.visibleFrame.minX
+        // max() keeps the range valid if the pet is wider than the visible screen
+        let maxX = max(minX, screen.visibleFrame.maxX - petSize)
         let startX = CGFloat.random(in: minX...maxX)
         let startY = screen.frame.maxY
 

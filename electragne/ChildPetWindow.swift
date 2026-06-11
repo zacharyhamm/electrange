@@ -75,6 +75,10 @@ class ChildPetWindow: NSWindow {
 
         super.init(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
 
+        // ARC manages this window's lifetime; the default (true) would make
+        // close() perform an extra release and crash with a use-after-free
+        self.isReleasedWhenClosed = false
+
         // Configure window to be transparent and floating
         self.isOpaque = false
         self.backgroundColor = .clear
@@ -183,7 +187,7 @@ class ChildPetWindow: NSWindow {
             // End of sequence
             if repeatCountRemaining > 0 {
                 repeatCountRemaining -= 1
-                currentFrameIndex = animation.repeatFrom
+                currentFrameIndex = min(max(0, animation.repeatFrom), animation.frames.count - 1)
             } else {
                 // Check for next animation
                 if let nextAnim = animation.nextAnimations.first(where: { $0.only == "none" }) {
@@ -204,7 +208,7 @@ class ChildPetWindow: NSWindow {
     private func updateFrame() {
         guard !isClosing, !hasBeenClosed,
               let animation = currentAnimation,
-              currentFrameIndex < animation.frames.count,
+              animation.frames.indices.contains(currentFrameIndex),
               let imgView = imageView else { return }
 
         let frameNumber = animation.frames[currentFrameIndex]
@@ -250,13 +254,9 @@ class ChildPetWindow: NSWindow {
         // Cancel any existing close work
         closeWorkItem?.cancel()
 
-        // Schedule close after delay
+        // Schedule close after delay; close() manages the hasBeenClosed flag
         closeWorkItem = DispatchWorkItem { [weak self] in
-            guard let self = self else { return }
-            guard !self.hasBeenClosed else { return }
-            self.hasBeenClosed = true
-            self.orderOut(nil)
-            self.close()
+            self?.close()
         }
         if let workItem = closeWorkItem {
             DispatchQueue.main.asyncAfter(deadline: .now() + BehaviorConstants.childWindowFadeDelay, execute: workItem)

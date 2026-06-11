@@ -164,6 +164,7 @@ enum BehaviorConstants {
 
 /// Pet window size constants
 enum PetSizeConstants {
+    static let storageKey = "petSize"
     static let defaultSize: Double = 40
     static let minimumSize: Double = 20
     static let maximumSize: Double = 200

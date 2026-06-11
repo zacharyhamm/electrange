@@ -15,7 +15,7 @@ struct ContentView: View {
 
 struct ElectragneView: View {
     @State private var viewModel = PetViewModel()
-    @AppStorage("petSize") private var petSize: Double = PetSizeConstants.defaultSize
+    @AppStorage(PetSizeConstants.storageKey) private var petSize: Double = PetSizeConstants.defaultSize
 
     var body: some View {
         ZStack {
@@ -37,6 +37,9 @@ struct ElectragneView: View {
             }
         }
         .frame(width: petSize, height: petSize)
+        .background(WindowAccessor { window in
+            viewModel.petWindow = window
+        })
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { _ in
@@ -44,7 +47,7 @@ struct ElectragneView: View {
 
                     if !viewModel.state.isDragging {
                         // Calculate offset from mouse to window origin
-                        if let window = viewModel.petWindow {
+                        if viewModel.state.canInteract, let window = viewModel.petWindow {
                             let offset = NSPoint(
                                 x: mouseLocation.x - window.frame.origin.x,
                                 y: mouseLocation.y - window.frame.origin.y
@@ -60,7 +63,6 @@ struct ElectragneView: View {
                 }
         )
         .onAppear {
-            setupWindow()
             viewModel.loadAnimations()
 
             // Defer window positioning to after the layout pass completes
@@ -71,11 +73,29 @@ struct ElectragneView: View {
             }
         }
     }
+}
 
-    private func setupWindow() {
-        // Store reference to window in viewModel
-        if let window = NSApplication.shared.windows.first {
-            viewModel.petWindow = window
+/// Reports the NSWindow hosting this view. Unlike NSApp.windows.first, this
+/// can't pick up the status-bar item's window or any other unrelated window.
+private struct WindowAccessor: NSViewRepresentable {
+    let onWindow: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> AccessorView {
+        let view = AccessorView()
+        view.onWindow = onWindow
+        return view
+    }
+
+    func updateNSView(_ nsView: AccessorView, context: Context) {}
+
+    final class AccessorView: NSView {
+        var onWindow: ((NSWindow) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window {
+                onWindow?(window)
+            }
         }
     }
 }

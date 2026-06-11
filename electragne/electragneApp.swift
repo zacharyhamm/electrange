@@ -12,7 +12,9 @@ struct electragneApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        WindowGroup {
+        // Window (not WindowGroup) so File > New Window can't spawn a second
+        // pet view fighting over the same NSWindow
+        Window("Electragne", id: "pet") {
             ContentView()
         }
         .windowStyle(.hiddenTitleBar)
@@ -37,8 +39,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureWindow() {
-        // Find the pet window (the main content window, not alerts or other system windows)
-        guard let window = NSApplication.shared.windows.first(where: { $0.contentView != nil }) else { return }
+        // Find the pet window (the main content window, not the status-bar
+        // item's window or other system windows)
+        guard let window = NSApplication.shared.windows.first(where: { window in
+            window.contentView != nil
+                && !(window is NSPanel)
+                && !window.className.contains("StatusBar")
+        }) else { return }
         self.petWindow = window
 
         // Remove ALL window decorations
@@ -159,12 +166,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func adjustPetSize(by delta: Double) {
-        let currentSize = UserDefaults.standard.double(forKey: "petSize")
+        let currentSize = UserDefaults.standard.double(forKey: PetSizeConstants.storageKey)
         let size = currentSize > 0 ? currentSize : PetSizeConstants.defaultSize
         let newSize = max(PetSizeConstants.minimumSize, min(PetSizeConstants.maximumSize, size + delta))
 
         guard let window = petWindow else {
-            UserDefaults.standard.set(newSize, forKey: "petSize")
+            UserDefaults.standard.set(newSize, forKey: PetSizeConstants.storageKey)
             return
         }
 
@@ -179,7 +186,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Update UserDefaults - this triggers SwiftUI to re-render with new size
         // SwiftUI's .windowResizability(.contentSize) will handle the window resize
-        UserDefaults.standard.set(newSize, forKey: "petSize")
+        UserDefaults.standard.set(newSize, forKey: PetSizeConstants.storageKey)
 
         // Adjust window position to keep pet grounded (after a brief delay to let SwiftUI resize)
         DispatchQueue.main.async {

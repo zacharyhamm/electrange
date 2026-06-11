@@ -51,9 +51,28 @@ class DockDetector {
 
     private init() {}
 
+    // Cache so the 60Hz physics/movement timers don't hit
+    // CGWindowListCopyWindowInfo (an expensive syscall) on every tick
+    private var cachedInfo: DockInfo?
+    private var cacheTimestamp: TimeInterval = 0
+    private static let cacheLifetime: TimeInterval = 1.0
+
     /// Get current dock information by finding the Dock application's window.
     /// Returns nil if dock is hidden or not detectable.
+    /// The result is cached for a second; call from the main thread.
     func getDockInfo() -> DockInfo? {
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - cacheTimestamp < Self.cacheLifetime {
+            return cachedInfo
+        }
+
+        let info = computeDockInfo()
+        cachedInfo = info
+        cacheTimestamp = now
+        return info
+    }
+
+    private func computeDockInfo() -> DockInfo? {
         guard let screen = NSScreen.main else { return nil }
 
         // First, determine dock position from screen geometry

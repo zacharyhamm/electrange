@@ -76,71 +76,24 @@ struct ChildSpawn {
                                     random: Int, randS: Int) -> CGFloat {
         guard !expr.isEmpty else { return 0 }
 
-        var expression = expr
+        let variables: [String: Double] = [
+            "screenW": Double(screenW),
+            "screenH": Double(screenH),
+            "areaW": Double(areaW),
+            "areaH": Double(areaH),
+            "imageX": Double(imageX),
+            "imageY": Double(imageY),
+            "imageW": Double(imageW),
+            "imageH": Double(imageH),
+            "random": Double(random),
+            "randS": Double(randS),
+        ]
 
-        // Replace variables with values
-        expression = expression.replacingOccurrences(of: "screenW", with: "\(screenW)")
-        expression = expression.replacingOccurrences(of: "screenH", with: "\(screenH)")
-        expression = expression.replacingOccurrences(of: "areaW", with: "\(areaW)")
-        expression = expression.replacingOccurrences(of: "areaH", with: "\(areaH)")
-        expression = expression.replacingOccurrences(of: "imageX", with: "\(imageX)")
-        expression = expression.replacingOccurrences(of: "imageY", with: "\(imageY)")
-        expression = expression.replacingOccurrences(of: "imageW", with: "\(imageW)")
-        expression = expression.replacingOccurrences(of: "imageH", with: "\(imageH)")
-        expression = expression.replacingOccurrences(of: "randS", with: "\(randS)")
-        expression = expression.replacingOccurrences(of: "random", with: "\(random)")
-
-        // Validate expression contains only safe characters (numbers, operators, parentheses, decimals, whitespace)
-        let safeCharacters = CharacterSet(charactersIn: "0123456789.+-*/() ")
-        guard expression.unicodeScalars.allSatisfy({ safeCharacters.contains($0) }) else {
-            print("Unsafe expression rejected: '\(expr)'")
+        guard let value = ExpressionEvaluator.evaluate(expr, variables: variables),
+              value.isFinite else {
+            print("Could not evaluate expression: '\(expr)'")
             return 0
         }
-
-        // Additional validation to prevent crashes
-        let trimmed = expression.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return 0 }
-
-        // Check balanced parentheses
-        var parenCount = 0
-        for char in trimmed {
-            if char == "(" { parenCount += 1 }
-            if char == ")" { parenCount -= 1 }
-            if parenCount < 0 { return 0 }  // More closing than opening
-        }
-        guard parenCount == 0 else { return 0 }
-
-        // Check for invalid patterns that would crash NSExpression
-        let invalidPatterns = ["++", "--", "**", "//", "+-", "-+", "*+", "/+",
-                               "+*", "+/", "-*", "-/", "*/", "/*", "()", "( )"]
-        for pattern in invalidPatterns {
-            if trimmed.contains(pattern) { return 0 }
-        }
-
-        // Check doesn't end with an operator
-        if let lastChar = trimmed.last, "+-*/(".contains(lastChar) { return 0 }
-
-        // Check doesn't start with problematic operators (leading minus is OK)
-        if let firstChar = trimmed.first, "+*/".contains(firstChar) { return 0 }
-
-        // Evaluate using NSExpression with exception safety
-        return evaluateExpressionSafely(trimmed)
-    }
-
-    private func evaluateExpressionSafely(_ expression: String) -> CGFloat {
-        // NSExpression can throw Objective-C exceptions which aren't caught by Swift try/catch.
-        // We use a more defensive approach: validate thoroughly above, and here we just
-        // handle the case where expressionValue returns something unexpected.
-        let nsExpr: NSExpression
-        nsExpr = NSExpression(format: expression)
-
-        guard let result = nsExpr.expressionValue(with: nil, context: nil) as? NSNumber else {
-            return 0
-        }
-
-        let value = result.doubleValue
-        // Guard against infinity/NaN from division by zero
-        guard value.isFinite else { return 0 }
 
         return CGFloat(value)
     }
@@ -151,17 +104,60 @@ enum RepeatValue {
     case fixed(Int)
     case random(divisor: Int, offset: Int) // random/divisor+offset
     case randomMultiplied(multiplier: Int) // random*multiplier
+    case expression(String) // Arbitrary arithmetic, e.g. "(screenW/2)/30-6"
+
+    // Upper bound keeps a bad value from overflowing downstream frame-count math
+    private static let maxRepeatCount = 100_000
 
     func evaluate() -> Int {
+        let value: Int
         switch self {
-        case .fixed(let value):
-            return value
+        case .fixed(let fixed):
+            value = fixed
         case .random(let divisor, let offset):
             // random 0-99 divided by divisor, plus offset
-            return Int.random(in: 0...99) / divisor + offset
+            guard divisor > 0 else { return Swift.max(0, offset) }
+            let (sum, overflow) = (Int.random(in: 0...99) / divisor).addingReportingOverflow(offset)
+            value = overflow ? Self.maxRepeatCount : sum
         case .randomMultiplied(let multiplier):
-            return Int.random(in: 0...99) * multiplier
+            let (product, overflow) = Int.random(in: 0...99).multipliedReportingOverflow(by: multiplier)
+            value = overflow ? Self.maxRepeatCount : product
+        case .expression(let expr):
+            value = Self.evaluateRepeatExpression(expr)
         }
+        return Swift.min(Swift.max(0, value), Self.maxRepeatCount)
+    }
+
+    private static func evaluateRepeatExpression(_ expr: String) -> Int {
+        // Translate desktopPet's C# "Convert(x,System.Int32)" int-cast into plain parentheses
+        var translated = expr.replacingOccurrences(of: "Convert(", with: "(")
+        translated = translated.replacingOccurrences(of: ",System.Int32)", with: ")")
+        translated = translated.replacingOccurrences(of: ", System.Int32)", with: ")")
+
+        let screenFrame = NSScreen.main?.frame ?? .zero
+        let visibleFrame = NSScreen.main?.visibleFrame ?? .zero
+        let storedSize = UserDefaults.standard.double(forKey: PetSizeConstants.storageKey)
+        let petSize = storedSize > 0 ? storedSize : PetSizeConstants.defaultSize
+
+        let variables: [String: Double] = [
+            "screenW": screenFrame.width,
+            "screenH": screenFrame.height,
+            "areaW": visibleFrame.width,
+            "areaH": visibleFrame.height,
+            "imageW": petSize,
+            "imageH": petSize,
+            "imageX": 0,
+            "imageY": 0,
+            "random": Double(Int.random(in: 0...99)),
+            "randS": Double(Int.random(in: 0...99)),
+        ]
+
+        guard let value = ExpressionEvaluator.evaluate(translated, variables: variables),
+              value.isFinite else {
+            return 1 // Matches the previous default for unparseable repeat values
+        }
+        // Clamp before converting: Int(_:) traps on out-of-range doubles
+        return Int(Swift.min(Swift.max(value, 0), Double(maxRepeatCount)))
     }
 
     static func parse(_ string: String) -> RepeatValue {
@@ -173,10 +169,10 @@ enum RepeatValue {
             if let plusIndex = rest.firstIndex(of: "+") {
                 let divisorStr = String(rest[..<plusIndex])
                 let offsetStr = String(rest[rest.index(after: plusIndex)...])
-                if let divisor = Int(divisorStr), let offset = Int(offsetStr) {
+                if let divisor = Int(divisorStr), divisor > 0, let offset = Int(offsetStr) {
                     return .random(divisor: divisor, offset: offset)
                 }
-            } else if let divisor = Int(rest) {
+            } else if let divisor = Int(rest), divisor > 0 {
                 return .random(divisor: divisor, offset: 0)
             }
         }
@@ -194,7 +190,10 @@ enum RepeatValue {
             return .fixed(value)
         }
 
-        return .fixed(1) // Default
+        // Anything else ("10+random/10", "(screenW/2)/30-6", ...) is evaluated
+        // as an arithmetic expression each time the animation plays
+        guard !trimmed.isEmpty else { return .fixed(1) }
+        return .expression(trimmed)
     }
 }
 
@@ -425,7 +424,7 @@ class AnimationParser: NSObject, XMLParserDelegate {
                     startInterval: startInterval / 1000.0,
                     endInterval: finalEndInterval / 1000.0,
                     repeatCount: repeatValue,
-                    repeatFrom: repeatFrom,
+                    repeatFrom: min(max(0, repeatFrom), currentFrames.count - 1),
                     offsetY: startOffsetY,
                     startMoveX: startMoveX,
                     startMoveY: startMoveY,
