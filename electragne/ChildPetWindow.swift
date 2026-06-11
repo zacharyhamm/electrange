@@ -34,11 +34,8 @@ class ChildPetWindow: NSWindow {
     }
 
     init?(animations: [String: PetAnimation], spriteRenderer: SpriteRenderer?,
-          spawn: ChildSpawn, parentPosition: NSPoint, parentSize: CGFloat, isMovingRight: Bool) {
-        guard let screen = NSScreen.main else {
-            return nil
-        }
-
+          spawn: ChildSpawn, parentPosition: NSPoint, parentSize: CGFloat, isMovingRight: Bool,
+          screen: NSScreen) {
         self.petAnimations = animations
         self.spriteRenderer = spriteRenderer
         self.childSize = parentSize
@@ -50,8 +47,13 @@ class ChildPetWindow: NSWindow {
         let random = Int.random(in: 0...99)
         let randS = Int.random(in: 0...99)
 
+        // The spawn expressions assume a single screen with origin (0,0), so
+        // evaluate them in screen-local coordinates and convert back
+        let localParentX = parentPosition.x - screen.frame.minX
+        let localParentY = parentPosition.y - screen.frame.minY
+
         var spawnX = spawn.evaluateX(
-            imageX: parentPosition.x, imageY: parentPosition.y,
+            imageX: localParentX, imageY: localParentY,
             imageW: parentSize, imageH: parentSize,
             screenW: screenW, screenH: screenH,
             areaW: areaW, areaH: areaH,
@@ -59,7 +61,7 @@ class ChildPetWindow: NSWindow {
         )
 
         let spawnY = spawn.evaluateY(
-            imageX: parentPosition.x, imageY: parentPosition.y,
+            imageX: localParentX, imageY: localParentY,
             imageW: parentSize, imageH: parentSize,
             screenW: screenW, screenH: screenH,
             areaW: areaW, areaH: areaH,
@@ -68,10 +70,14 @@ class ChildPetWindow: NSWindow {
 
         // Mirror X position if parent is moving right
         if isMovingRight {
-            spawnX = parentPosition.x + parentSize - (spawnX - parentPosition.x) - parentSize
+            spawnX = localParentX + parentSize - (spawnX - localParentX) - parentSize
         }
 
-        let frame = NSRect(x: spawnX, y: spawnY, width: parentSize, height: parentSize)
+        let frame = NSRect(
+            x: screen.frame.minX + spawnX,
+            y: screen.frame.minY + spawnY,
+            width: parentSize, height: parentSize
+        )
 
         super.init(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
 

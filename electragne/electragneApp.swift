@@ -178,10 +178,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let oldSize = window.frame.size
         let oldOrigin = window.frame.origin
 
-        // Calculate new origin to keep pet grounded
+        // Calculate new origin to keep pet grounded (the floor is the bottom
+        // edge of whichever screen the pet is on, not necessarily y=0)
+        let floorY = window.screen?.frame.minY ?? 0
         let newOrigin = NSPoint(
             x: oldOrigin.x,
-            y: max(0, oldOrigin.y - (newSize - oldSize.height))
+            y: max(floorY, oldOrigin.y - (newSize - oldSize.height))
         )
 
         // Update UserDefaults - this triggers SwiftUI to re-render with new size

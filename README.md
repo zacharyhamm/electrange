@@ -5,7 +5,10 @@ tasking claude code (Opus 4.5) with porting functionality from
 https://github.com/Adrianotiger/desktopPet over to macOS, and then lots of
 iteration from there. It only supports the original eSheep animations (and only
 a subset), and only walks around on the bottom of the screen, although it will
-attempt to jump on your dock. It makes me smile. There may be more in the future.
+attempt to jump on your dock. If you have multiple displays it will wander
+between them: walking across where their edges meet, dropping down to a lower
+screen, or hopping up onto a slightly higher one. It makes me smile. There may
+be more in the future.
 
 Installation:
 

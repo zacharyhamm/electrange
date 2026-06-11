@@ -52,39 +52,39 @@ class DockDetector {
     private init() {}
 
     // Cache so the 60Hz physics/movement timers don't hit
-    // CGWindowListCopyWindowInfo (an expensive syscall) on every tick
+    // CGWindowListCopyWindowInfo (an expensive syscall) on every tick.
+    // Keyed by screen frame since the pet asks about the screen it's on.
     private var cachedInfo: DockInfo?
+    private var cachedScreenFrame: NSRect = .zero
     private var cacheTimestamp: TimeInterval = 0
     private static let cacheLifetime: TimeInterval = 1.0
 
-    /// Get current dock information by finding the Dock application's window.
-    /// Returns nil if dock is hidden or not detectable.
+    /// Get dock information for the given screen by finding the Dock
+    /// application's window there. Returns nil if the dock is hidden, not
+    /// detectable, or lives on a different screen.
     /// The result is cached for a second; call from the main thread.
-    func getDockInfo() -> DockInfo? {
+    func getDockInfo(for screen: NSScreen) -> DockInfo? {
         let now = ProcessInfo.processInfo.systemUptime
-        if now - cacheTimestamp < Self.cacheLifetime {
+        if now - cacheTimestamp < Self.cacheLifetime, cachedScreenFrame == screen.frame {
             return cachedInfo
         }
 
-        let info = computeDockInfo()
+        let info = computeDockInfo(for: screen)
         cachedInfo = info
+        cachedScreenFrame = screen.frame
         cacheTimestamp = now
         return info
     }
 
-    private func computeDockInfo() -> DockInfo? {
-        guard let screen = NSScreen.main else { return nil }
-
-        // First, determine dock position from screen geometry
-        let position = inferDockPosition(screen: screen)
-
+    private func computeDockInfo(for screen: NSScreen) -> DockInfo? {
         // Try to find the actual Dock window bounds (requires Screen Recording permission)
-        if let dockFrame = findDockWindowFrame(screen: screen) {
+        if let (dockFrame, position) = findDockWindowFrame(on: screen) {
             return DockInfo(position: position, frame: dockFrame)
         }
 
         // Fallback: estimate dock bounds based on screen geometry
         // CGWindowList doesn't work in sandboxed apps without Screen Recording permission
+        let position = inferDockPosition(screen: screen)
         return estimateDockBounds(screen: screen, position: position)
     }
 
@@ -110,7 +110,7 @@ class DockDetector {
             )
 
             // Center the dock on screen
-            let dockX = (fullFrame.width - estimatedWidth) / 2
+            let dockX = fullFrame.origin.x + (fullFrame.width - estimatedWidth) / 2
 
             return DockInfo(
                 position: .bottom,
@@ -132,7 +132,7 @@ class DockDetector {
                 estimatedIconSize * estimatedIconCount,
                 fullFrame.height * 0.4
             )
-            let dockY = (fullFrame.height - estimatedHeight) / 2
+            let dockY = fullFrame.origin.y + (fullFrame.height - estimatedHeight) / 2
 
             return DockInfo(
                 position: .left,
@@ -154,7 +154,7 @@ class DockDetector {
                 estimatedIconSize * estimatedIconCount,
                 fullFrame.height * 0.4
             )
-            let dockY = (fullFrame.height - estimatedHeight) / 2
+            let dockY = fullFrame.origin.y + (fullFrame.height - estimatedHeight) / 2
 
             return DockInfo(
                 position: .right,
@@ -168,17 +168,20 @@ class DockDetector {
         }
     }
 
-    /// Find the Dock application's window frame using CGWindowList
+    /// Find the Dock application's window frame on the given screen using CGWindowList
     /// Note: This requires Screen Recording permission in sandboxed apps
-    private func findDockWindowFrame(screen: NSScreen) -> NSRect? {
+    private func findDockWindowFrame(on screen: NSScreen) -> (NSRect, DockPosition)? {
         // Get list of all windows
         guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
             return nil
         }
 
-        let screenHeight = screen.frame.height
-        let screenWidth = screen.frame.width
-        var bestDockFrame: NSRect? = nil
+        // CGWindowList y values are measured down from the top-left of the
+        // *primary* screen (the one at NSScreen origin (0,0)), regardless of
+        // which screen the window is on
+        let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY
+        let screenFrame = screen.frame
+        var best: (NSRect, DockPosition)? = nil
         var bestDockArea: CGFloat = 0
 
         // Find the Dock windows and pick the main bar (largest one at screen edge)
@@ -194,7 +197,8 @@ class DockDetector {
             }
 
             // CGWindowList uses top-left origin, convert to bottom-left (NSScreen coordinates)
-            let flippedY = screenHeight - y - height
+            let flippedY = primaryMaxY - y - height
+            let windowFrame = NSRect(x: x, y: flippedY, width: width, height: height)
 
             // Skip tiny windows (dock has indicator windows, tooltips, etc.)
             let area = width * height
@@ -202,32 +206,37 @@ class DockDetector {
                 continue
             }
 
-            // IMPORTANT: Skip windows that span the full screen width or height
-            // These are likely desktop/background layers, not the actual dock bar
-            if width >= screenWidth - 10 || height >= screenHeight - 10 {
+            // Only consider dock windows on the screen the pet is on
+            if !screenFrame.intersects(windowFrame) {
                 continue
             }
 
-            // For bottom dock: should be wide and short, near Y=0
-            if width > height && flippedY < 10 && area > bestDockArea {
-                bestDockFrame = NSRect(x: x, y: 0, width: width, height: height)
+            // IMPORTANT: Skip windows that span the full screen width or height
+            // These are likely desktop/background layers, not the actual dock bar
+            if width >= screenFrame.width - 10 || height >= screenFrame.height - 10 {
+                continue
+            }
+
+            // For bottom dock: should be wide and short, near the screen's bottom edge
+            if width > height && abs(flippedY - screenFrame.minY) < 10 && area > bestDockArea {
+                best = (NSRect(x: x, y: screenFrame.minY, width: width, height: height), .bottom)
                 bestDockArea = area
             }
 
-            // For left dock: should be tall and narrow, near X=0
-            if height > width && x < 10 && area > bestDockArea {
-                bestDockFrame = NSRect(x: 0, y: flippedY, width: width, height: height)
+            // For left dock: should be tall and narrow, near the screen's left edge
+            if height > width && abs(x - screenFrame.minX) < 10 && area > bestDockArea {
+                best = (NSRect(x: screenFrame.minX, y: flippedY, width: width, height: height), .left)
                 bestDockArea = area
             }
 
-            // For right dock: should be tall and narrow, near right edge
-            if height > width && x + width > screenWidth - 10 && area > bestDockArea {
-                bestDockFrame = NSRect(x: x, y: flippedY, width: width, height: height)
+            // For right dock: should be tall and narrow, near the screen's right edge
+            if height > width && x + width > screenFrame.maxX - 10 && area > bestDockArea {
+                best = (windowFrame, .right)
                 bestDockArea = area
             }
         }
 
-        return bestDockFrame
+        return best
     }
 
     /// Infer dock position from screen geometry
@@ -248,16 +257,5 @@ class DockDetector {
         }
 
         return .bottom
-    }
-
-
-    /// Get the dock's position, or .bottom as default if not detectable
-    func getDockPosition() -> DockPosition {
-        return getDockInfo()?.position ?? .bottom
-    }
-
-    /// Check if the dock appears to be hidden (no visible dock space)
-    func isDockHidden() -> Bool {
-        return getDockInfo() == nil
     }
 }

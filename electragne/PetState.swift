@@ -35,6 +35,7 @@ enum PetState: Equatable {
     case dragging(mouseOffset: NSPoint)
     case jumping
     case jumpingToDock           // Jumping up onto the dock
+    case jumpingToLedge          // Jumping up onto a higher adjacent display
     case lookingDown             // Peering over dock edge
     case jumpingOffDock          // Jumping down from dock
     case fallingFromDock         // Falling after jumping off dock
@@ -64,6 +65,7 @@ enum PetState: Equatable {
     var isJumping: Bool {
         if case .jumping = self { return true }
         if case .jumpingToDock = self { return true }
+        if case .jumpingToLedge = self { return true }
         if case .jumpingOffDock = self { return true }
         return false
     }
@@ -82,7 +84,7 @@ enum PetState: Equatable {
         switch self {
         case .falling, .walking, .walkingOnDock, .sleeping, .jumping:
             return true
-        case .dragging, .jumpingToDock, .lookingDown, .jumpingOffDock, .fallingFromDock:
+        case .dragging, .jumpingToDock, .jumpingToLedge, .lookingDown, .jumpingOffDock, .fallingFromDock:
             return false
         }
     }
@@ -144,6 +146,10 @@ enum PhysicsConstants {
     static let minBounceVelocity: CGFloat = 2.0
     static let hardLandingThreshold: CGFloat = 15.0
     static let frameInterval: TimeInterval = 0.016  // ~60fps
+
+    // Tallest ledge the pet will jump up when an adjacent display's bottom
+    // edge sits above the one it's walking on; bigger gaps act like a wall
+    static let maxScreenStepUp: CGFloat = 250.0
 }
 
 // MARK: - Behavior Constants
