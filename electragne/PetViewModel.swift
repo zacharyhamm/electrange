@@ -23,10 +23,29 @@ class PetViewModel {
 
     let animationManager = AnimationManager()
     private let dockDetector = DockDetector.shared
+    private let windowDetector = WindowDetector.shared
 
     // MARK: - Dock State
 
     private var cachedDockInfo: DockInfo?
+
+    // MARK: - Window Climbing State
+
+    /// The app window the pet is climbing or standing on
+    private var climbWindowID: CGWindowID?
+    /// Whether the pet is climbing the window's left side (it climbs the left
+    /// side when moving right, the right side when moving left)
+    private var climbingOnLeftSide = true
+
+    private enum ClimbPhase {
+        case ascending   // Going up the side
+        case toppingOut  // Crawling over the edge onto the top
+    }
+    private var climbPhase: ClimbPhase = .ascending
+
+    /// Whether the current fall may land on window tops. Set when the pet is
+    /// dropped from a drag; ordinary falls go all the way to the ground.
+    private var landOnWindowsWhileFalling = false
 
     // MARK: - Child Windows
 
@@ -83,6 +102,8 @@ class PetViewModel {
 
         positionWindowForFall()
         if isPaused {
+            climbWindowID = nil
+            landOnWindowsWhileFalling = false
             stateBeforePause = .falling(velocity: 0, bounceCount: 0)
             state = .falling(velocity: 0, bounceCount: 0)
         } else {
@@ -124,12 +145,15 @@ class PetViewModel {
     // MARK: - State Transitions
 
     func startFalling() {
+        climbWindowID = nil
+        landOnWindowsWhileFalling = false
         state = .falling(velocity: 0, bounceCount: 0)
         playFallAnimation()
         startPhysicsTimer()
     }
 
     func startWalking() {
+        climbWindowID = nil
         state = .walking
         playAnimationWithTransitions(AnimationID.walk)
         recordInteraction()
@@ -140,6 +164,7 @@ class PetViewModel {
 
     func startDragging(mouseOffset: NSPoint) {
         stopAllTimers()
+        climbWindowID = nil
         state = .dragging(mouseOffset: mouseOffset)
         animationManager.playAnimation(AnimationID.drag.rawValue)
         startDynamicAnimationTimer()
@@ -149,6 +174,8 @@ class PetViewModel {
     func endDragging() {
         guard state.isDragging else { return }
         state = .falling(velocity: 0, bounceCount: 0)
+        // A dropped pet may land on the first window top it falls onto
+        landOnWindowsWhileFalling = true
         recordInteraction()
         playFallAnimation()
         startPhysicsTimer()
@@ -346,6 +373,206 @@ class PetViewModel {
         window.setFrameOrigin(NSPoint(x: newX, y: newY))
     }
 
+    // MARK: - Window Climbing
+
+    /// A window edge the pet just walked into and decided to climb
+    private struct ClimbOpportunity {
+        let surface: WindowSurface
+        let startX: CGFloat
+    }
+
+    /// Check whether the pet's step from currentX to newX crosses the side of
+    /// a climbable window. The window qualifies only if its top leaves room
+    /// for the pet below the top of the screen, its top is above the pet's
+    /// head (something to actually climb), and its side reaches down to the
+    /// pet. Rolls the climb chance per crossing.
+    private func findClimbOpportunity(on screen: NSScreen, currentX: CGFloat, newX: CGFloat,
+                                      footY: CGFloat, petSize: CGFloat) -> ClimbOpportunity? {
+        let topLimit = screen.visibleFrame.maxY
+
+        for surface in windowDetector.windows(on: screen) {
+            let frame = surface.frame
+
+            // The pet must fit between the window top and the top of the screen
+            guard frame.maxY + petSize <= topLimit else { continue }
+            // The top must be above the pet's head, else there's nothing to climb
+            guard frame.maxY > footY + petSize else { continue }
+            // The side must reach down to where the pet is walking
+            guard frame.minY <= footY + petSize else { continue }
+            // And the top must be wide enough to stand on
+            guard frame.width >= petSize else { continue }
+
+            if isMovingRight {
+                // Just crossed the window's left edge this tick
+                if currentX + petSize <= frame.minX && newX + petSize >= frame.minX,
+                   Int.random(in: 1...100) <= BehaviorConstants.climbChance {
+                    return ClimbOpportunity(surface: surface, startX: frame.minX - petSize)
+                }
+            } else {
+                // Just crossed the window's right edge this tick
+                if currentX >= frame.maxX && newX <= frame.maxX,
+                   Int.random(in: 1...100) <= BehaviorConstants.climbChance {
+                    return ClimbOpportunity(surface: surface, startX: frame.maxX)
+                }
+            }
+        }
+
+        return nil
+    }
+
+    func startClimbingWindow(_ surface: WindowSurface) {
+        stopMovementTimer()
+        stopIdleTimer()
+
+        climbWindowID = surface.id
+        climbingOnLeftSide = isMovingRight
+        climbPhase = .ascending
+        state = .climbingWindow
+        recordInteraction()
+
+        // The climbing sprites are drawn vertically; the existing
+        // direction flip mirrors them onto the correct side
+        animationManager.playAnimation(AnimationID.verticalWalkUp.rawValue)
+        startDynamicAnimationTimer()
+        startClimbTimer()
+    }
+
+    private func startClimbTimer() {
+        movementTimer?.invalidate()
+        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
+            self?.updateClimbMovement()
+        }
+    }
+
+    private func updateClimbMovement() {
+        guard let window = petWindow else { return }
+        guard case .climbingWindow = state else { return }
+        guard let id = climbWindowID,
+              let frame = windowDetector.frame(ofWindow: id),
+              let screen = currentScreen else {
+            // The window went away mid-climb
+            abortClimb()
+            return
+        }
+
+        let petSize = window.frame.width
+
+        // If the window moved up so the pet no longer fits on top, let go
+        if frame.maxY + petSize > screen.visibleFrame.maxY {
+            abortClimb()
+            return
+        }
+
+        // Hug the wall, following the window if it moves
+        let wallX = climbingOnLeftSide ? frame.minX - petSize : frame.maxX
+
+        switch climbPhase {
+        case .ascending:
+            // Climb at the animation's own vertical speed
+            let climbSpeed = abs(animationManager.getCurrentMoveY())
+            let newY = window.frame.origin.y + climbSpeed
+
+            if newY >= frame.maxY {
+                // Reached the top: crawl over the edge
+                climbPhase = .toppingOut
+                window.setFrameOrigin(NSPoint(x: wallX, y: frame.maxY))
+                animationManager.playAnimationOnce(AnimationID.verticalWalkOver.rawValue) { [weak self] in
+                    self?.finishToppingOut()
+                }
+            } else {
+                window.setFrameOrigin(NSPoint(x: wallX, y: newY))
+            }
+
+        case .toppingOut:
+            // Slide from the wall onto the window top while crawling over
+            let targetX = climbingOnLeftSide ? frame.minX : frame.maxX - petSize
+            var newX = window.frame.origin.x
+            let step: CGFloat = 1.5
+            if abs(targetX - newX) <= step {
+                newX = targetX
+            } else {
+                newX += targetX > newX ? step : -step
+            }
+            window.setFrameOrigin(NSPoint(x: newX, y: frame.maxY))
+        }
+    }
+
+    private func finishToppingOut() {
+        guard case .climbingWindow = state else { return }
+        startWalkingOnWindow()
+    }
+
+    private func abortClimb() {
+        movementTimer?.invalidate()
+        movementTimer = nil
+        startFalling()
+    }
+
+    func startWalkingOnWindow() {
+        state = .walkingOnWindow
+        // Note: top_walk2 (39) looks right but is the upside-down
+        // hanging-from-the-screen-top sprite; on a window we walk normally
+        animationManager.playAnimation(AnimationID.walk.rawValue)
+        recordInteraction()
+        startDynamicAnimationTimer()
+        startIdleTimer()
+        startWindowTopMovementTimer()
+    }
+
+    private func startWindowTopMovementTimer() {
+        movementTimer?.invalidate()
+        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
+            self?.updateWindowTopMovement()
+        }
+    }
+
+    private func updateWindowTopMovement() {
+        guard let window = petWindow else { return }
+        guard case .walkingOnWindow = state else { return }
+        guard let id = climbWindowID,
+              let frame = windowDetector.frame(ofWindow: id),
+              let screen = currentScreen else {
+            // The window disappeared from under the pet
+            stopMovementTimer()
+            stopIdleTimer()
+            startFalling()
+            return
+        }
+
+        let petSize = window.frame.width
+
+        // If the window moved up under the menu bar, hop down
+        if frame.maxY + petSize > screen.visibleFrame.maxY {
+            stopIdleTimer()
+            startJumpingDown(fromPlatform: frame)
+            return
+        }
+
+        let moveX = abs(animationManager.getCurrentMoveX())
+        var newX = window.frame.origin.x
+
+        if isMovingRight {
+            newX += moveX
+        } else {
+            newX -= moveX
+        }
+
+        // Check window-top boundaries
+        let atRightEdge = newX + petSize >= frame.maxX
+        let atLeftEdge = newX <= frame.minX
+
+        if atRightEdge || atLeftEdge {
+            // At edge of the window, trigger look_down
+            newX = atRightEdge ? frame.maxX - petSize : frame.minX
+            window.setFrameOrigin(NSPoint(x: newX, y: frame.maxY))
+            startLookingDown()
+            return
+        }
+
+        // Ride the window top (it may be moving)
+        window.setFrameOrigin(NSPoint(x: newX, y: frame.maxY))
+    }
+
     // MARK: - Dock State Transitions
 
     // Track jump progress
@@ -526,6 +753,24 @@ class PetViewModel {
         // Roll to decide: turn around or jump off
         let roll = Int.random(in: 1...100)
 
+        // Peering over a window edge?
+        if let id = climbWindowID {
+            guard let frame = windowDetector.frame(ofWindow: id) else {
+                startFalling()
+                return
+            }
+            if roll <= 50 {
+                // Turn around, stay on the window top
+                isMovingRight.toggle()
+                startWalkingOnWindow()
+            } else {
+                // Jump down from the window
+                climbWindowID = nil
+                startJumpingDown(fromPlatform: frame)
+            }
+            return
+        }
+
         if roll <= 50 {
             // Turn around, stay on dock
             isMovingRight.toggle()
@@ -537,30 +782,40 @@ class PetViewModel {
     }
 
     func startJumpingOffDock() {
+        guard let dockInfo = cachedDockInfo else {
+            startWalking()
+            return
+        }
+        startJumpingDown(fromPlatform: dockInfo.frame)
+    }
+
+    /// Jump down to the ground from the edge of a platform (the dock or an
+    /// app window's top), arcing away from the platform in the facing direction.
+    func startJumpingDown(fromPlatform platformFrame: NSRect) {
         guard let window = petWindow,
-              let dockInfo = cachedDockInfo,
               let screen = currentScreen else {
             startWalking()
             return
         }
 
+        climbWindowID = nil
         state = .jumpingOffDock
 
-        // Calculate jump arc from dock to ground
+        // Calculate jump arc from platform to ground
         jumpStartX = window.frame.origin.x
         jumpStartY = window.frame.origin.y
         jumpTargetY = screen.frame.minY  // Ground level
 
-        // Target X: jump away from dock edge
+        // Target X: jump away from platform edge
         let petSize = window.frame.width
         let jumpDistance: CGFloat = 50  // How far to jump horizontally
 
         if isMovingRight {
-            // At right edge of dock, jump right
-            jumpTargetX = min(dockInfo.frame.maxX + jumpDistance, screen.frame.maxX - petSize)
+            // At right edge of platform, jump right
+            jumpTargetX = min(platformFrame.maxX + jumpDistance, screen.frame.maxX - petSize)
         } else {
-            // At left edge of dock, jump left
-            jumpTargetX = max(dockInfo.frame.minX - jumpDistance - petSize, screen.frame.minX)
+            // At left edge of platform, jump left
+            jumpTargetX = max(platformFrame.minX - jumpDistance - petSize, screen.frame.minX)
         }
         jumpProgress = 0
 
@@ -686,23 +941,55 @@ class PetViewModel {
 
     // MARK: - Ground Level Calculation
 
+    /// What the pet would land on at the end of a fall
+    private enum GroundSurface {
+        case ground
+        case dock
+        case window(CGWindowID)
+    }
+
     /// Ground level beneath the pet: the dock top when the pet is over the
     /// dock on its screen, otherwise the bottom edge of the screen under it.
-    private func groundInfo(at x: CGFloat, petWidth: CGFloat, below y: CGFloat) -> (level: CGFloat, isDock: Bool) {
+    /// With includeWindows, app window tops below the pet count too, and the
+    /// highest one (the first the pet would encounter falling) wins.
+    private func groundInfo(at x: CGFloat, petWidth: CGFloat, below y: CGFloat,
+                            includeWindows: Bool = false) -> (level: CGFloat, surface: GroundSurface) {
         let screen = screenContaining(x: x + petWidth / 2, below: y) ?? currentScreen
 
-        guard let screen else { return (0, false) }
+        guard let screen else { return (0, .ground) }
 
         // Refresh dock info for the screen the pet is over
         cachedDockInfo = dockDetector.getDockInfo(for: screen)
 
+        var level = screen.frame.minY
+        var surface = GroundSurface.ground
+
         // For bottom dock, check if pet is above the dock
         if let dockInfo = cachedDockInfo, dockInfo.position == .bottom,
            dockInfo.containsX(x, petWidth: petWidth) {
-            return (dockInfo.frame.maxY, true)
+            level = dockInfo.frame.maxY
+            surface = .dock
         }
 
-        return (screen.frame.minY, false)
+        if includeWindows {
+            let topLimit = screen.visibleFrame.maxY
+            for candidate in windowDetector.windows(on: screen) {
+                let frame = candidate.frame
+                // Must be the highest surface so far, below the pet
+                guard frame.maxY > level, frame.maxY <= y else { continue }
+                // Pet must horizontally overlap the window top
+                guard x + petWidth > frame.minX, x < frame.maxX else { continue }
+                // Pet must fit between the window top and the top of the screen
+                guard frame.maxY + petWidth <= topLimit else { continue }
+                // And the top must be wide enough to stand on
+                guard frame.width >= petWidth else { continue }
+
+                level = frame.maxY
+                surface = .window(candidate.id)
+            }
+        }
+
+        return (level, surface)
     }
 
     // MARK: - Animation Playback
@@ -737,7 +1024,8 @@ class PetViewModel {
     }
 
     private func handleAnimationComplete() {
-        guard !state.isDragging && !state.isFalling && !state.isSleeping && !state.isOnDock else { return }
+        guard !state.isDragging && !state.isFalling && !state.isSleeping
+                && !state.isOnDock && !state.isOnWindow else { return }
 
         // Check if we just finished jumping - handle before the walking guard
         if state.isJumping && animationManager.currentAnimation?.name == "jump" {
@@ -895,6 +1183,13 @@ class PetViewModel {
         case .jumpingToLedge:
             startDynamicAnimationTimer()
             startLedgeJumpTimer()
+        case .climbingWindow:
+            startDynamicAnimationTimer()
+            startClimbTimer()
+        case .walkingOnWindow:
+            startDynamicAnimationTimer()
+            startIdleTimer()
+            startWindowTopMovementTimer()
         case .lookingDown:
             startDynamicAnimationTimer()
         case .jumpingOffDock:
@@ -934,11 +1229,12 @@ class PetViewModel {
         velocity += PhysicsConstants.gravity
         var newY = window.frame.origin.y - velocity
 
-        // Calculate ground level (may be dock top or screen bottom)
-        let (ground, landingOnDock) = groundInfo(
+        // Calculate ground level (may be a window top, dock top, or screen bottom)
+        let (ground, surface) = groundInfo(
             at: window.frame.origin.x,
             petWidth: window.frame.width,
-            below: window.frame.origin.y
+            below: window.frame.origin.y,
+            includeWindows: landOnWindowsWhileFalling
         )
 
         if newY <= ground {
@@ -953,9 +1249,13 @@ class PetViewModel {
                 physicsTimer = nil
 
                 // Start appropriate walking based on where we landed
-                if landingOnDock {
+                switch surface {
+                case .dock:
                     startWalkingOnDock()
-                } else {
+                case .window(let id):
+                    climbWindowID = id
+                    startWalkingOnWindow()
+                case .ground:
                     startWalking()
                 }
                 return
@@ -1013,6 +1313,14 @@ class PetViewModel {
                     return
                 }
             }
+        }
+
+        // Check for a window side the pet feels like climbing
+        if let climb = findClimbOpportunity(on: screen, currentX: currentX, newX: newX,
+                                            footY: footY, petSize: petSize) {
+            window.setFrameOrigin(NSPoint(x: climb.startX, y: footY))
+            startClimbingWindow(climb.surface)
+            return
         }
 
         // Screen edge: cross onto an adjacent display, or turn around

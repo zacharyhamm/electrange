@@ -36,8 +36,10 @@ enum PetState: Equatable {
     case jumping
     case jumpingToDock           // Jumping up onto the dock
     case jumpingToLedge          // Jumping up onto a higher adjacent display
-    case lookingDown             // Peering over dock edge
-    case jumpingOffDock          // Jumping down from dock
+    case climbingWindow          // Climbing up the side of an app window
+    case walkingOnWindow         // Walking on top of an app window
+    case lookingDown             // Peering over dock/window edge
+    case jumpingOffDock          // Jumping down from dock or window top
     case fallingFromDock         // Falling after jumping off dock
 
     var isFalling: Bool {
@@ -49,6 +51,7 @@ enum PetState: Equatable {
     var isWalking: Bool {
         if case .walking = self { return true }
         if case .walkingOnDock = self { return true }
+        if case .walkingOnWindow = self { return true }
         return false
     }
 
@@ -79,10 +82,19 @@ enum PetState: Equatable {
         }
     }
 
+    var isOnWindow: Bool {
+        switch self {
+        case .climbingWindow, .walkingOnWindow:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Returns true if the pet can be interacted with (dragged)
     var canInteract: Bool {
         switch self {
-        case .falling, .walking, .walkingOnDock, .sleeping, .jumping:
+        case .falling, .walking, .walkingOnDock, .sleeping, .jumping, .climbingWindow, .walkingOnWindow:
             return true
         case .dragging, .jumpingToDock, .jumpingToLedge, .lookingDown, .jumpingOffDock, .fallingFromDock:
             return false
@@ -125,6 +137,10 @@ enum AnimationID: String {
     // Running
     case runBegin = "35"
 
+    // Window climbing
+    case verticalWalkUp = "37"
+    case verticalWalkOver = "42"
+
     // Dock animations
     case lookDown = "43"
     case jumpDown = "44"
@@ -166,6 +182,7 @@ enum BehaviorConstants {
     static let eatChance: Int = 3       // 3% chance
     static let runChance: Int = 20 // 20% chance
     static let jumpWhileRunningChance: Int = 30  // 30% chance while running (we like the jumping!)
+    static let climbChance: Int = 25    // 25% chance to climb a window the pet bumps into
 }
 
 /// Pet window size constants
