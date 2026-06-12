@@ -32,7 +32,16 @@ class PetViewModel {
     // MARK: - Window Climbing State
 
     /// The app window the pet is climbing or standing on
-    private var climbWindowID: CGWindowID?
+    private var climbWindowID: CGWindowID? {
+        didSet {
+            guard oldValue != climbWindowID else { return }
+            if let id = climbWindowID {
+                enterWindowDepth(windowID: id)
+            } else {
+                exitWindowDepth()
+            }
+        }
+    }
     /// Whether the pet is climbing the window's left side (it climbs the left
     /// side when moving right, the right side when moving left)
     private var climbingOnLeftSide = true
@@ -57,6 +66,7 @@ class PetViewModel {
     private var physicsTimer: Timer?
     private var animationTimer: Timer?
     private var idleTimer: Timer?
+    private var zOrderTimer: Timer?
 
     // MARK: - Pause State
 
@@ -123,6 +133,7 @@ class PetViewModel {
     deinit {
         NotificationCenter.default.removeObserver(self)
         stopAllTimers()
+        zOrderTimer?.invalidate()
     }
 
     func loadAnimations() {
@@ -374,6 +385,37 @@ class PetViewModel {
     }
 
     // MARK: - Window Climbing
+
+    /// While the pet is on a window, sink the pet window to that window's
+    /// depth in the z-order so windows in front of it also cover the pet.
+    /// order(_:relativeTo:) accepts other apps' window numbers but the
+    /// relationship isn't persistent, so it's re-asserted every frame —
+    /// if the window is raised the pet comes forward with it without lag.
+    private func enterWindowDepth(windowID: CGWindowID) {
+        guard let window = petWindow else { return }
+        window.level = .normal
+        window.order(.above, relativeTo: Int(windowID))
+
+        zOrderTimer?.invalidate()
+        zOrderTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
+            // The isVisible guard matters: ordering relative to another
+            // window puts an ordered-out (hidden) window back on screen
+            guard let self, let id = self.climbWindowID,
+                  let window = self.petWindow, window.isVisible else { return }
+            window.order(.above, relativeTo: Int(id))
+        }
+    }
+
+    private func exitWindowDepth() {
+        zOrderTimer?.invalidate()
+        zOrderTimer = nil
+        guard let window = petWindow else { return }
+        window.level = .floating
+        // Don't orderFront a pet hidden via the menu bar
+        if window.isVisible {
+            window.orderFront(nil)
+        }
+    }
 
     /// A window edge the pet just walked into and decided to climb
     private struct ClimbOpportunity {
