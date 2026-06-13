@@ -138,8 +138,12 @@ class PetViewModel {
     }
 
     deinit {
+        // Only thread-safe primitives here (deinit is non-isolated): the
+        // TimerDriver/WindowDepthController instances invalidate their own
+        // timers in their deinits, so only the raw animation timer and the
+        // observers need explicit teardown.
         NotificationCenter.default.removeObserver(self)
-        stopAllTimers()
+        animationTimer?.invalidate()
     }
 
     func loadAnimations() {
