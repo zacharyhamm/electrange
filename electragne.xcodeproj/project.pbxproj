@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		DD000000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 3F5330752F32F272003EA740 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3F53307C2F32F272003EA740;
+			remoteInfo = electragne;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		3F53307D2F32F272003EA740 /* electragne.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = electragne.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD0000000000000000000002 /* electragneTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = electragneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +27,22 @@
 			path = electragne;
 			sourceTree = "<group>";
 		};
+		DD0000000000000000000003 /* electragneTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = electragneTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		3F53307A2F32F272003EA740 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD0000000000000000000008 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				3F53307F2F32F272003EA740 /* electragne */,
+				DD0000000000000000000003 /* electragneTests */,
 				3F53307E2F32F272003EA740 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				3F53307D2F32F272003EA740 /* electragne.app */,
+				DD0000000000000000000002 /* electragneTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +95,29 @@
 			productReference = 3F53307D2F32F272003EA740 /* electragne.app */;
 			productType = "com.apple.product-type.application";
 		};
+		DD0000000000000000000001 /* electragneTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DD0000000000000000000004 /* Build configuration list for PBXNativeTarget "electragneTests" */;
+			buildPhases = (
+				DD0000000000000000000007 /* Sources */,
+				DD0000000000000000000008 /* Frameworks */,
+				DD0000000000000000000009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DD000000000000000000000A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				DD0000000000000000000003 /* electragneTests */,
+			);
+			name = electragneTests;
+			packageProductDependencies = (
+			);
+			productName = electragneTests;
+			productReference = DD0000000000000000000002 /* electragneTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +130,10 @@
 				TargetAttributes = {
 					3F53307C2F32F272003EA740 = {
 						CreatedOnToolsVersion = 26.2;
+					};
+					DD0000000000000000000001 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 3F53307C2F32F272003EA740;
 					};
 				};
 			};
@@ -100,12 +152,20 @@
 			projectRoot = "";
 			targets = (
 				3F53307C2F32F272003EA740 /* electragne */,
+				DD0000000000000000000001 /* electragneTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		3F53307B2F32F272003EA740 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD0000000000000000000009 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +182,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DD0000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		DD000000000000000000000A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3F53307C2F32F272003EA740 /* electragne */;
+			targetProxy = DD000000000000000000000B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		3F5330862F32F273003EA740 /* Debug */ = {
@@ -305,6 +380,38 @@
 			};
 			name = Release;
 		};
+		DD0000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = org.impolexg.electragneTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/electragne.app/Contents/MacOS/electragne";
+			};
+			name = Debug;
+		};
+		DD0000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = org.impolexg.electragneTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/electragne.app/Contents/MacOS/electragne";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -322,6 +429,15 @@
 			buildConfigurations = (
 				3F5330892F32F273003EA740 /* Debug */,
 				3F53308A2F32F273003EA740 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DD0000000000000000000004 /* Build configuration list for PBXNativeTarget "electragneTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DD0000000000000000000005 /* Debug */,
+				DD0000000000000000000006 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
