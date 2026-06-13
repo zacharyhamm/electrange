@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 import AppKit
+import os
 
 // MARK: - Pet View Model
 
@@ -138,7 +139,7 @@ class PetViewModel {
 
     func loadAnimations() {
         guard let url = Bundle.main.url(forResource: "animations", withExtension: "xml") else {
-            print("Failed to find animations.xml")
+            Log.lifecycle.error("Failed to find animations.xml in bundle")
             return
         }
 
@@ -924,20 +925,6 @@ class PetViewModel {
         startDynamicAnimationTimer()
     }
 
-    private func startFallingFromDock() {
-        // This is now handled by finishJumpOffDock
-        // Keep for compatibility but redirect
-        finishJumpOffDock()
-    }
-
-    private func startFallingFromDockTimer() {
-        // No longer used - jump arc handles the full motion
-    }
-
-    private func updateFallingFromDock(timer: Timer) {
-        // No longer used - jump arc handles the full motion
-    }
-
     // MARK: - Screen Helpers
 
     /// The screen the pet is currently on (by window midpoint). Falls back to
@@ -1237,9 +1224,6 @@ class PetViewModel {
         case .jumpingOffDock:
             startDynamicAnimationTimer()
             startJumpOffMovementTimer()
-        case .fallingFromDock:
-            startDynamicAnimationTimer()
-            startFallingFromDockTimer()
         }
 
         stateBeforePause = nil

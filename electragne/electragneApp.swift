@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct electragneApp: App {
+struct ElectragneApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
@@ -84,8 +84,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "About Electragne", action: #selector(aboutApp), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
 
-        toggleVisibilityMenuItem = NSMenuItem(title: "Hide Pet", action: #selector(toggleVisibility), keyEquivalent: "h")
-        menu.addItem(toggleVisibilityMenuItem!)
+        let toggleItem = NSMenuItem(title: "Hide Pet", action: #selector(toggleVisibility), keyEquivalent: "h")
+        toggleVisibilityMenuItem = toggleItem
+        menu.addItem(toggleItem)
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Increase Size", action: #selector(increaseSize), keyEquivalent: "+"))
@@ -130,7 +131,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         textView.isSelectable = true
         textView.drawsBackground = false
 
-        let linkURL = URL(string: "https://adrianotiger.github.io/desktopPet/")!
         let fullText = "An electric sheep for macOS based on desktopPet. It's a little guy. He's your friend."
         let attributedString = NSMutableAttributedString(string: fullText)
 
@@ -140,7 +140,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         attributedString.addAttribute(.foregroundColor, value: NSColor.labelColor, range: fullRange)
 
         // Make "desktopPet" a clickable link
-        if let linkRange = fullText.range(of: "desktopPet") {
+        if let linkRange = fullText.range(of: "desktopPet"),
+           let linkURL = URL(string: "https://adrianotiger.github.io/desktopPet/") {
             let nsRange = NSRange(linkRange, in: fullText)
             attributedString.addAttribute(.link, value: linkURL, range: nsRange)
         }

@@ -40,11 +40,9 @@ enum PetState: Equatable {
     case walkingOnWindow         // Walking on top of an app window
     case lookingDown             // Peering over dock/window edge
     case jumpingOffDock          // Jumping down from dock or window top
-    case fallingFromDock         // Falling after jumping off dock
 
     var isFalling: Bool {
         if case .falling = self { return true }
-        if case .fallingFromDock = self { return true }
         return false
     }
 
@@ -96,7 +94,7 @@ enum PetState: Equatable {
         switch self {
         case .falling, .walking, .walkingOnDock, .sleeping, .jumping, .climbingWindow, .walkingOnWindow:
             return true
-        case .dragging, .jumpingToDock, .jumpingToLedge, .lookingDown, .jumpingOffDock, .fallingFromDock:
+        case .dragging, .jumpingToDock, .jumpingToLedge, .lookingDown, .jumpingOffDock:
             return false
         }
     }

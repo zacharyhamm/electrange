@@ -238,7 +238,9 @@ class ChildPetWindow: NSWindow {
 
     private func calculateTotalFrames(animation: PetAnimation, repeatCount: Int) -> Int {
         let firstPass = animation.frames.count
-        let repeatSection = animation.frames.count - animation.repeatFrom
+        // max(0,...) guards against a repeatFrom past the frame count producing
+        // a negative section (mirrors AnimationManager.calculateTotalFrames).
+        let repeatSection = max(0, animation.frames.count - animation.repeatFrom)
         return firstPass + (repeatSection * repeatCount)
     }
 

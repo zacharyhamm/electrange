@@ -7,6 +7,7 @@
 
 import Foundation
 import AppKit
+import os
 
 /// Shared sprite rendering utility to extract frames from sprite sheets
 class SpriteRenderer {
@@ -40,7 +41,7 @@ class SpriteRenderer {
     func extractFrame(frameNumber: Int) -> NSImage? {
         // Bounds checking
         guard frameNumber >= 0 && frameNumber <= maxFrameNumber else {
-            print("Warning: Invalid frame number \(frameNumber), valid range is 0-\(maxFrameNumber)")
+            Log.rendering.debug("Invalid frame number \(frameNumber), valid range is 0-\(self.maxFrameNumber)")
             return nil
         }
 

@@ -163,12 +163,6 @@ class AnimationManager {
         return transitions.last?.animationID
     }
 
-    // Check if current animation has movement defined
-    func hasMovement() -> Bool {
-        guard let animation = currentAnimation else { return false }
-        return animation.startMoveX != 0 || animation.endMoveX != 0
-    }
-
     func advanceFrame() {
         guard let animation = currentAnimation else { return }
         let nextIndex = currentFrameIndex + 1
@@ -224,8 +218,10 @@ class AnimationManager {
     private func calculateTotalFrames(animation: PetAnimation, repeatCount: Int) -> Int {
         // First pass through all frames
         let firstPass = animation.frames.count
-        // Repeated section (from repeatFrom to end)
-        let repeatSection = animation.frames.count - animation.repeatFrom
+        // Repeated section (from repeatFrom to end). max(0,...) guards against a
+        // repeatFrom past the frame count (empty/corrupt data) producing a
+        // negative section that would corrupt the frame total.
+        let repeatSection = max(0, animation.frames.count - animation.repeatFrom)
         // Total = first pass + (repeatSection * repeatCount)
         return firstPass + (repeatSection * repeatCount)
     }

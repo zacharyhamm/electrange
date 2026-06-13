@@ -7,6 +7,7 @@
 
 import Foundation
 import AppKit
+import os
 
 // MARK: - Animation Models
 
@@ -34,8 +35,6 @@ struct PetAnimation: Identifiable {
 
     // Gravity-triggered transitions (when landing)
     let gravityTransitions: [NextAnimation]
-
-    var interval: TimeInterval { startInterval } // Compatibility
 }
 
 struct NextAnimation {
@@ -91,7 +90,7 @@ struct ChildSpawn {
 
         guard let value = ExpressionEvaluator.evaluate(expr, variables: variables),
               value.isFinite else {
-            print("Could not evaluate expression: '\(expr)'")
+            Log.animation.error("Could not evaluate expression: \(expr, privacy: .public)")
             return 0
         }
 
@@ -206,7 +205,6 @@ class AnimationParser: NSObject, XMLParserDelegate {
     private var currentFrames: [Int] = []
     private var currentElement = ""
     private var currentText = ""
-    private var elementStack: [String] = [] // Track nested elements
 
     // Start block values
     private var startMoveX: CGFloat = 0
@@ -262,7 +260,6 @@ class AnimationParser: NSObject, XMLParserDelegate {
     // MARK: - XMLParserDelegate
 
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
-        elementStack.append(elementName)
         currentElement = elementName
         currentText = ""
 
@@ -480,7 +477,6 @@ class AnimationParser: NSObject, XMLParserDelegate {
             break
         }
 
-        elementStack.removeLast()
         currentText = ""
     }
 }
