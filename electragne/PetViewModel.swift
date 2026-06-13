@@ -214,35 +214,14 @@ class PetViewModel {
     }
 
     func startJumping() {
-        guard let window = petWindow,
-              let screen = currentScreen else {
-            return
-        }
+        // The basic jump is animation-driven (updateBasicJumpMovement reads the
+        // jump sprite's own movement curve), so it needs no ballistic arc — only
+        // a window and screen to move within.
+        guard petWindow != nil, currentScreen != nil else { return }
 
         stopMovementTimer()
         stopIdleTimer()
         state = .jumping
-
-        // Calculate jump start position
-        jumpStartX = window.frame.origin.x
-        jumpStartY = window.frame.origin.y
-
-        // Calculate jump target position
-        // Horizontal: continue forward with momentum
-        let jumpDistance: CGFloat = 120  // Distance to travel forward during jump
-        let petSize = window.frame.width
-
-        if isMovingRight {
-            jumpTargetX = min(jumpStartX + jumpDistance, screen.frame.maxX - petSize)
-        } else {
-            jumpTargetX = max(jumpStartX - jumpDistance, screen.frame.minX)
-        }
-
-        // Vertical: return to ground level
-        jumpTargetY = screen.frame.minY
-
-        // Initialize jump progress
-        jumpProgress = 0
 
         // Start animation timer to advance sprite frames
         startDynamicAnimationTimer()
@@ -308,9 +287,6 @@ class PetViewModel {
         // Stop jump timer
         movement.stop()
 
-        // Reset jump progress
-        jumpProgress = 0
-
         // Land at the ground of the screen under the pet (not the dock top:
         // the pet may legitimately end up at ground level within the dock's
         // x-range, as before)
@@ -346,11 +322,14 @@ class PetViewModel {
         stopIdleTimer()
         state = .jumpingToLedge
 
-        jumpStartX = window.frame.origin.x
-        jumpStartY = window.frame.origin.y
-        jumpTargetX = targetX
-        jumpTargetY = targetY
-        jumpProgress = 0
+        // Linear X, parabolic arc for Y (same shape as the dock jump).
+        activeJump = BallisticJump(
+            start: window.frame.origin,
+            target: CGPoint(x: targetX, y: targetY),
+            arc: .parabolic(height: 30),
+            step: 0.05,
+            clampToTargetY: false
+        )
 
         animationManager.playAnimation(AnimationID.jump.rawValue)
         startDynamicAnimationTimer()
@@ -365,22 +344,15 @@ class PetViewModel {
         guard let window = petWindow else { return }
         guard case .jumpingToLedge = state else { return }
 
-        // Advance jump progress (complete in ~0.3 seconds)
-        jumpProgress += 0.05
-        if jumpProgress >= 1.0 {
+        guard let next = activeJump?.advance() else {
+            let target = activeJump?.target ?? window.frame.origin
+            activeJump = nil
             movement.stop()
-            window.setFrameOrigin(NSPoint(x: jumpTargetX, y: jumpTargetY))
+            window.setFrameOrigin(target)
             startWalking()
             return
         }
-
-        // Linear interpolation for X, parabolic arc for Y (same as the dock jump)
-        let arcHeight: CGFloat = 30
-        let newX = jumpStartX + (jumpTargetX - jumpStartX) * jumpProgress
-        let baseY = jumpStartY + (jumpTargetY - jumpStartY) * jumpProgress
-        let newY = baseY + arcHeight * 4 * jumpProgress * (1 - jumpProgress)
-
-        window.setFrameOrigin(NSPoint(x: newX, y: newY))
+        window.setFrameOrigin(next)
     }
 
     // MARK: - Window Climbing
@@ -578,12 +550,10 @@ class PetViewModel {
 
     // MARK: - Dock State Transitions
 
-    // Track jump progress
-    private var jumpProgress: CGFloat = 0
-    private var jumpStartX: CGFloat = 0
-    private var jumpStartY: CGFloat = 0
-    private var jumpTargetX: CGFloat = 0
-    private var jumpTargetY: CGFloat = 0
+    /// The in-flight progress-driven jump arc (dock / ledge / jump-off). The
+    /// animation-driven basic jump does not use this. Preserved across pause
+    /// so a paused-mid-jump pet resumes from its saved progress.
+    private var activeJump: BallisticJump?
 
     func startJumpingToDock() {
         guard let window = petWindow,
@@ -596,19 +566,23 @@ class PetViewModel {
         stopIdleTimer()
         state = .jumpingToDock
 
-        // Calculate jump start and target positions
-        jumpStartX = window.frame.origin.x
-        jumpStartY = window.frame.origin.y
-        jumpTargetY = dockInfo.frame.maxY  // Land on top of dock
-
         // Target X: move onto the dock a bit
         let petSize = window.frame.width
+        let targetX: CGFloat
         if isMovingRight {
-            jumpTargetX = dockInfo.frame.minX + petSize  // Land just inside left edge
+            targetX = dockInfo.frame.minX + petSize  // Land just inside left edge
         } else {
-            jumpTargetX = dockInfo.frame.maxX - petSize * 2  // Land just inside right edge
+            targetX = dockInfo.frame.maxX - petSize * 2  // Land just inside right edge
         }
-        jumpProgress = 0
+
+        // Linear X, parabolic arc up onto the dock top.
+        activeJump = BallisticJump(
+            start: window.frame.origin,
+            target: CGPoint(x: targetX, y: dockInfo.frame.maxY),
+            arc: .parabolic(height: 30),
+            step: 0.05,
+            clampToTargetY: false
+        )
 
         animationManager.playAnimation(AnimationID.jump.rawValue)
         startDynamicAnimationTimer()
@@ -623,25 +597,12 @@ class PetViewModel {
         guard let window = petWindow else { return }
         guard case .jumpingToDock = state else { return }
 
-        // Advance jump progress (complete in ~0.3 seconds)
-        jumpProgress += 0.05
-        if jumpProgress >= 1.0 {
-            jumpProgress = 1.0
+        guard let next = activeJump?.advance() else {
+            activeJump = nil
             landOnDock()
             return
         }
-
-        // Linear interpolation for X
-        let newX = jumpStartX + (jumpTargetX - jumpStartX) * jumpProgress
-
-        // Parabolic arc for Y (jump up then land)
-        // y = startY + (targetY - startY) * t + arcHeight * 4 * t * (1 - t)
-        let arcHeight: CGFloat = 30  // How high the jump arcs above the target
-        let baseY = jumpStartY + (jumpTargetY - jumpStartY) * jumpProgress
-        let arcOffset = arcHeight * 4 * jumpProgress * (1 - jumpProgress)
-        let newY = baseY + arcOffset
-
-        window.setFrameOrigin(NSPoint(x: newX, y: newY))
+        window.setFrameOrigin(next)
     }
 
     private func landOnDock() {
@@ -797,23 +758,27 @@ class PetViewModel {
         climbWindowID = nil
         state = .jumpingOffDock
 
-        // Calculate jump arc from platform to ground
-        jumpStartX = window.frame.origin.x
-        jumpStartY = window.frame.origin.y
-        jumpTargetY = screen.frame.minY  // Ground level
-
         // Target X: jump away from platform edge
         let petSize = window.frame.width
         let jumpDistance: CGFloat = 50  // How far to jump horizontally
-
+        let targetX: CGFloat
         if isMovingRight {
             // At right edge of platform, jump right
-            jumpTargetX = min(platformFrame.maxX + jumpDistance, screen.frame.maxX - petSize)
+            targetX = min(platformFrame.maxX + jumpDistance, screen.frame.maxX - petSize)
         } else {
             // At left edge of platform, jump left
-            jumpTargetX = max(platformFrame.minX - jumpDistance - petSize, screen.frame.minX)
+            targetX = max(platformFrame.minX - jumpDistance - petSize, screen.frame.minX)
         }
-        jumpProgress = 0
+
+        // Quick rise then a long descent to ground; clamped so it never dips
+        // below the ground while arcing.
+        activeJump = BallisticJump(
+            start: window.frame.origin,
+            target: CGPoint(x: targetX, y: screen.frame.minY),
+            arc: .piecewise(height: 20, peak: 0.2),
+            step: 0.033,
+            clampToTargetY: true
+        )
 
         animationManager.playAnimation(AnimationID.jumpDown.rawValue)
         startDynamicAnimationTimer()
@@ -828,35 +793,11 @@ class PetViewModel {
         guard let window = petWindow else { return }
         guard case .jumpingOffDock = state else { return }
 
-        // Advance jump progress (complete in ~0.5 seconds)
-        jumpProgress += 0.033
-        if jumpProgress >= 1.0 {
-            jumpProgress = 1.0
+        guard let next = activeJump?.advance() else {
             finishJumpOffDock()
             return
         }
-
-        // Linear interpolation for X
-        let newX = jumpStartX + (jumpTargetX - jumpStartX) * jumpProgress
-
-        // Parabolic arc for Y - starts high, arcs up slightly, then down
-        // Peak should be early in the jump (around 20% progress)
-        let peakProgress: CGFloat = 0.2
-        let arcHeight: CGFloat = 20
-
-        let baseY = jumpStartY + (jumpTargetY - jumpStartY) * jumpProgress
-        let arcOffset: CGFloat
-        if jumpProgress < peakProgress {
-            // Going up
-            arcOffset = arcHeight * (jumpProgress / peakProgress)
-        } else {
-            // Coming down
-            let downProgress = (jumpProgress - peakProgress) / (1 - peakProgress)
-            arcOffset = arcHeight * (1 - downProgress)
-        }
-        let newY = baseY + arcOffset
-
-        window.setFrameOrigin(NSPoint(x: newX, y: max(jumpTargetY, newY)))
+        window.setFrameOrigin(next)
     }
 
     private func finishJumpOffDock() {
@@ -864,8 +805,10 @@ class PetViewModel {
 
         movement.stop()
 
-        // Ensure pet is on ground
-        window.setFrameOrigin(NSPoint(x: window.frame.origin.x, y: jumpTargetY))
+        // Ensure pet is on the ground (the jump's target Y).
+        let groundY = activeJump?.target.y ?? window.frame.origin.y
+        activeJump = nil
+        window.setFrameOrigin(NSPoint(x: window.frame.origin.x, y: groundY))
 
         // Play landing animation then resume walking
         animationManager.playAnimationOnce(AnimationID.jumpDown3.rawValue) { [weak self] in
