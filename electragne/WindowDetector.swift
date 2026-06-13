@@ -27,17 +27,11 @@ class WindowDetector {
     private init() {}
 
     // Full window list cache (per screen)
-    private var cachedList: [WindowSurface] = []
-    private var cachedListScreenFrame: NSRect = .zero
-    private var listTimestamp: TimeInterval = 0
-    private static let listCacheLifetime: TimeInterval = 1.0
+    private var listCache = TimedCache<NSRect, [WindowSurface]>(lifetime: 1.0)
 
     // Single-window cache: refreshed faster than the list so the pet can
     // ride a window that's being dragged without lagging too far behind
-    private var cachedFrame: NSRect?
-    private var cachedFrameID: CGWindowID = 0
-    private var frameTimestamp: TimeInterval = 0
-    private static let frameCacheLifetime: TimeInterval = 0.15
+    private var frameCache = TimedCache<CGWindowID, NSRect?>(lifetime: 0.15)
 
     // Ignore tiny helper/utility windows apps create at the normal level
     private static let minimumWindowSize: CGFloat = 50
@@ -46,8 +40,8 @@ class WindowDetector {
     /// first, in NSScreen (bottom-left origin) coordinates.
     func windows(on screen: NSScreen) -> [WindowSurface] {
         let now = ProcessInfo.processInfo.systemUptime
-        if now - listTimestamp < Self.listCacheLifetime, cachedListScreenFrame == screen.frame {
-            return cachedList
+        if let hit = listCache.cached(for: screen.frame, now: now) {
+            return hit
         }
 
         var result: [WindowSurface] = []
@@ -73,9 +67,7 @@ class WindowDetector {
             }
         }
 
-        cachedList = result
-        cachedListScreenFrame = screen.frame
-        listTimestamp = now
+        listCache.store(result, for: screen.frame, now: now)
         return result
     }
 
@@ -83,8 +75,8 @@ class WindowDetector {
     /// or hidden. Used to track the window the pet is climbing/standing on.
     func frame(ofWindow id: CGWindowID) -> NSRect? {
         let now = ProcessInfo.processInfo.systemUptime
-        if cachedFrameID == id, now - frameTimestamp < Self.frameCacheLifetime {
-            return cachedFrame
+        if let hit = frameCache.cached(for: id, now: now) {
+            return hit
         }
 
         var result: NSRect? = nil
@@ -95,9 +87,7 @@ class WindowDetector {
             result = Self.cocoaFrame(from: info)
         }
 
-        cachedFrame = result
-        cachedFrameID = id
-        frameTimestamp = now
+        frameCache.store(result, for: id, now: now)
         return result
     }
 
@@ -113,6 +103,7 @@ class WindowDetector {
             return nil
         }
         let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? 0
-        return NSRect(x: x, y: primaryMaxY - y - height, width: width, height: height)
+        return ScreenGeometry.cocoaRect(x: x, quartzY: y, width: width, height: height,
+                                        primaryMaxY: primaryMaxY)
     }
 }

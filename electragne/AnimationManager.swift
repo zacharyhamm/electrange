@@ -144,23 +144,28 @@ class AnimationManager {
     // Select next animation based on probabilities, returns animation ID or nil
     func selectNextAnimation() -> String? {
         guard let animation = currentAnimation else { return nil }
-        let transitions = animation.nextAnimations.filter { $0.only == "none" }
-        guard !transitions.isEmpty else { return nil }
-
-        // Calculate total probability weight
-        let totalWeight = transitions.reduce(0) { $0 + $1.probability }
+        let eligible = animation.nextAnimations.filter { $0.only == "none" }
+        let totalWeight = eligible.reduce(0) { $0 + $1.probability }
         guard totalWeight > 0 else { return nil }
+        return Self.weightedNextAnimation(from: animation.nextAnimations,
+                                          roll: Int.random(in: 1...totalWeight))
+    }
 
-        // Random selection based on weights
-        let random = Int.random(in: 1...totalWeight)
+    /// Pure weighted choice among `only == "none"` transitions for a 1-based
+    /// `roll` in `1...totalWeight` (totalWeight = sum of eligible probabilities).
+    /// Returns nil when no transition is eligible. The random roll is supplied
+    /// by the caller so this stays deterministic and unit-testable.
+    static func weightedNextAnimation(from transitions: [NextAnimation], roll: Int) -> String? {
+        let eligible = transitions.filter { $0.only == "none" }
+        guard !eligible.isEmpty else { return nil }
         var accumulated = 0
-        for transition in transitions {
+        for transition in eligible {
             accumulated += transition.probability
-            if random <= accumulated {
+            if roll <= accumulated {
                 return transition.animationID
             }
         }
-        return transitions.last?.animationID
+        return eligible.last?.animationID
     }
 
     func advanceFrame() {
@@ -215,7 +220,7 @@ class AnimationManager {
         triggerChildSpawns()
     }
 
-    private func calculateTotalFrames(animation: PetAnimation, repeatCount: Int) -> Int {
+    func calculateTotalFrames(animation: PetAnimation, repeatCount: Int) -> Int {
         // First pass through all frames
         let firstPass = animation.frames.count
         // Repeated section (from repeatFrom to end). max(0,...) guards against a

@@ -946,9 +946,11 @@ class PetViewModel {
     /// With displays stacked beyond a seam, prefers the highest ground that's
     /// still beneath the pet.
     private func screenContaining(x: CGFloat, below y: CGFloat) -> NSScreen? {
-        NSScreen.screens
-            .filter { x >= $0.frame.minX && x < $0.frame.maxX && $0.frame.minY <= y + 1 }
-            .max { $0.frame.minY < $1.frame.minY }
+        let screens = NSScreen.screens
+        guard let index = ScreenGeometry.screenContaining(x: x, below: y, in: screens.map(\.frame)) else {
+            return nil
+        }
+        return screens[index]
     }
 
     /// A display the pet can walk onto across the given screen's left or right
@@ -956,16 +958,14 @@ class PetViewModel {
     /// height, and have a ground that's reachable: at/below the pet's feet, or
     /// a jumpable ledge above them.
     private func walkableScreen(beyond screen: NSScreen, movingRight: Bool, footY: CGFloat) -> NSScreen? {
-        let seamX = movingRight ? screen.frame.maxX : screen.frame.minX
-        let candidates = NSScreen.screens.filter { other in
-            guard other != screen else { return false }
-            let touchingEdge = movingRight ? other.frame.minX : other.frame.maxX
-            guard abs(touchingEdge - seamX) < 1 else { return false }
-            guard other.frame.maxY > footY else { return false }
-            return other.frame.minY <= footY + PhysicsConstants.maxScreenStepUp
+        let screens = NSScreen.screens
+        guard let screenIndex = screens.firstIndex(of: screen),
+              let index = ScreenGeometry.walkableScreen(
+                beyond: screenIndex, movingRight: movingRight, footY: footY,
+                maxStepUp: PhysicsConstants.maxScreenStepUp, in: screens.map(\.frame)) else {
+            return nil
         }
-        // With stacked displays beyond the seam, prefer the ground nearest the pet's feet
-        return candidates.min { abs($0.frame.minY - footY) < abs($1.frame.minY - footY) }
+        return screens[index]
     }
 
     // MARK: - Ground Level Calculation

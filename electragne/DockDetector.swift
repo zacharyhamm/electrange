@@ -54,10 +54,7 @@ class DockDetector {
     // Cache so the 60Hz physics/movement timers don't hit
     // CGWindowListCopyWindowInfo (an expensive syscall) on every tick.
     // Keyed by screen frame since the pet asks about the screen it's on.
-    private var cachedInfo: DockInfo?
-    private var cachedScreenFrame: NSRect = .zero
-    private var cacheTimestamp: TimeInterval = 0
-    private static let cacheLifetime: TimeInterval = 1.0
+    private var cache = TimedCache<NSRect, DockInfo?>(lifetime: 1.0)
 
     /// Get dock information for the given screen by finding the Dock
     /// application's window there. Returns nil if the dock is hidden, not
@@ -65,14 +62,12 @@ class DockDetector {
     /// The result is cached for a second; call from the main thread.
     func getDockInfo(for screen: NSScreen) -> DockInfo? {
         let now = ProcessInfo.processInfo.systemUptime
-        if now - cacheTimestamp < Self.cacheLifetime, cachedScreenFrame == screen.frame {
-            return cachedInfo
+        if let hit = cache.cached(for: screen.frame, now: now) {
+            return hit
         }
 
         let info = computeDockInfo(for: screen)
-        cachedInfo = info
-        cachedScreenFrame = screen.frame
-        cacheTimestamp = now
+        cache.store(info, for: screen.frame, now: now)
         return info
     }
 
@@ -197,7 +192,7 @@ class DockDetector {
             }
 
             // CGWindowList uses top-left origin, convert to bottom-left (NSScreen coordinates)
-            let flippedY = primaryMaxY - y - height
+            let flippedY = ScreenGeometry.cocoaY(quartzY: y, height: height, primaryMaxY: primaryMaxY)
             let windowFrame = NSRect(x: x, y: flippedY, width: width, height: height)
 
             // Skip tiny windows (dock has indicator windows, tooltips, etc.)
