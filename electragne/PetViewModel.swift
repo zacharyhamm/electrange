@@ -32,14 +32,17 @@ class PetViewModel {
 
     // MARK: - Window Climbing State
 
+    /// Sinks the pet window to a climbed window's z-depth.
+    private let depth = WindowDepthController()
+
     /// The app window the pet is climbing or standing on
     private var climbWindowID: CGWindowID? {
         didSet {
             guard oldValue != climbWindowID else { return }
             if let id = climbWindowID {
-                enterWindowDepth(windowID: id)
+                depth.enter(windowID: id)
             } else {
-                exitWindowDepth()
+                depth.exit()
             }
         }
     }
@@ -69,7 +72,6 @@ class PetViewModel {
     // The animation timer is non-repeating and self-rescheduling (it re-arms
     // itself with the next frame's interval), so it stays a raw Timer.
     private var animationTimer: Timer?
-    private var zOrderTimer: Timer?
 
     // MARK: - Pause State
 
@@ -78,7 +80,9 @@ class PetViewModel {
 
     // MARK: - Window Reference
 
-    weak var petWindow: NSWindow?
+    weak var petWindow: NSWindow? {
+        didSet { depth.petWindow = petWindow }
+    }
 
     // MARK: - Initialization
 
@@ -136,7 +140,6 @@ class PetViewModel {
     deinit {
         NotificationCenter.default.removeObserver(self)
         stopAllTimers()
-        zOrderTimer?.invalidate()
     }
 
     func loadAnimations() {
@@ -381,37 +384,6 @@ class PetViewModel {
     }
 
     // MARK: - Window Climbing
-
-    /// While the pet is on a window, sink the pet window to that window's
-    /// depth in the z-order so windows in front of it also cover the pet.
-    /// order(_:relativeTo:) accepts other apps' window numbers but the
-    /// relationship isn't persistent, so it's re-asserted every frame —
-    /// if the window is raised the pet comes forward with it without lag.
-    private func enterWindowDepth(windowID: CGWindowID) {
-        guard let window = petWindow else { return }
-        window.level = .normal
-        window.order(.above, relativeTo: Int(windowID))
-
-        zOrderTimer?.invalidate()
-        zOrderTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
-            // The isVisible guard matters: ordering relative to another
-            // window puts an ordered-out (hidden) window back on screen
-            guard let self, let id = self.climbWindowID,
-                  let window = self.petWindow, window.isVisible else { return }
-            window.order(.above, relativeTo: Int(id))
-        }
-    }
-
-    private func exitWindowDepth() {
-        zOrderTimer?.invalidate()
-        zOrderTimer = nil
-        guard let window = petWindow else { return }
-        window.level = .floating
-        // Don't orderFront a pet hidden via the menu bar
-        if window.isVisible {
-            window.orderFront(nil)
-        }
-    }
 
     /// A window edge the pet just walked into and decided to climb
     private struct ClimbOpportunity {
