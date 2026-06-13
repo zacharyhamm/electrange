@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    # The app targets macOS 26.2, so the runner must ship a matching SDK
+    # (Xcode 26.x). If GitHub's hosted images lag, either pin to the newest
+    # image that has Xcode 26.x here, or pass MACOSX_DEPLOYMENT_TARGET=<older>
+    # to xcodebuild for CI only (the code uses standard AppKit/SwiftUI APIs).
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show available Xcode versions
+        run: ls /Applications | grep -i Xcode || true
+
+      - name: Select Xcode 26
+        run: |
+          if [ -d /Applications/Xcode_26.2.app ]; then
+            sudo xcode-select -switch /Applications/Xcode_26.2.app
+          elif [ -d /Applications/Xcode_26.app ]; then
+            sudo xcode-select -switch /Applications/Xcode_26.app
+          fi
+          xcodebuild -version
+
+      # Builds the app (as the test host) and runs the Swift Testing suite.
+      # Same invocation as local `./test.sh`.
+      - name: Build & test
+        run: ./test.sh
