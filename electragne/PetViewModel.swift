@@ -63,10 +63,12 @@ class PetViewModel {
 
     // MARK: - Timers
 
-    private var movementTimer: Timer?
-    private var physicsTimer: Timer?
+    private let movement = TimerDriver()
+    private let physics = TimerDriver()
+    private let idle = TimerDriver()
+    // The animation timer is non-repeating and self-rescheduling (it re-arms
+    // itself with the next frame's interval), so it stays a raw Timer.
     private var animationTimer: Timer?
-    private var idleTimer: Timer?
     private var zOrderTimer: Timer?
 
     // MARK: - Pause State
@@ -247,10 +249,7 @@ class PetViewModel {
     }
 
     private func startBasicJumpTimer() {
-        movementTimer?.invalidate()
-        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
-            self?.updateBasicJumpMovement()
-        }
+        movement.start { [weak self] in self?.updateBasicJumpMovement() }
     }
 
     private func updateBasicJumpMovement() {
@@ -304,7 +303,7 @@ class PetViewModel {
         }
 
         // Stop jump timer
-        movementTimer?.invalidate()
+        movement.stop()
 
         // Reset jump progress
         jumpProgress = 0
@@ -356,10 +355,7 @@ class PetViewModel {
     }
 
     private func startLedgeJumpTimer() {
-        movementTimer?.invalidate()
-        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
-            self?.updateLedgeJumpMovement()
-        }
+        movement.start { [weak self] in self?.updateLedgeJumpMovement() }
     }
 
     private func updateLedgeJumpMovement() {
@@ -369,8 +365,7 @@ class PetViewModel {
         // Advance jump progress (complete in ~0.3 seconds)
         jumpProgress += 0.05
         if jumpProgress >= 1.0 {
-            movementTimer?.invalidate()
-            movementTimer = nil
+            movement.stop()
             window.setFrameOrigin(NSPoint(x: jumpTargetX, y: jumpTargetY))
             startWalking()
             return
@@ -481,10 +476,7 @@ class PetViewModel {
     }
 
     private func startClimbTimer() {
-        movementTimer?.invalidate()
-        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
-            self?.updateClimbMovement()
-        }
+        movement.start { [weak self] in self?.updateClimbMovement() }
     }
 
     private func updateClimbMovement() {
@@ -546,8 +538,7 @@ class PetViewModel {
     }
 
     private func abortClimb() {
-        movementTimer?.invalidate()
-        movementTimer = nil
+        movement.stop()
         startFalling()
     }
 
@@ -563,10 +554,7 @@ class PetViewModel {
     }
 
     private func startWindowTopMovementTimer() {
-        movementTimer?.invalidate()
-        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
-            self?.updateWindowTopMovement()
-        }
+        movement.start { [weak self] in self?.updateWindowTopMovement() }
     }
 
     private func updateWindowTopMovement() {
@@ -656,10 +644,7 @@ class PetViewModel {
     }
 
     private func startDockJumpTimer() {
-        movementTimer?.invalidate()
-        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
-            self?.updateDockJumpMovement()
-        }
+        movement.start { [weak self] in self?.updateDockJumpMovement() }
     }
 
     private func updateDockJumpMovement() {
@@ -694,8 +679,7 @@ class PetViewModel {
             return
         }
 
-        movementTimer?.invalidate()
-        movementTimer = nil
+        movement.stop()
 
         // Ensure pet is exactly on dock top and within dock bounds
         var finalX = window.frame.origin.x
@@ -727,10 +711,7 @@ class PetViewModel {
     }
 
     private func startDockMovementTimer() {
-        movementTimer?.invalidate()
-        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
-            self?.updateDockMovement()
-        }
+        movement.start { [weak self] in self?.updateDockMovement() }
     }
 
     private func updateDockMovement() {
@@ -868,10 +849,7 @@ class PetViewModel {
     }
 
     private func startJumpOffMovementTimer() {
-        movementTimer?.invalidate()
-        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
-            self?.updateJumpOffMovement()
-        }
+        movement.start { [weak self] in self?.updateJumpOffMovement() }
     }
 
     private func updateJumpOffMovement() {
@@ -912,8 +890,7 @@ class PetViewModel {
     private func finishJumpOffDock() {
         guard let window = petWindow else { return }
 
-        movementTimer?.invalidate()
-        movementTimer = nil
+        movement.stop()
 
         // Ensure pet is on ground
         window.setFrameOrigin(NSPoint(x: window.frame.origin.x, y: jumpTargetY))
@@ -1124,45 +1101,31 @@ class PetViewModel {
     }
 
     private func startPhysicsTimer() {
-        physicsTimer?.invalidate()
-        physicsTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] timer in
-            self?.updatePhysics(timer: timer)
-        }
+        physics.start { [weak self] in self?.updatePhysics() }
     }
 
     private func startMovementTimer() {
-        movementTimer?.invalidate()
-        movementTimer = Timer.scheduledTimer(withTimeInterval: PhysicsConstants.frameInterval, repeats: true) { [weak self] _ in
-            self?.updateMovement()
-        }
+        movement.start { [weak self] in self?.updateMovement() }
     }
 
     private func stopMovementTimer() {
-        movementTimer?.invalidate()
-        movementTimer = nil
+        movement.stop()
     }
 
     private func startIdleTimer() {
-        idleTimer?.invalidate()
-        idleTimer = Timer.scheduledTimer(withTimeInterval: BehaviorConstants.idleCheckInterval, repeats: true) { [weak self] _ in
-            self?.checkIdle()
-        }
+        idle.start(interval: BehaviorConstants.idleCheckInterval) { [weak self] in self?.checkIdle() }
     }
 
     private func stopIdleTimer() {
-        idleTimer?.invalidate()
-        idleTimer = nil
+        idle.stop()
     }
 
     func stopAllTimers() {
-        movementTimer?.invalidate()
-        movementTimer = nil
-        physicsTimer?.invalidate()
-        physicsTimer = nil
+        movement.stop()
+        physics.stop()
         animationTimer?.invalidate()
         animationTimer = nil
-        idleTimer?.invalidate()
-        idleTimer = nil
+        idle.stop()
     }
 
     // MARK: - Pause/Resume
@@ -1248,7 +1211,7 @@ class PetViewModel {
 
     // MARK: - Physics Updates
 
-    private func updatePhysics(timer: Timer) {
+    private func updatePhysics() {
         guard let window = petWindow else { return }
         guard case .falling(var velocity, var bounceCount) = state else { return }
 
@@ -1271,8 +1234,7 @@ class PetViewModel {
             bounceCount += 1
 
             if bounceCount > PhysicsConstants.maxBounces || abs(velocity) < PhysicsConstants.minBounceVelocity {
-                timer.invalidate()
-                physicsTimer = nil
+                physics.stop()
 
                 // Start appropriate walking based on where we landed
                 switch surface {
