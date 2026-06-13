@@ -244,8 +244,8 @@ class PetViewModel {
 
         // Use the animation's built-in movement values (like desktopPet)
         // The jump animation has startY=-15 (up) to endY=+15 (down) which creates the arc
-        let moveX = abs(animationManager.getCurrentMoveX())
-        let moveY = animationManager.getCurrentMoveY()
+        let moveX = abs(scaledMoveX())
+        let moveY = scaledMoveY()
 
         let petSize = window.frame.width
         var newX = window.frame.origin.x
@@ -331,7 +331,7 @@ class PetViewModel {
             start: window.frame.origin,
             target: CGPoint(x: targetX, y: targetY),
             arc: .parabolic(height: 30),
-            step: 0.05,
+            step: 0.05 * PhysicsConstants.tickScale,
             clampToTargetY: false
         )
 
@@ -452,7 +452,7 @@ class PetViewModel {
         switch climbPhase {
         case .ascending:
             // Climb at the animation's own vertical speed
-            let climbSpeed = abs(animationManager.getCurrentMoveY())
+            let climbSpeed = abs(scaledMoveY())
             let newY = window.frame.origin.y + climbSpeed
 
             if newY >= frame.maxY {
@@ -470,7 +470,7 @@ class PetViewModel {
             // Slide from the wall onto the window top while crawling over
             let targetX = climbingOnLeftSide ? frame.minX : frame.maxX - petSize
             var newX = window.frame.origin.x
-            let step: CGFloat = 1.5
+            let step: CGFloat = 1.5 * PhysicsConstants.tickScale
             if abs(targetX - newX) <= step {
                 newX = targetX
             } else {
@@ -527,7 +527,7 @@ class PetViewModel {
             return
         }
 
-        let moveX = abs(animationManager.getCurrentMoveX())
+        let moveX = abs(scaledMoveX())
         var newX = window.frame.origin.x
 
         if isMovingRight {
@@ -584,7 +584,7 @@ class PetViewModel {
             start: window.frame.origin,
             target: CGPoint(x: targetX, y: dockInfo.frame.maxY),
             arc: .parabolic(height: 30),
-            step: 0.05,
+            step: 0.05 * PhysicsConstants.tickScale,
             clampToTargetY: false
         )
 
@@ -660,7 +660,7 @@ class PetViewModel {
             return
         }
 
-        let moveX = abs(animationManager.getCurrentMoveX())
+        let moveX = abs(scaledMoveX())
         var newX = window.frame.origin.x
         let petSize = window.frame.width
 
@@ -780,7 +780,7 @@ class PetViewModel {
             start: window.frame.origin,
             target: CGPoint(x: targetX, y: screen.frame.minY),
             arc: .piecewise(height: 20, peak: 0.2),
-            step: 0.033,
+            step: 0.033 * PhysicsConstants.tickScale,
             clampToTargetY: true
         )
 
@@ -1128,14 +1128,32 @@ class PetViewModel {
         }
     }
 
+    // MARK: - Per-Tick Movement Deltas
+
+    /// The animation's per-frame X movement, scaled to the current tick rate so
+    /// the pet's wall-clock walking speed is independent of `frameInterval`.
+    private func scaledMoveX() -> CGFloat {
+        animationManager.getCurrentMoveX() * PhysicsConstants.tickScale
+    }
+
+    /// The animation's per-frame Y movement, scaled to the current tick rate.
+    private func scaledMoveY() -> CGFloat {
+        animationManager.getCurrentMoveY() * PhysicsConstants.tickScale
+    }
+
     // MARK: - Physics Updates
 
     private func updatePhysics() {
         guard let window = petWindow else { return }
         guard case .falling(var velocity, var bounceCount) = state else { return }
 
-        velocity += PhysicsConstants.gravity
-        var newY = window.frame.origin.y - velocity
+        // Scale both the acceleration and the position step by tickScale so the
+        // fall matches in wall-clock time at any tick rate. `velocity` stays in
+        // reference-rate units (on-screen speed = velocity / referenceInterval,
+        // independent of the tick rate), so the bounce thresholds below compare
+        // against it unscaled.
+        velocity += PhysicsConstants.gravity * PhysicsConstants.tickScale
+        var newY = window.frame.origin.y - velocity * PhysicsConstants.tickScale
 
         // Calculate ground level (may be a window top, dock top, or screen bottom)
         let (ground, surface) = groundInfo(
@@ -1182,7 +1200,7 @@ class PetViewModel {
         let currentX = window.frame.origin.x
         let footY = window.frame.origin.y
 
-        let moveX = abs(animationManager.getCurrentMoveX())  // Use absolute value
+        let moveX = abs(scaledMoveX())  // Use absolute value
 
         var newX = currentX
 

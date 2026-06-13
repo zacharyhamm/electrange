@@ -25,6 +25,15 @@ class AnimationManager {
     // Sprite rendering
     private(set) var spriteRenderer: SpriteRenderer?
 
+    // Memoized current-frame image. ContentView.body calls getCurrentFrameImage()
+    // on every re-evaluation (direction flips, observation churn), not only when
+    // the frame advances, so without this each redraw re-crops and allocates a
+    // new NSImage. Keyed by frame (tile) number, so it self-invalidates whenever
+    // the displayed tile changes. @ObservationIgnored: derived state the view
+    // shouldn't observe, and mutating it during body must not invalidate body.
+    @ObservationIgnored private var cachedFrameNumber: Int?
+    @ObservationIgnored private var cachedFrameImage: NSImage?
+
     // Child spawn tracking
     var childSpawns: [String: [ChildSpawn]] = [:]  // Keyed by parent animation ID
     var onChildSpawn: ((ChildSpawn) -> Void)?  // Callback when a child should spawn
@@ -104,7 +113,14 @@ class AnimationManager {
             return nil
         }
 
-        return renderer.extractFrame(frameNumber: frameNumber)
+        if frameNumber == cachedFrameNumber, let cached = cachedFrameImage {
+            return cached
+        }
+
+        let image = renderer.extractFrame(frameNumber: frameNumber)
+        cachedFrameNumber = frameNumber
+        cachedFrameImage = image
+        return image
     }
 
     // Returns the current interval (interpolated between start and end)

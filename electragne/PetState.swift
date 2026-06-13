@@ -159,7 +159,20 @@ enum PhysicsConstants {
     static let maxBounces: Int = 3
     static let minBounceVelocity: CGFloat = 2.0
     static let hardLandingThreshold: CGFloat = 15.0
-    static let frameInterval: TimeInterval = 0.016  // ~60fps
+
+    /// The tick rate the per-frame physics/movement deltas were originally
+    /// tuned at. Frozen — it's the baseline `tickScale` divides by, not a
+    /// live knob.
+    static let referenceInterval: TimeInterval = 0.016  // ~60fps
+    /// Live movement/physics tick interval. Lowered from the reference rate to
+    /// cut the number of `setFrameOrigin` window-server round trips per second;
+    /// `tickScale` keeps wall-clock speed/arcs/bounce identical.
+    static let frameInterval: TimeInterval = 0.032  // ~30fps
+
+    /// Multiplier applied to every per-tick delta (movement, gravity, jump arc
+    /// step) so that lowering the tick rate doesn't change the pet's perceived
+    /// speed. Equals 1.0 when `frameInterval == referenceInterval`.
+    static let tickScale: CGFloat = CGFloat(frameInterval / referenceInterval)
 
     // Tallest ledge the pet will jump up when an adjacent display's bottom
     // edge sits above the one it's walking on; bigger gaps act like a wall
