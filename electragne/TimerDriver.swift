@@ -15,7 +15,9 @@ final class TimerDriver {
     /// (Re)start the repeating timer. Any previously running timer is invalidated.
     func start(interval: TimeInterval = PhysicsConstants.frameInterval, _ tick: @escaping () -> Void) {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in tick() }
+        let newTimer = Timer(timeInterval: interval, repeats: true) { _ in tick() }
+        RunLoop.main.add(newTimer, forMode: .common)
+        self.timer = newTimer
     }
 
     func stop() {

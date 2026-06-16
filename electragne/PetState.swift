@@ -164,10 +164,12 @@ enum PhysicsConstants {
     /// tuned at. Frozen — it's the baseline `tickScale` divides by, not a
     /// live knob.
     static let referenceInterval: TimeInterval = 0.016  // ~60fps
-    /// Live movement/physics tick interval. Lowered from the reference rate to
-    /// cut the number of `setFrameOrigin` window-server round trips per second;
-    /// `tickScale` keeps wall-clock speed/arcs/bounce identical.
-    static let frameInterval: TimeInterval = 0.032  // ~30fps
+    /// Live movement/physics tick interval. Currently matches `referenceInterval`
+    /// (so `tickScale` == 1.0), running movement/physics at the full 60fps the
+    /// deltas were tuned at — smoother motion at the cost of more `setFrameOrigin`
+    /// window-server round trips. Raise this to trade smoothness for fewer round
+    /// trips; `tickScale` then keeps wall-clock speed/arcs/bounce identical.
+    static let frameInterval: TimeInterval = 0.016  // ~60fps
 
     /// Multiplier applied to every per-tick delta (movement, gravity, jump arc
     /// step) so that lowering the tick rate doesn't change the pet's perceived

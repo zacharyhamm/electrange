@@ -34,7 +34,7 @@ class SpriteRenderer {
 
     private let tileWidth: CGFloat
     private let tileHeight: CGFloat
-    private let cachedCGImage: CGImage  // Cache CGImage to avoid repeated extraction
+    private var frames: [NSImage?]
 
     init?(spriteSheet: NSImage?, tilesX: Int, tilesY: Int) {
         guard tilesX > 0, tilesY > 0,
@@ -47,29 +47,34 @@ class SpriteRenderer {
         self.grid = SpriteGrid(tilesX: tilesX, tilesY: tilesY)
         self.tileWidth = CGFloat(cgImage.width) / CGFloat(tilesX)
         self.tileHeight = CGFloat(cgImage.height) / CGFloat(tilesY)
-        self.cachedCGImage = cgImage
+        
+        let maxFrames = tilesX * tilesY
+        self.frames = Array(repeating: nil, count: maxFrames)
+        
+        for frameNumber in 0..<maxFrames {
+            if let (col, row) = self.grid.cell(for: frameNumber) {
+                let rect = CGRect(
+                    x: CGFloat(col) * self.tileWidth,
+                    y: CGFloat(row) * self.tileHeight,
+                    width: self.tileWidth,
+                    height: self.tileHeight
+                )
+                if let croppedImage = cgImage.cropping(to: rect) {
+                    self.frames[frameNumber] = NSImage(cgImage: croppedImage, size: NSSize(width: self.tileWidth, height: self.tileHeight))
+                }
+            }
+        }
     }
 
     /// Extract a single frame from the sprite sheet
     /// - Parameter frameNumber: The frame index (0 to tilesX*tilesY-1)
     /// - Returns: The extracted frame image, or nil if frameNumber is out of bounds
     func extractFrame(frameNumber: Int) -> NSImage? {
-        guard let (col, row) = grid.cell(for: frameNumber) else {
+        guard let _ = grid.cell(for: frameNumber) else {
             Log.rendering.debug("Invalid frame number \(frameNumber), valid range is 0-\(self.grid.maxFrameNumber)")
             return nil
         }
 
-        let rect = CGRect(
-            x: CGFloat(col) * tileWidth,
-            y: CGFloat(row) * tileHeight,
-            width: tileWidth,
-            height: tileHeight
-        )
-
-        guard let croppedImage = cachedCGImage.cropping(to: rect) else {
-            return nil
-        }
-
-        return NSImage(cgImage: croppedImage, size: NSSize(width: tileWidth, height: tileHeight))
+        return frames[frameNumber]
     }
 }
