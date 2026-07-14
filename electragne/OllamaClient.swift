@@ -140,7 +140,8 @@ struct OllamaClient {
         sentence or two, no long paragraphs. Plain text only — no markdown, \
         no bullet lists, no headings, no code formatting. You have a \
         web_search tool: use it when asked to search, or for current events \
-        and facts you are not sure about.
+        and facts you are not sure about. When you answer from web search \
+        results, always share the links (plain URLs) to the sources you used.
         """
     /// Ollama defaults num_ctx to a few thousand tokens; raise it so long
     /// conversations keep their earlier turns in context.
