@@ -402,7 +402,7 @@ private struct ChatBubbleView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center) {
-                    Text("O rly?")
+                    Text("sheepchat. baaa.")
                         .font(.system(size: 14, weight: .semibold))
 
                     Spacer()
