@@ -26,6 +26,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     weak var petWindow: NSWindow?
     private var toggleVisibilityMenuItem: NSMenuItem?
+    private var geminiToggleMenuItem: NSMenuItem?
     private var isPetVisible = true
     private var summonHotkey: GlobalHotkey?
 
@@ -106,6 +107,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         chatItem.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(chatItem)
 
+        let geminiItem = NSMenuItem(
+            title: "Use Gemini (Cloud)",
+            action: #selector(toggleGeminiChat),
+            keyEquivalent: ""
+        )
+        geminiItem.state = ChatProviderPreference.useGemini ? .on : .off
+        geminiToggleMenuItem = geminiItem
+        menu.addItem(geminiItem)
+
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Increase Size", action: #selector(increaseSize), keyEquivalent: "+"))
         menu.addItem(NSMenuItem(title: "Decrease Size", action: #selector(decreaseSize), keyEquivalent: "-"))
@@ -117,6 +127,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func summonPetToChatFromMenu() {
         summonPetToChat()
+    }
+
+    @objc func toggleGeminiChat() {
+        let defaults = UserDefaults.standard
+        let useGemini = !defaults.bool(forKey: ChatProviderPreference.useGeminiKey)
+        defaults.set(useGemini, forKey: ChatProviderPreference.useGeminiKey)
+        geminiToggleMenuItem?.state = useGemini ? .on : .off
     }
 
     private func summonPetToChat() {

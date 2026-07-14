@@ -118,7 +118,8 @@ final class ChatBubbleWindowController {
     private var panel: ChatBubblePanel?
     private var model = ChatBubbleModel()
     private var onDismiss: (() -> Void)?
-    private let client: OllamaClient
+    private let ollamaClient: OllamaClient
+    private let geminiClient: GeminiClient
     private var streamTask: Task<Void, Never>?
     /// Conversation memory for the app's lifetime; survives bubble dismissal.
     /// Capped at the most recent messages to keep the request context small.
@@ -130,8 +131,9 @@ final class ChatBubbleWindowController {
     private var globalMouseMonitor: Any?
     private var windowObservers: [NSObjectProtocol] = []
 
-    init(client: OllamaClient = OllamaClient()) {
-        self.client = client
+    init(ollamaClient: OllamaClient = OllamaClient(), geminiClient: GeminiClient = GeminiClient()) {
+        self.ollamaClient = ollamaClient
+        self.geminiClient = geminiClient
     }
 
     func present(
@@ -210,7 +212,8 @@ final class ChatBubbleWindowController {
 
         appendToHistory(OllamaMessage(role: "user", content: userMessage))
 
-        let client = client
+        let useGemini = ChatProviderPreference.useGemini
+        let client: any ChatClient = useGemini ? geminiClient : ollamaClient
         let model = model
         let messages = history
         let streamID = UUID()
@@ -236,8 +239,14 @@ final class ChatBubbleWindowController {
                 model.phase = .failed(
                     "Web search needs an ollama.com API key — set OLLAMA_API_KEY or put it in ~/.ollama/api_key"
                 )
+            } catch GeminiError.missingAPIKey {
+                model.phase = .failed(
+                    "Gemini needs an API key — put it in ~/.gemini.api.key"
+                )
+            } catch GeminiError.quotaExceeded {
+                model.phase = .failed("Gemini quota exceeded — try again later")
             } catch is URLError {
-                model.phase = .failed("Ollama not reachable")
+                model.phase = .failed(useGemini ? "Gemini not reachable" : "Ollama not reachable")
             } catch {
                 model.phase = .failed("Something went wrong")
             }

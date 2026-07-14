@@ -5,6 +5,7 @@
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
 	<array>
 		<string>/.ollama/api_key</string>
+		<string>/.gemini.api.key</string>
 	</array>
 </dict>
 </plist>

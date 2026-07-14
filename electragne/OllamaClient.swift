@@ -131,7 +131,7 @@ nonisolated struct OllamaWebSearch {
 }
 
 /// Minimal streaming client for a local Ollama server.
-struct OllamaClient {
+struct OllamaClient: ChatClient {
     nonisolated static let defaultBaseURL = URL(string: "http://localhost:11434")!
     nonisolated static let defaultModel = "gemma4:latest"
     nonisolated static let systemPrompt = """

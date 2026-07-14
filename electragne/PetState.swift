@@ -28,14 +28,14 @@ struct Weak<T: AnyObject> {
 // MARK: - Pet State Machine
 
 /// The surface to return to after the user closes the chat bubble.
-enum ChatRestingPlace: Equatable {
+nonisolated enum ChatRestingPlace: Equatable {
     case ground
     case dock
     case window
 }
 
 /// Represents the current state of the pet with associated data
-enum PetState: Equatable {
+nonisolated enum PetState: Equatable {
     case falling(velocity: CGFloat, bounceCount: Int)
     case walking
     case walkingOnDock           // Walking on the dock surface
