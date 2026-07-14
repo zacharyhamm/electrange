@@ -68,6 +68,20 @@ struct ChatInteractionTests {
         #expect(placement.tailOffset == 140)
     }
 
+    @Test func expandedBubbleFlipsBelowPetAndClampsNearTopOfScreen() {
+        let placement = ChatBubblePlacement.calculate(
+            petFrame: CGRect(x: 700, y: 820, width: 40, height: 40),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            bubbleSize: ChatBubblePlacement.expandedSize
+        )
+
+        // Desired y (below the pet) would be 820 - 4 - 300 = 516, which fits,
+        // and the taller bubble no longer fits above the pet.
+        #expect(placement.origin == CGPoint(x: 580, y: 516))
+        #expect(placement.tailEdge == .top)
+        #expect(placement.tailOffset == 140)
+    }
+
     @Test func bubbleUsesOffsetDisplayCoordinates() {
         let placement = ChatBubblePlacement.calculate(
             petFrame: CGRect(x: -1400, y: 100, width: 40, height: 40),

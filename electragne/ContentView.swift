@@ -120,10 +120,7 @@ struct ElectragneView: View {
 
         chatBubbleController.present(
             anchoredTo: window,
-            onDismiss: { viewModel.dismissChat() },
-            onSubmit: { _ in
-                // Intentionally inert until the LLM integration is added.
-            }
+            onDismiss: { viewModel.dismissChat() }
         )
     }
 }

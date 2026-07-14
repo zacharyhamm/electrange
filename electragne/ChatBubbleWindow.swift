@@ -9,6 +9,7 @@ enum ChatBubbleTailEdge: Equatable {
 /// Pure placement result so screen-edge behavior can be unit tested without a window.
 struct ChatBubblePlacement: Equatable {
     static let defaultSize = CGSize(width: 280, height: 122)
+    static let expandedSize = CGSize(width: 280, height: 300)
     static let screenMargin: CGFloat = 8
     static let petGap: CGFloat = 4
 
@@ -51,11 +52,21 @@ struct ChatBubblePlacement: Equatable {
     }
 }
 
+enum ChatBubblePhase: Equatable {
+    case idle
+    case streaming
+    case failed(String)
+}
+
 @Observable
 private final class ChatBubbleModel {
     var text = ""
     var tailEdge: ChatBubbleTailEdge = .bottom
     var tailOffset = ChatBubblePlacement.defaultSize.width / 2
+    var response = ""
+    var phase: ChatBubblePhase = .idle
+
+    var isStreaming: Bool { phase == .streaming }
 }
 
 /// Owns the auxiliary AppKit panel used for chat. Keeping the bubble separate
@@ -65,15 +76,25 @@ final class ChatBubbleWindowController {
     private var panel: ChatBubblePanel?
     private var model = ChatBubbleModel()
     private var onDismiss: (() -> Void)?
+    private let client: OllamaClient
+    private var streamTask: Task<Void, Never>?
+    /// Conversation memory for the app's lifetime; survives bubble dismissal.
+    /// Capped at the most recent messages to keep the request context small.
+    private var history: [OllamaMessage] = []
+    private static let maxHistoryMessages = 100
+    private var activeStreamID: UUID?
 
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
     private var windowObservers: [NSObjectProtocol] = []
 
+    init(client: OllamaClient = OllamaClient()) {
+        self.client = client
+    }
+
     func present(
         anchoredTo petWindow: NSWindow,
-        onDismiss: @escaping () -> Void,
-        onSubmit: @escaping (String) -> Void
+        onDismiss: @escaping () -> Void
     ) {
         self.petWindow = petWindow
         self.onDismiss = onDismiss
@@ -83,7 +104,7 @@ final class ChatBubbleWindowController {
             let bubbleView = ChatBubbleView(
                 model: model,
                 onDismiss: { [weak self] in self?.dismiss(notify: true) },
-                onSubmit: onSubmit
+                onSubmit: { [weak self] message in self?.startStream(userMessage: message) }
             )
             let panel = makePanel(rootView: bubbleView)
             self.panel = panel
@@ -99,6 +120,8 @@ final class ChatBubbleWindowController {
         guard panel != nil else { return }
         let callback = notify ? onDismiss : nil
 
+        streamTask?.cancel()
+        streamTask = nil
         removeEventMonitors()
         removeWindowObservers()
         panel?.orderOut(nil)
@@ -127,6 +150,66 @@ final class ChatBubbleWindowController {
         panel.setFrameOrigin(placement.origin)
     }
 
+    private func startStream(userMessage: String) {
+        streamTask?.cancel()
+
+        model.text = ""
+        model.response = ""
+        model.phase = .streaming
+        setExpanded(true)
+
+        appendToHistory(OllamaMessage(role: "user", content: userMessage))
+
+        let client = client
+        let model = model
+        let messages = history
+        let streamID = UUID()
+        activeStreamID = streamID
+
+        streamTask = Task { [weak self] in
+            do {
+                try await client.streamChat(history: messages) { token in
+                    model.response += token
+                }
+                model.phase = .idle
+            } catch is CancellationError {
+                // Bubble dismissed or a new message superseded this stream.
+            } catch let error as URLError where error.code == .cancelled {
+                // URLSession reports Task cancellation as URLError.cancelled.
+            } catch is URLError {
+                model.phase = .failed("Ollama not reachable")
+            } catch {
+                model.phase = .failed("Something went wrong")
+            }
+
+            // Record the exchange, unless a newer stream has taken over the
+            // history bookkeeping since.
+            guard let self, self.activeStreamID == streamID else { return }
+            if model.response.isEmpty {
+                // Nothing came back (error or cancelled early); drop the
+                // question so a retry doesn't duplicate it.
+                self.history.removeLast()
+            } else {
+                self.appendToHistory(OllamaMessage(role: "assistant", content: model.response))
+            }
+        }
+    }
+
+    private func appendToHistory(_ message: OllamaMessage) {
+        history.append(message)
+        if history.count > Self.maxHistoryMessages {
+            history.removeFirst(history.count - Self.maxHistoryMessages)
+        }
+    }
+
+    private func setExpanded(_ expanded: Bool) {
+        guard let panel else { return }
+        let size = expanded ? ChatBubblePlacement.expandedSize : ChatBubblePlacement.defaultSize
+        guard panel.frame.size != size else { return }
+        panel.setContentSize(size)
+        reposition()
+    }
+
     private func makePanel(rootView: ChatBubbleView) -> ChatBubblePanel {
         let panel = ChatBubblePanel(
             contentRect: CGRect(origin: .zero, size: ChatBubblePlacement.defaultSize),
@@ -153,7 +236,8 @@ final class ChatBubbleWindowController {
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
             DispatchQueue.main.async {
-                self?.dismiss(notify: true)
+                guard let self, !self.model.isStreaming else { return }
+                self.dismiss(notify: true)
             }
         }
 
@@ -167,6 +251,7 @@ final class ChatBubbleWindowController {
                 return event
             }
             DispatchQueue.main.async {
+                guard !self.model.isStreaming else { return }
                 self.dismiss(notify: true)
             }
             return event
@@ -263,19 +348,26 @@ private struct ChatBubbleView: View {
                         .textFieldStyle(.roundedBorder)
                         .focused($inputIsFocused)
                         .onSubmit(submit)
+                        .disabled(model.isStreaming)
 
                     Button(action: submit) {
                         Image(systemName: "paperplane.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .disabled(trimmedText.isEmpty)
+                    .disabled(trimmedText.isEmpty || model.isStreaming)
                     .accessibilityLabel("Send")
+                }
+
+                if model.phase != .idle || !model.response.isEmpty {
+                    Divider()
+                    responseArea
                 }
             }
             .padding(.top, model.tailEdge == .top ? 19 : 12)
             .padding(.bottom, model.tailEdge == .bottom ? 19 : 12)
             .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .onExitCommand(perform: onDismiss)
         .onAppear {
@@ -285,8 +377,40 @@ private struct ChatBubbleView: View {
         }
     }
 
+    @ViewBuilder
+    private var responseArea: some View {
+        if case .failed(let message) = model.phase {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.red)
+        } else if model.response.isEmpty {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Thinking…")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(model.response)
+                        .font(.system(size: 12))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
+                }
+                .onChange(of: model.response) { _, _ in
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
+        }
+    }
+
     private func submit() {
-        guard !trimmedText.isEmpty else { return }
+        guard !trimmedText.isEmpty, !model.isStreaming else { return }
         onSubmit(trimmedText)
     }
 }
