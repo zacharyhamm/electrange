@@ -1,12 +1,12 @@
 import Foundation
 
-enum OllamaError: Error, Equatable {
+nonisolated enum OllamaError: Error, Equatable {
     case badStatus(Int)
     case missingAPIKey
 }
 
 /// One decoded line of the NDJSON stream from /api/chat.
-struct OllamaChatChunk: Equatable {
+nonisolated struct OllamaChatChunk: Equatable {
     var content: String
     var done: Bool
     var toolCalls: [OllamaToolCall] = []
@@ -14,7 +14,7 @@ struct OllamaChatChunk: Equatable {
 
 /// A tool invocation requested by the model. Only web_search exists, so the
 /// arguments are modeled concretely rather than as arbitrary JSON.
-struct OllamaToolCall: Equatable, Codable {
+nonisolated struct OllamaToolCall: Equatable, Codable {
     struct Function: Equatable, Codable {
         struct Arguments: Equatable, Codable {
             var query: String?
@@ -28,7 +28,7 @@ struct OllamaToolCall: Equatable, Codable {
 }
 
 /// One turn of the conversation sent to /api/chat.
-struct OllamaMessage: Equatable, Encodable {
+nonisolated struct OllamaMessage: Equatable, Encodable {
     var role: String
     var content: String
     var toolName: String? = nil
@@ -43,7 +43,7 @@ struct OllamaMessage: Equatable, Encodable {
 }
 
 /// Client for Ollama's hosted web search API (requires an ollama.com API key).
-struct OllamaWebSearch {
+nonisolated struct OllamaWebSearch {
     static let endpoint = URL(string: "https://ollama.com/api/web_search")!
     static let maxResults = 4
     static let maxResultCharacters = 1500
@@ -132,26 +132,27 @@ struct OllamaWebSearch {
 
 /// Minimal streaming client for a local Ollama server.
 struct OllamaClient {
-    static let defaultBaseURL = URL(string: "http://localhost:11434")!
-    static let defaultModel = "gemma4:latest"
-    static let systemPrompt = """
-        You are a small desktop pet chatting with your owner. Respond as if \
-        chatting: short and succinct, a sentence or two, no long paragraphs. \
-        Plain text only — no markdown, no bullet lists, no headings, no code \
-        formatting. You have a web_search tool: use it when asked to search, \
-        or for current events and facts you are not sure about.
+    nonisolated static let defaultBaseURL = URL(string: "http://localhost:11434")!
+    nonisolated static let defaultModel = "gemma4:latest"
+    nonisolated static let systemPrompt = """
+        You are a highly intelligent sheep living as a desktop pet, chatting \
+        with your owner. Respond as if chatting: short and succinct, a \
+        sentence or two, no long paragraphs. Plain text only — no markdown, \
+        no bullet lists, no headings, no code formatting. You have a \
+        web_search tool: use it when asked to search, or for current events \
+        and facts you are not sure about.
         """
     /// Ollama defaults num_ctx to a few thousand tokens; raise it so long
     /// conversations keep their earlier turns in context.
-    static let contextWindowTokens = 32768
+    nonisolated static let contextWindowTokens = 32768
     /// Bound on search → answer round-trips per user message.
-    static let maxToolRounds = 3
+    nonisolated static let maxToolRounds = 3
 
     var baseURL = defaultBaseURL
     var model = defaultModel
     var webSearch = OllamaWebSearch()
 
-    private struct ChatRequest: Encodable {
+    private nonisolated struct ChatRequest: Encodable {
         struct Options: Encodable {
             let numCtx: Int
 
@@ -189,7 +190,7 @@ struct OllamaClient {
         let tools: [ToolDefinition]
     }
 
-    private static let webSearchTool = ChatRequest.ToolDefinition(
+    private nonisolated static let webSearchTool = ChatRequest.ToolDefinition(
         function: ChatRequest.ToolDefinition.Function(
             name: "web_search",
             description: "Search the web and return the top results.",
@@ -205,7 +206,7 @@ struct OllamaClient {
         )
     )
 
-    private struct ChatResponseLine: Decodable {
+    private nonisolated struct ChatResponseLine: Decodable {
         struct Message: Decodable {
             let content: String?
             let toolCalls: [OllamaToolCall]?
