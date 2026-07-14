@@ -19,6 +19,16 @@ struct OllamaClientTests {
         #expect(chunk == OllamaChatChunk(content: "", done: true))
     }
 
+    @Test func decodesToolCallLine() {
+        let line = #"{"model":"gemma4:latest","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"web_search","arguments":{"query":"weather today"}}}]},"done":false}"#
+
+        let chunk = OllamaClient.decodeChunk(fromLine: line)
+
+        #expect(chunk?.toolCalls.count == 1)
+        #expect(chunk?.toolCalls.first?.function.name == "web_search")
+        #expect(chunk?.toolCalls.first?.function.arguments.query == "weather today")
+    }
+
     @Test func rejectsBlankAndMalformedLines() {
         #expect(OllamaClient.decodeChunk(fromLine: "") == nil)
         #expect(OllamaClient.decodeChunk(fromLine: "   ") == nil)
@@ -75,5 +85,101 @@ struct OllamaClientTests {
             #expect(messages[index + 1]["role"] as? String == turn.role)
             #expect(messages[index + 1]["content"] as? String == turn.content)
         }
+    }
+
+    @Test func requestBodyDeclaresWebSearchTool() throws {
+        let body = try OllamaClient.makeRequestBody(model: "gemma4:latest", history: [])
+
+        let json = try #require(
+            try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        let tools = try #require(json["tools"] as? [[String: Any]])
+        #expect(tools.count == 1)
+        let function = try #require(tools[0]["function"] as? [String: Any])
+        #expect(function["name"] as? String == "web_search")
+        let parameters = try #require(function["parameters"] as? [String: Any])
+        #expect(parameters["required"] as? [String] == ["query"])
+    }
+
+    @Test func toolMessagesEncodeOllamaFieldNames() throws {
+        let history = [
+            OllamaMessage(
+                role: "assistant",
+                content: "",
+                toolCalls: [OllamaToolCall(
+                    function: OllamaToolCall.Function(
+                        name: "web_search",
+                        arguments: OllamaToolCall.Function.Arguments(query: "news")
+                    )
+                )]
+            ),
+            OllamaMessage(role: "tool", content: "Result 1: …", toolName: "web_search"),
+        ]
+        let body = try OllamaClient.makeRequestBody(model: "gemma4:latest", history: history)
+
+        let json = try #require(
+            try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        let messages = try #require(json["messages"] as? [[String: Any]])
+
+        let assistant = messages[1]
+        let toolCalls = try #require(assistant["tool_calls"] as? [[String: Any]])
+        let function = try #require(toolCalls[0]["function"] as? [String: Any])
+        #expect(function["name"] as? String == "web_search")
+        #expect((function["arguments"] as? [String: Any])?["query"] as? String == "news")
+
+        let tool = messages[2]
+        #expect(tool["role"] as? String == "tool")
+        #expect(tool["tool_name"] as? String == "web_search")
+        // Plain chat messages must not carry tool keys.
+        #expect(messages[0]["tool_calls"] == nil)
+        #expect(messages[0]["tool_name"] == nil)
+    }
+
+    @Test func formatsSearchResultsWithTruncation() throws {
+        let longContent = String(repeating: "x", count: 5000)
+        let payload = """
+            {"results":[
+              {"title":"First","url":"https://example.com/a","content":"short answer"},
+              {"title":"Second","url":"https://example.com/b","content":"\(longContent)"}
+            ]}
+            """
+        let text = OllamaWebSearch.formatResults(from: Data(payload.utf8))
+
+        #expect(text.contains("Result 1: First"))
+        #expect(text.contains("URL: https://example.com/a"))
+        #expect(text.contains("short answer"))
+        #expect(text.contains("Result 2: Second"))
+        #expect(text.count < 2500 + longContent.count - OllamaWebSearch.maxResultCharacters)
+    }
+
+    @Test func emptyOrMalformedSearchResponsesReadAsNoResults() {
+        #expect(OllamaWebSearch.formatResults(from: Data(#"{"results":[]}"#.utf8)) == "No results found.")
+        #expect(OllamaWebSearch.formatResults(from: Data("garbage".utf8)) == "No results found.")
+    }
+
+    @Test func apiKeyComesFromEnvironmentFirstThenFile() throws {
+        #expect(
+            OllamaWebSearch.loadAPIKey(
+                environment: ["OLLAMA_API_KEY": " key-from-env\n"],
+                homeDirectory: "/nonexistent"
+            ) == "key-from-env"
+        )
+
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ollama-key-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".ollama"),
+            withIntermediateDirectories: true
+        )
+        try "key-from-file\n".write(
+            to: home.appendingPathComponent(".ollama/api_key"),
+            atomically: true,
+            encoding: .utf8
+        )
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        #expect(OllamaWebSearch.loadAPIKey(environment: [:], homeDirectory: home.path) == "key-from-file")
+        #expect(OllamaWebSearch.loadAPIKey(environment: [:], homeDirectory: "/nonexistent") == nil)
     }
 }

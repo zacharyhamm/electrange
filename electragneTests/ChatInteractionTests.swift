@@ -82,6 +82,24 @@ struct ChatInteractionTests {
         #expect(placement.tailOffset == 140)
     }
 
+    @Test func chatTextTurnsURLsIntoLinks() {
+        let attributed = ChatTextFormatter.linkified(
+            "check https://example.com/page?q=1 or www.ollama.com for details"
+        )
+
+        let links = attributed.runs.compactMap(\.link)
+        #expect(links.count == 2)
+        #expect(links.contains(URL(string: "https://example.com/page?q=1")!))
+        #expect(links.contains { $0.absoluteString.contains("ollama.com") })
+    }
+
+    @Test func chatTextWithoutURLsHasNoLinks() {
+        let attributed = ChatTextFormatter.linkified("just a friendly plain sentence")
+
+        #expect(attributed.runs.compactMap(\.link).isEmpty)
+        #expect(String(attributed.characters) == "just a friendly plain sentence")
+    }
+
     @Test func bubbleUsesOffsetDisplayCoordinates() {
         let placement = ChatBubblePlacement.calculate(
             petFrame: CGRect(x: -1400, y: 100, width: 40, height: 40),

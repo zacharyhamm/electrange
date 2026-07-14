@@ -2,18 +2,132 @@ import Foundation
 
 enum OllamaError: Error, Equatable {
     case badStatus(Int)
+    case missingAPIKey
 }
 
 /// One decoded line of the NDJSON stream from /api/chat.
 struct OllamaChatChunk: Equatable {
-    let content: String
-    let done: Bool
+    var content: String
+    var done: Bool
+    var toolCalls: [OllamaToolCall] = []
+}
+
+/// A tool invocation requested by the model. Only web_search exists, so the
+/// arguments are modeled concretely rather than as arbitrary JSON.
+struct OllamaToolCall: Equatable, Codable {
+    struct Function: Equatable, Codable {
+        struct Arguments: Equatable, Codable {
+            var query: String?
+        }
+
+        var name: String
+        var arguments: Arguments
+    }
+
+    var function: Function
 }
 
 /// One turn of the conversation sent to /api/chat.
 struct OllamaMessage: Equatable, Encodable {
-    let role: String
-    let content: String
+    var role: String
+    var content: String
+    var toolName: String? = nil
+    var toolCalls: [OllamaToolCall]? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case toolName = "tool_name"
+        case toolCalls = "tool_calls"
+    }
+}
+
+/// Client for Ollama's hosted web search API (requires an ollama.com API key).
+struct OllamaWebSearch {
+    static let endpoint = URL(string: "https://ollama.com/api/web_search")!
+    static let maxResults = 4
+    static let maxResultCharacters = 1500
+
+    private struct SearchRequest: Encodable {
+        let query: String
+        let maxResults: Int
+
+        enum CodingKeys: String, CodingKey {
+            case query
+            case maxResults = "max_results"
+        }
+    }
+
+    private struct SearchResponse: Decodable {
+        struct Result: Decodable {
+            let title: String?
+            let url: String?
+            let content: String?
+        }
+
+        let results: [Result]
+    }
+
+    /// The env var works for terminal launches; the key file works when the
+    /// app is launched from Finder (GUI apps don't inherit shell env).
+    nonisolated static func loadAPIKey(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: String = realHomeDirectory()
+    ) -> String? {
+        if let key = environment["OLLAMA_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !key.isEmpty {
+            return key
+        }
+        let keyFile = URL(fileURLWithPath: homeDirectory).appendingPathComponent(".ollama/api_key")
+        if let key = try? String(contentsOf: keyFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !key.isEmpty {
+            return key
+        }
+        return nil
+    }
+
+    /// The sandbox reports the container as home; the key file lives in the
+    /// user's real home directory.
+    nonisolated static func realHomeDirectory() -> String {
+        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
+            return String(cString: dir)
+        }
+        return NSHomeDirectory()
+    }
+
+    func resultsText(query: String) async throws -> String {
+        guard let key = Self.loadAPIKey() else { throw OllamaError.missingAPIKey }
+
+        var request = URLRequest(url: Self.endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(
+            SearchRequest(query: query, maxResults: Self.maxResults)
+        )
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw OllamaError.badStatus(http.statusCode)
+        }
+        return Self.formatResults(from: data)
+    }
+
+    nonisolated static func formatResults(from data: Data) -> String {
+        guard let decoded = try? JSONDecoder().decode(SearchResponse.self, from: data),
+              !decoded.results.isEmpty else {
+            return "No results found."
+        }
+        return decoded.results.enumerated().map { index, result in
+            let content = String((result.content ?? "").prefix(maxResultCharacters))
+            return """
+                Result \(index + 1): \(result.title ?? "Untitled")
+                URL: \(result.url ?? "unknown")
+                \(content)
+                """
+        }.joined(separator: "\n\n")
+    }
 }
 
 /// Minimal streaming client for a local Ollama server.
@@ -24,14 +138,18 @@ struct OllamaClient {
         You are a small desktop pet chatting with your owner. Respond as if \
         chatting: short and succinct, a sentence or two, no long paragraphs. \
         Plain text only — no markdown, no bullet lists, no headings, no code \
-        formatting.
+        formatting. You have a web_search tool: use it when asked to search, \
+        or for current events and facts you are not sure about.
         """
     /// Ollama defaults num_ctx to a few thousand tokens; raise it so long
     /// conversations keep their earlier turns in context.
     static let contextWindowTokens = 32768
+    /// Bound on search → answer round-trips per user message.
+    static let maxToolRounds = 3
 
     var baseURL = defaultBaseURL
     var model = defaultModel
+    var webSearch = OllamaWebSearch()
 
     private struct ChatRequest: Encodable {
         struct Options: Encodable {
@@ -42,15 +160,60 @@ struct OllamaClient {
             }
         }
 
+        struct ToolDefinition: Encodable {
+            struct Function: Encodable {
+                struct Parameters: Encodable {
+                    struct Property: Encodable {
+                        let type: String
+                        let description: String
+                    }
+
+                    let type = "object"
+                    let properties: [String: Property]
+                    let required: [String]
+                }
+
+                let name: String
+                let description: String
+                let parameters: Parameters
+            }
+
+            let type = "function"
+            let function: Function
+        }
+
         let model: String
         let messages: [OllamaMessage]
         let stream: Bool
         let options: Options
+        let tools: [ToolDefinition]
     }
+
+    private static let webSearchTool = ChatRequest.ToolDefinition(
+        function: ChatRequest.ToolDefinition.Function(
+            name: "web_search",
+            description: "Search the web and return the top results.",
+            parameters: ChatRequest.ToolDefinition.Function.Parameters(
+                properties: [
+                    "query": ChatRequest.ToolDefinition.Function.Parameters.Property(
+                        type: "string",
+                        description: "The search query"
+                    )
+                ],
+                required: ["query"]
+            )
+        )
+    )
 
     private struct ChatResponseLine: Decodable {
         struct Message: Decodable {
             let content: String?
+            let toolCalls: [OllamaToolCall]?
+
+            enum CodingKeys: String, CodingKey {
+                case content
+                case toolCalls = "tool_calls"
+            }
         }
 
         let message: Message?
@@ -62,7 +225,8 @@ struct OllamaClient {
             model: model,
             messages: [OllamaMessage(role: "system", content: systemPrompt)] + history,
             stream: true,
-            options: ChatRequest.Options(numCtx: contextWindowTokens)
+            options: ChatRequest.Options(numCtx: contextWindowTokens),
+            tools: [webSearchTool]
         )
         return try JSONEncoder().encode(request)
     }
@@ -77,27 +241,70 @@ struct OllamaClient {
         }
         return OllamaChatChunk(
             content: decoded.message?.content ?? "",
-            done: decoded.done ?? false
+            done: decoded.done ?? false,
+            toolCalls: decoded.message?.toolCalls ?? []
         )
     }
 
-    func streamChat(history: [OllamaMessage], onToken: (String) -> Void) async throws {
-        var request = URLRequest(url: baseURL.appendingPathComponent("api/chat"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try Self.makeRequestBody(model: model, history: history)
+    /// Streams the model's answer, executing web_search tool calls as they
+    /// arrive and feeding results back until the model produces a final reply.
+    func streamChat(
+        history: [OllamaMessage],
+        onStatus: (String) -> Void = { _ in },
+        onToken: (String) -> Void
+    ) async throws {
+        var messages = history
 
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw OllamaError.badStatus(http.statusCode)
-        }
+        for round in 0...Self.maxToolRounds {
+            var toolCalls: [OllamaToolCall] = []
+            var roundContent = ""
 
-        for try await line in bytes.lines {
-            guard let chunk = Self.decodeChunk(fromLine: line) else { continue }
-            if !chunk.content.isEmpty {
-                onToken(chunk.content)
+            var request = URLRequest(url: baseURL.appendingPathComponent("api/chat"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try Self.makeRequestBody(model: model, history: messages)
+
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                throw OllamaError.badStatus(http.statusCode)
             }
-            if chunk.done { break }
+
+            for try await line in bytes.lines {
+                guard let chunk = Self.decodeChunk(fromLine: line) else { continue }
+                if !chunk.content.isEmpty {
+                    roundContent += chunk.content
+                    onToken(chunk.content)
+                }
+                toolCalls.append(contentsOf: chunk.toolCalls)
+                if chunk.done { break }
+            }
+
+            guard !toolCalls.isEmpty, round < Self.maxToolRounds else { return }
+
+            messages.append(
+                OllamaMessage(role: "assistant", content: roundContent, toolCalls: toolCalls)
+            )
+            for call in toolCalls {
+                let query = call.function.arguments.query ?? ""
+                onStatus("Searching the web: \(query)")
+                let resultText: String
+                do {
+                    resultText = try await webSearch.resultsText(query: query)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch OllamaError.missingAPIKey {
+                    throw OllamaError.missingAPIKey
+                } catch let error as URLError where error.code == .cancelled {
+                    throw CancellationError()
+                } catch {
+                    // Let the model explain the failure instead of aborting.
+                    resultText = "Web search failed: \(error.localizedDescription)"
+                }
+                messages.append(
+                    OllamaMessage(role: "tool", content: resultText, toolName: call.function.name)
+                )
+            }
+            onStatus("Thinking…")
         }
     }
 }

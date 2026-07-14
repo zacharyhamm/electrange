@@ -58,15 +58,57 @@ enum ChatBubblePhase: Equatable {
     case failed(String)
 }
 
+/// Turns plain chat text into an AttributedString whose URLs are tappable
+/// links; SwiftUI Text opens them with the default browser.
+enum ChatTextFormatter {
+    nonisolated static func linkified(_ text: String) -> AttributedString {
+        guard let detector = try? NSDataDetector(
+            types: NSTextCheckingResult.CheckingType.link.rawValue
+        ) else {
+            return AttributedString(text)
+        }
+
+        let source = NSMutableAttributedString(string: text)
+        let fullRange = NSRange(location: 0, length: source.length)
+        for match in detector.matches(in: text, options: [], range: fullRange) {
+            guard let url = match.url else { continue }
+            source.addAttribute(.link, value: url, range: match.range)
+        }
+
+        var attributed = AttributedString(source)
+        for run in attributed.runs where run.link != nil {
+            attributed[run.range].underlineStyle = .single
+        }
+        return attributed
+    }
+}
+
+private struct ChatBubbleEntry: Equatable, Identifiable {
+    enum Role {
+        case user
+        case assistant
+    }
+
+    let id = UUID()
+    let role: Role
+    var text: String
+}
+
 @Observable
 private final class ChatBubbleModel {
     var text = ""
     var tailEdge: ChatBubbleTailEdge = .bottom
     var tailOffset = ChatBubblePlacement.defaultSize.width / 2
-    var response = ""
+    var entries: [ChatBubbleEntry] = []
+    var status = "Thinking…"
     var phase: ChatBubblePhase = .idle
 
     var isStreaming: Bool { phase == .streaming }
+
+    func appendToken(_ token: String) {
+        guard let last = entries.indices.last, entries[last].role == .assistant else { return }
+        entries[last].text += token
+    }
 }
 
 /// Owns the auxiliary AppKit panel used for chat. Keeping the bubble separate
@@ -101,6 +143,9 @@ final class ChatBubbleWindowController {
 
         if panel == nil {
             model = ChatBubbleModel()
+            model.entries = history.map { turn in
+                ChatBubbleEntry(role: turn.role == "user" ? .user : .assistant, text: turn.content)
+            }
             let bubbleView = ChatBubbleView(
                 model: model,
                 onDismiss: { [weak self] in self?.dismiss(notify: true) },
@@ -113,6 +158,9 @@ final class ChatBubbleWindowController {
         }
 
         reposition()
+        if !model.entries.isEmpty {
+            setExpanded(true)
+        }
         panel?.makeKeyAndOrderFront(nil)
     }
 
@@ -154,8 +202,10 @@ final class ChatBubbleWindowController {
         streamTask?.cancel()
 
         model.text = ""
-        model.response = ""
+        model.status = "Thinking…"
         model.phase = .streaming
+        model.entries.append(ChatBubbleEntry(role: .user, text: userMessage))
+        model.entries.append(ChatBubbleEntry(role: .assistant, text: ""))
         setExpanded(true)
 
         appendToHistory(OllamaMessage(role: "user", content: userMessage))
@@ -167,15 +217,25 @@ final class ChatBubbleWindowController {
         activeStreamID = streamID
 
         streamTask = Task { [weak self] in
+            var streamed = ""
             do {
-                try await client.streamChat(history: messages) { token in
-                    model.response += token
-                }
+                try await client.streamChat(
+                    history: messages,
+                    onStatus: { status in model.status = status },
+                    onToken: { token in
+                        streamed += token
+                        model.appendToken(token)
+                    }
+                )
                 model.phase = .idle
             } catch is CancellationError {
                 // Bubble dismissed or a new message superseded this stream.
             } catch let error as URLError where error.code == .cancelled {
                 // URLSession reports Task cancellation as URLError.cancelled.
+            } catch OllamaError.missingAPIKey {
+                model.phase = .failed(
+                    "Web search needs an ollama.com API key — set OLLAMA_API_KEY or put it in ~/.ollama/api_key"
+                )
             } catch is URLError {
                 model.phase = .failed("Ollama not reachable")
             } catch {
@@ -185,12 +245,16 @@ final class ChatBubbleWindowController {
             // Record the exchange, unless a newer stream has taken over the
             // history bookkeeping since.
             guard let self, self.activeStreamID == streamID else { return }
-            if model.response.isEmpty {
+            if streamed.isEmpty {
                 // Nothing came back (error or cancelled early); drop the
-                // question so a retry doesn't duplicate it.
+                // question so a retry doesn't duplicate it, and the empty
+                // answer placeholder from the transcript.
                 self.history.removeLast()
+                if model.entries.last?.role == .assistant, model.entries.last?.text.isEmpty == true {
+                    model.entries.removeLast()
+                }
             } else {
-                self.appendToHistory(OllamaMessage(role: "assistant", content: model.response))
+                self.appendToHistory(OllamaMessage(role: "assistant", content: streamed))
             }
         }
     }
@@ -329,7 +393,7 @@ private struct ChatBubbleView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center) {
-                    Text("What can I help with?")
+                    Text("O rly?")
                         .font(.system(size: 14, weight: .semibold))
 
                     Spacer()
@@ -348,7 +412,6 @@ private struct ChatBubbleView: View {
                         .textFieldStyle(.roundedBorder)
                         .focused($inputIsFocused)
                         .onSubmit(submit)
-                        .disabled(model.isStreaming)
 
                     Button(action: submit) {
                         Image(systemName: "paperplane.fill")
@@ -359,9 +422,9 @@ private struct ChatBubbleView: View {
                     .accessibilityLabel("Send")
                 }
 
-                if model.phase != .idle || !model.response.isEmpty {
+                if model.phase != .idle || !model.entries.isEmpty {
                     Divider()
-                    responseArea
+                    transcriptArea
                 }
             }
             .padding(.top, model.tailEdge == .top ? 19 : 12)
@@ -375,36 +438,82 @@ private struct ChatBubbleView: View {
                 inputIsFocused = true
             }
         }
+        .onChange(of: model.isStreaming) { _, streaming in
+            if !streaming {
+                inputIsFocused = true
+            }
+        }
+    }
+
+    private var showsStatusRow: Bool {
+        guard model.isStreaming else { return false }
+        // Before the first token, or whenever a web search is in flight.
+        if model.entries.last?.text.isEmpty == true { return true }
+        return model.status.hasPrefix("Searching")
+    }
+
+    private var transcriptArea: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.entries) { entry in
+                        transcriptRow(for: entry)
+                    }
+
+                    if case .failed(let message) = model.phase {
+                        Label(message, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.red)
+                    }
+
+                    if showsStatusRow {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(model.status)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear
+                    .frame(height: 1)
+                    .id("bottom")
+            }
+            .onChange(of: model.entries) { _, _ in
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            .onChange(of: model.phase) { _, _ in
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            .onAppear {
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+        }
     }
 
     @ViewBuilder
-    private var responseArea: some View {
-        if case .failed(let message) = model.phase {
-            Label(message, systemImage: "exclamationmark.triangle.fill")
+    private func transcriptRow(for entry: ChatBubbleEntry) -> some View {
+        switch entry.role {
+        case .user:
+            Text(ChatTextFormatter.linkified(entry.text))
                 .font(.system(size: 12))
-                .foregroundStyle(.red)
-        } else if model.response.isEmpty {
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Thinking…")
+                .textSelection(.enabled)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 9)
+                        .fill(Color.accentColor.opacity(0.18))
+                )
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        case .assistant:
+            if !entry.text.isEmpty {
+                Text(ChatTextFormatter.linkified(entry.text))
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-        } else {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(model.response)
-                        .font(.system(size: 12))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Color.clear
-                        .frame(height: 1)
-                        .id("bottom")
-                }
-                .onChange(of: model.response) { _, _ in
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
