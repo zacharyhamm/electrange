@@ -99,7 +99,9 @@ struct GeminiClient: ChatClient {
 
     nonisolated static func makeSystemPrompt(userName: String?) -> String {
         guard let userName, !userName.isEmpty else { return systemPrompt }
-        return systemPrompt + " The owner you are chatting with is named \(userName)."
+        return systemPrompt
+            + " The owner you are chatting with is named \(userName), but there "
+            + "is no need to keep repeating their name — use it sparingly."
     }
 
     nonisolated static func makeRequestBody(
