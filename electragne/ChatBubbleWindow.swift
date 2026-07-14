@@ -169,6 +169,44 @@ private enum ChatTextMeasurer {
 /// text selection and opens links with the default browser.
 private struct LinkedText: NSViewRepresentable {
     let text: String
+    var fontSize: CGFloat = UserPreferences.defaultChatFontSize
+
+    /// Caches the formatted string and its measurements so repeated SwiftUI
+    /// update/sizing passes don't re-run markdown parsing, link detection,
+    /// and TextKit layout when nothing changed.
+    final class Coordinator {
+        private var cachedText: String?
+        private var cachedFontSize: CGFloat?
+        private var cachedDisplay: NSAttributedString?
+        private var sizesByWidth: [CGFloat: CGSize] = [:]
+        var appliedToView = false
+
+        func display(for text: String, size: CGFloat) -> NSAttributedString {
+            if let cachedDisplay, cachedText == text, cachedFontSize == size {
+                return cachedDisplay
+            }
+            let display = ChatTextFormatter.displayText(text, size: size)
+            cachedText = text
+            cachedFontSize = size
+            cachedDisplay = display
+            sizesByWidth = [:]
+            appliedToView = false
+            return display
+        }
+
+        func measuredSize(for display: NSAttributedString, width: CGFloat) -> CGSize {
+            if let cached = sizesByWidth[width] {
+                return cached
+            }
+            let size = ChatTextMeasurer.size(of: display, width: width)
+            sizesByWidth[width] = size
+            return size
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
     func makeNSView(context: Context) -> NSTextView {
         let view = NSTextView()
@@ -189,7 +227,11 @@ private struct LinkedText: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSTextView, context: Context) {
-        view.textStorage?.setAttributedString(ChatTextFormatter.displayText(text))
+        let display = context.coordinator.display(for: text, size: fontSize)
+        if !context.coordinator.appliedToView {
+            view.textStorage?.setAttributedString(display)
+            context.coordinator.appliedToView = true
+        }
     }
 
     func sizeThatFits(
@@ -199,7 +241,8 @@ private struct LinkedText: NSViewRepresentable {
     ) -> CGSize? {
         let width = proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
             ?? ChatBubblePlacement.defaultSize.width
-        return ChatTextMeasurer.size(of: ChatTextFormatter.displayText(text), width: width)
+        let display = context.coordinator.display(for: text, size: fontSize)
+        return context.coordinator.measuredSize(for: display, width: width)
     }
 }
 
@@ -224,8 +267,14 @@ private final class ChatBubbleModel {
     var phase: ChatBubblePhase = .idle
     var availableChats: [ChatSummary] = []
     var currentChatID: UUID?
+    var fontSize: CGFloat = UserPreferences.chatFontSize()
 
     var isStreaming: Bool { phase == .streaming }
+
+    func adjustFontSize(by delta: CGFloat) {
+        fontSize = (fontSize + delta).clamped(to: UserPreferences.chatFontSizeRange)
+        UserPreferences.setChatFontSize(fontSize)
+    }
 
     func appendToken(_ token: String) {
         guard let last = entries.indices.last, entries[last].role == .assistant else { return }
@@ -683,7 +732,9 @@ private struct ChatBubbleView: View {
 
                 if model.phase != .idle || !model.entries.isEmpty {
                     Divider()
-                    transcriptArea
+                    // A separate view so per-keystroke updates to model.text
+                    // don't re-evaluate (and re-measure) the transcript.
+                    ChatTranscriptView(model: model)
                 }
             }
             .padding(.top, model.tailEdge == .top ? 19 : 12)
@@ -692,6 +743,22 @@ private struct ChatBubbleView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .onExitCommand(perform: onDismiss)
+        .background {
+            // Invisible buttons so Cmd+/Cmd- adjust the chat font while the
+            // bubble is the key window ("+" is also reachable as Cmd-=).
+            Group {
+                Button("") { model.adjustFontSize(by: 1) }
+                    .keyboardShortcut("+", modifiers: .command)
+                Button("") { model.adjustFontSize(by: 1) }
+                    .keyboardShortcut("=", modifiers: .command)
+                Button("") { model.adjustFontSize(by: -1) }
+                    .keyboardShortcut("-", modifiers: .command)
+            }
+            .buttonStyle(.plain)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+        }
         .onAppear {
             DispatchQueue.main.async {
                 inputIsFocused = true
@@ -704,6 +771,17 @@ private struct ChatBubbleView: View {
         }
     }
 
+    private func submit() {
+        guard !trimmedText.isEmpty, !model.isStreaming else { return }
+        onSubmit(trimmedText)
+    }
+}
+
+/// The scrollable conversation. Kept separate from ChatBubbleView so typing
+/// (which mutates model.text every keystroke) doesn't re-render the rows.
+private struct ChatTranscriptView: View {
+    let model: ChatBubbleModel
+
     private var showsStatusRow: Bool {
         guard model.isStreaming else { return false }
         // Before the first token, or whenever a web search is in flight.
@@ -711,7 +789,7 @@ private struct ChatBubbleView: View {
         return model.status.hasPrefix("Searching")
     }
 
-    private var transcriptArea: some View {
+    var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
@@ -721,7 +799,7 @@ private struct ChatBubbleView: View {
 
                     if case .failed(let message) = model.phase {
                         Label(message, systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 12))
+                            .font(.system(size: model.fontSize))
                             .foregroundStyle(.red)
                     }
 
@@ -730,7 +808,7 @@ private struct ChatBubbleView: View {
                             ProgressView()
                                 .controlSize(.small)
                             Text(model.status)
-                                .font(.system(size: 12))
+                                .font(.system(size: model.fontSize))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
@@ -757,7 +835,7 @@ private struct ChatBubbleView: View {
     private func transcriptRow(for entry: ChatBubbleEntry) -> some View {
         switch entry.role {
         case .user:
-            LinkedText(text: entry.text)
+            LinkedText(text: entry.text, fontSize: model.fontSize)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(
@@ -767,15 +845,10 @@ private struct ChatBubbleView: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         case .assistant:
             if !entry.text.isEmpty {
-                LinkedText(text: entry.text)
+                LinkedText(text: entry.text, fontSize: model.fontSize)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-    }
-
-    private func submit() {
-        guard !trimmedText.isEmpty, !model.isStreaming else { return }
-        onSubmit(trimmedText)
     }
 }
 

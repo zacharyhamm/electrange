@@ -67,3 +67,36 @@ struct ChatStoreTests {
         #expect(store.load(id: UUID()) == nil)
     }
 }
+
+struct UserPreferencesTests {
+    @Test func preferredNameIsTrimmedAndBlankMeansUnset() throws {
+        let suite = "prefs-test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(UserPreferences.preferredName(in: defaults) == nil)
+
+        defaults.set("   ", forKey: UserPreferences.preferredNameKey)
+        #expect(UserPreferences.preferredName(in: defaults) == nil)
+
+        defaults.set("  Zed the Owner \n", forKey: UserPreferences.preferredNameKey)
+        #expect(UserPreferences.preferredName(in: defaults) == "Zed the Owner")
+    }
+
+    @Test func chatFontSizeDefaultsAndClamps() throws {
+        let suite = "font-test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(UserPreferences.chatFontSize(in: defaults) == UserPreferences.defaultChatFontSize)
+
+        UserPreferences.setChatFontSize(100, in: defaults)
+        #expect(UserPreferences.chatFontSize(in: defaults) == UserPreferences.chatFontSizeRange.upperBound)
+
+        UserPreferences.setChatFontSize(1, in: defaults)
+        #expect(UserPreferences.chatFontSize(in: defaults) == UserPreferences.chatFontSizeRange.lowerBound)
+
+        UserPreferences.setChatFontSize(16, in: defaults)
+        #expect(UserPreferences.chatFontSize(in: defaults) == 16)
+    }
+}

@@ -22,6 +22,21 @@ struct ElectragneApp: App {
         .windowResizability(.contentSize)
     }
 }
+struct SettingsView: View {
+    @AppStorage(UserPreferences.preferredNameKey) private var preferredName = ""
+
+    var body: some View {
+        Form {
+            TextField("Your name:", text: $preferredName)
+            Text("The pet calls you this when chatting. Leave empty to use your macOS account name.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .frame(width: 360)
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     weak var petWindow: NSWindow?
@@ -29,6 +44,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var geminiToggleMenuItem: NSMenuItem?
     private var isPetVisible = true
     private var summonHotkey: GlobalHotkey?
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create menu bar item
@@ -120,6 +136,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Increase Size", action: #selector(increaseSize), keyEquivalent: "+"))
         menu.addItem(NSMenuItem(title: "Decrease Size", action: #selector(decreaseSize), keyEquivalent: "-"))
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
 
         statusItem?.menu = menu
@@ -202,6 +219,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
     
+    @objc func openSettings() {
+        if settingsWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 360, height: 140),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Electragne Settings"
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: SettingsView())
+            window.center()
+            settingsWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
     @objc func quitApp() {
         NSApplication.shared.terminate(nil)
     }

@@ -135,8 +135,8 @@ struct OllamaClient: ChatClient {
     nonisolated static let defaultBaseURL = URL(string: "http://localhost:11434")!
     nonisolated static let defaultModel = "gemma4:latest"
     nonisolated static let systemPrompt = """
-        You are a highly intelligent sheep living as a desktop pet, chatting \
-        with your owner. Respond as if chatting: keep replies short and \
+        You are Baaz, a highly intelligent sheep living as a desktop pet, \
+        chatting with your owner. Respond as if chatting: keep replies short and \
         chat-sized — a sentence or two, or a brief list when that is clearer. \
         Markdown formatting is welcome: bold, italics, [title](url) links, \
         and bullet lists using "-"; avoid headings, tables, and code blocks. \
@@ -170,7 +170,8 @@ struct OllamaClient: ChatClient {
     var baseURL = defaultBaseURL
     var model = defaultModel
     var webSearch = OllamaWebSearch()
-    var userName: String? = detectedUserName()
+    /// Resolved per request so Settings changes apply immediately.
+    var userName: String? { UserPreferences.resolvedUserName() }
 
     private nonisolated struct ChatRequest: Encodable {
         struct Options: Encodable {
