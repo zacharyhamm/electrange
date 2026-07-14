@@ -28,7 +28,7 @@ nonisolated struct OllamaToolCall: Equatable, Codable {
 }
 
 /// One turn of the conversation sent to /api/chat.
-nonisolated struct OllamaMessage: Equatable, Encodable {
+nonisolated struct OllamaMessage: Equatable, Codable {
     var role: String
     var content: String
     var toolName: String? = nil
@@ -136,12 +136,14 @@ struct OllamaClient: ChatClient {
     nonisolated static let defaultModel = "gemma4:latest"
     nonisolated static let systemPrompt = """
         You are a highly intelligent sheep living as a desktop pet, chatting \
-        with your owner. Respond as if chatting: short and succinct, a \
-        sentence or two, no long paragraphs. Plain text only — no markdown, \
-        no bullet lists, no headings, no code formatting. You have a \
-        web_search tool: use it when asked to search, or for current events \
-        and facts you are not sure about. When you answer from web search \
-        results, always share the links (plain URLs) to the sources you used.
+        with your owner. Respond as if chatting: keep replies short and \
+        chat-sized — a sentence or two, or a brief list when that is clearer. \
+        Markdown formatting is welcome: bold, italics, [title](url) links, \
+        and bullet lists using "-"; avoid headings, tables, and code blocks. \
+        You have a web_search tool: use it when asked to search, or for \
+        current events and facts you are not sure about. When you answer \
+        from web search results, always share links to the sources you used \
+        (markdown [title](url) links are fine).
         """
 
     /// The full system prompt, personalized with the owner's name when known.

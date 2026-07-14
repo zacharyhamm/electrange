@@ -6,10 +6,16 @@ enum GeminiError: Error, Equatable {
     case missingAPIKey
 }
 
+/// One grounding source (search result) attached to a Gemini answer.
+struct GeminiSource: Equatable {
+    let title: String?
+    let uri: String
+}
+
 /// One decoded SSE data line from streamGenerateContent.
 struct GeminiChunk: Equatable {
     var text: String
-    var sourceURLs: [String] = []
+    var sources: [GeminiSource] = []
 }
 
 /// Streaming client for the Gemini API with Google Search grounding. Search
@@ -20,11 +26,12 @@ struct GeminiClient: ChatClient {
     nonisolated static let defaultModel = "gemini-3.1-flash-lite"
     nonisolated static let systemPrompt = """
         You are a highly intelligent sheep living as a desktop pet, chatting \
-        with your owner. Respond as if chatting: short and succinct, a \
-        sentence or two, no long paragraphs. Plain text only — no markdown, \
-        no bullet lists, no headings, no code formatting. You have Google \
-        Search available: use it when asked to search, or for current events \
-        and facts you are not sure about.
+        with your owner. Respond as if chatting: keep replies short and \
+        chat-sized — a sentence or two, or a brief list when that is clearer. \
+        Markdown formatting is welcome: bold, italics, [title](url) links, \
+        and bullet lists using "-"; avoid headings, tables, and code blocks. \
+        You have Google Search available: use it when asked to search, or \
+        for current events and facts you are not sure about.
         """
     /// Cap on grounding source links appended after a searched answer.
     nonisolated static let maxSourceLinks = 3
@@ -82,6 +89,7 @@ struct GeminiClient: ChatClient {
                 struct GroundingChunk: Decodable {
                     struct Web: Decodable {
                         let uri: String?
+                        let title: String?
                     }
 
                     let web: Web?
@@ -136,9 +144,24 @@ struct GeminiClient: ChatClient {
         }
 
         let text = (candidate.content?.parts ?? []).compactMap(\.text).joined()
-        let sources = (candidate.groundingMetadata?.groundingChunks ?? [])
-            .compactMap(\.web?.uri)
-        return GeminiChunk(text: text, sourceURLs: sources)
+        let sources = (candidate.groundingMetadata?.groundingChunks ?? []).compactMap { chunk in
+            chunk.web?.uri.map { GeminiSource(title: chunk.web?.title, uri: $0) }
+        }
+        return GeminiChunk(text: text, sources: sources)
+    }
+
+    /// Formats grounding sources as short markdown links so the long
+    /// grounding-redirect URLs don't fill the bubble.
+    nonisolated static func formatSources(_ sources: [GeminiSource]) -> String {
+        guard !sources.isEmpty else { return "" }
+        let links = sources.prefix(maxSourceLinks).map { source in
+            var title = source.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if title.isEmpty {
+                title = URLComponents(string: source.uri)?.host ?? source.uri
+            }
+            return "[\(title)](\(source.uri))"
+        }
+        return "\n\nSources: " + links.joined(separator: " · ")
     }
 
     /// The env var works for terminal launches; the key file works when the
@@ -184,21 +207,22 @@ struct GeminiClient: ChatClient {
                 : GeminiError.badStatus(http.statusCode)
         }
 
-        var sources: [String] = []
+        var sources: [GeminiSource] = []
         for try await line in bytes.lines {
             guard let chunk = Self.decodeChunk(fromLine: line) else { continue }
             if !chunk.text.isEmpty {
                 onToken(chunk.text)
             }
-            for source in chunk.sourceURLs where !sources.contains(source) {
+            for source in chunk.sources where !sources.contains(where: { $0.uri == source.uri }) {
                 sources.append(source)
             }
         }
 
-        // Grounding sources arrive as metadata, not text; append them so the
-        // bubble's linkifier makes them clickable.
-        if !sources.isEmpty {
-            onToken("\n\nSources:\n" + sources.prefix(Self.maxSourceLinks).joined(separator: "\n"))
+        // Grounding sources arrive as metadata, not text; append them as
+        // markdown links so the bubble renders short clickable titles.
+        let sourcesText = Self.formatSources(sources)
+        if !sourcesText.isEmpty {
+            onToken(sourcesText)
         }
     }
 }

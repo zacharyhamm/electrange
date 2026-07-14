@@ -35,9 +35,9 @@ struct ChatInteractionTests {
             visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900)
         )
 
-        #expect(placement.origin == CGPoint(x: 580, y: 44))
+        #expect(placement.origin == CGPoint(x: 560, y: 44))
         #expect(placement.tailEdge == .bottom)
-        #expect(placement.tailOffset == 140)
+        #expect(placement.tailOffset == 160)
     }
 
     @Test func bubbleClampsAtHorizontalScreenEdges() {
@@ -53,8 +53,8 @@ struct ChatInteractionTests {
 
         #expect(left.origin.x == 8)
         #expect(left.tailOffset == 28)
-        #expect(right.origin.x == 1152)
-        #expect(right.tailOffset == 252)
+        #expect(right.origin.x == 1112)
+        #expect(right.tailOffset == 292)
     }
 
     @Test func bubbleFlipsBelowPetNearTopOfScreen() {
@@ -63,9 +63,9 @@ struct ChatInteractionTests {
             visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900)
         )
 
-        #expect(placement.origin == CGPoint(x: 580, y: 694))
+        #expect(placement.origin == CGPoint(x: 560, y: 676))
         #expect(placement.tailEdge == .top)
-        #expect(placement.tailOffset == 140)
+        #expect(placement.tailOffset == 160)
     }
 
     @Test func expandedBubbleFlipsBelowPetAndClampsNearTopOfScreen() {
@@ -75,11 +75,11 @@ struct ChatInteractionTests {
             bubbleSize: ChatBubblePlacement.expandedSize
         )
 
-        // Desired y (below the pet) would be 820 - 4 - 300 = 516, which fits,
+        // Desired y (below the pet) would be 820 - 4 - 380 = 436, which fits,
         // and the taller bubble no longer fits above the pet.
-        #expect(placement.origin == CGPoint(x: 580, y: 516))
+        #expect(placement.origin == CGPoint(x: 550, y: 436))
         #expect(placement.tailEdge == .top)
-        #expect(placement.tailOffset == 140)
+        #expect(placement.tailOffset == 170)
     }
 
     @Test func summonPlacesPetInRightThirdOnTheGround() {
@@ -165,6 +165,51 @@ struct ChatInteractionTests {
         #expect(links.count == 2)
         #expect(links.contains(URL(string: "https://example.com/page?q=1")!))
         #expect(links.contains { $0.absoluteString.contains("ollama.com") })
+    }
+
+    @Test func chatTextRendersInlineMarkdown() {
+        let attributed = ChatTextFormatter.linkified(
+            "A **bold** claim!\nSee [KC Weather](https://example.com/wx) or https://openweather.org today."
+        )
+        let plain = String(attributed.characters)
+
+        // Markdown syntax is consumed, newline preserved.
+        #expect(plain == "A bold claim!\nSee KC Weather or https://openweather.org today.")
+
+        let boldRun = attributed.runs.first { run in
+            run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true
+        }
+        #expect(boldRun.map { String(attributed.characters[$0.range]) } == "bold")
+
+        let links = attributed.runs.compactMap { run in
+            run.link.map { (String(attributed.characters[run.range]), $0.absoluteString) }
+        }
+        #expect(links.contains { $0 == ("KC Weather", "https://example.com/wx") })
+        #expect(links.contains { $0 == ("https://openweather.org", "https://openweather.org") })
+    }
+
+    @Test @MainActor func displayTextCarriesFontsAndLinksForAppKit() throws {
+        let display = ChatTextFormatter.displayText(
+            "A **bold** [link](https://example.com/wx) here"
+        )
+
+        #expect(display.string == "A bold link here")
+
+        var foundBold = false
+        var foundLink = false
+        display.enumerateAttributes(
+            in: NSRange(location: 0, length: display.length)
+        ) { attributes, range, _ in
+            let segment = (display.string as NSString).substring(with: range)
+            if segment == "bold", let font = attributes[.font] as? NSFont {
+                foundBold = font.fontDescriptor.symbolicTraits.contains(.bold)
+            }
+            if segment == "link" {
+                foundLink = (attributes[.link] as? URL)?.absoluteString == "https://example.com/wx"
+            }
+        }
+        #expect(foundBold)
+        #expect(foundLink)
     }
 
     @Test func chatTextWithoutURLsHasNoLinks() {

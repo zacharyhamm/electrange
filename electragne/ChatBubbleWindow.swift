@@ -8,8 +8,10 @@ enum ChatBubbleTailEdge: Equatable {
 
 /// Pure placement result so screen-edge behavior can be unit tested without a window.
 struct ChatBubblePlacement: Equatable {
-    static let defaultSize = CGSize(width: 280, height: 122)
-    static let expandedSize = CGSize(width: 280, height: 300)
+    static let defaultSize = CGSize(width: 320, height: 140)
+    static let expandedSize = CGSize(width: 340, height: 380)
+    static let minPanelSize = CGSize(width: 320, height: 140)
+    static let maxPanelSize = CGSize(width: 720, height: 900)
     static let screenMargin: CGFloat = 8
     static let petGap: CGFloat = 4
 
@@ -58,28 +60,146 @@ enum ChatBubblePhase: Equatable {
     case failed(String)
 }
 
-/// Turns plain chat text into an AttributedString whose URLs are tappable
-/// links; SwiftUI Text opens them with the default browser.
+/// Renders chat text with inline markdown (bold, italics, [title](url)
+/// links) and makes bare URLs tappable; SwiftUI Text opens links with the
+/// default browser.
 enum ChatTextFormatter {
     nonisolated static func linkified(_ text: String) -> AttributedString {
-        guard let detector = try? NSDataDetector(
+        var attributed = (try? AttributedString(
+            markdown: text,
+            options: AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace
+            )
+        )) ?? AttributedString(text)
+
+        // Second pass: bare URLs the markdown parser left as plain text.
+        if let detector = try? NSDataDetector(
             types: NSTextCheckingResult.CheckingType.link.rawValue
-        ) else {
-            return AttributedString(text)
+        ) {
+            let plain = String(attributed.characters)
+            let fullRange = NSRange(plain.startIndex..., in: plain)
+            for match in detector.matches(in: plain, options: [], range: fullRange) {
+                guard let url = match.url,
+                      let range = Range(match.range, in: plain) else { continue }
+                let startOffset = plain.distance(from: plain.startIndex, to: range.lowerBound)
+                let length = plain.distance(from: range.lowerBound, to: range.upperBound)
+                let lower = attributed.index(attributed.startIndex, offsetByCharacters: startOffset)
+                let upper = attributed.index(lower, offsetByCharacters: length)
+                // Don't clobber markdown links.
+                guard !attributed[lower..<upper].runs.contains(where: { $0.link != nil }) else {
+                    continue
+                }
+                attributed[lower..<upper].link = url
+            }
         }
 
-        let source = NSMutableAttributedString(string: text)
-        let fullRange = NSRange(location: 0, length: source.length)
-        for match in detector.matches(in: text, options: [], range: fullRange) {
-            guard let url = match.url else { continue }
-            source.addAttribute(.link, value: url, range: match.range)
-        }
-
-        var attributed = AttributedString(source)
         for run in attributed.runs where run.link != nil {
             attributed[run.range].underlineStyle = .single
         }
         return attributed
+    }
+
+    /// AppKit rendition of `linkified` for NSTextView: inline presentation
+    /// intents become concrete fonts, links keep their `.link` attribute.
+    static func displayText(_ text: String, size: CGFloat = 12) -> NSAttributedString {
+        let attributed = linkified(text)
+        let base = NSFont.systemFont(ofSize: size)
+        let result = NSMutableAttributedString()
+
+        for run in attributed.runs {
+            let segment = String(attributed.characters[run.range])
+            var font = base
+            if let intent = run.inlinePresentationIntent {
+                if intent.contains(.code) {
+                    font = NSFont.monospacedSystemFont(ofSize: size - 1, weight: .regular)
+                } else {
+                    var traits: NSFontDescriptor.SymbolicTraits = []
+                    if intent.contains(.stronglyEmphasized) { traits.insert(.bold) }
+                    if intent.contains(.emphasized) { traits.insert(.italic) }
+                    if !traits.isEmpty {
+                        let descriptor = base.fontDescriptor.withSymbolicTraits(traits)
+                        font = NSFont(descriptor: descriptor, size: size) ?? base
+                    }
+                }
+            }
+
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.labelColor,
+            ]
+            if let link = run.link {
+                attributes[.link] = link
+            }
+            result.append(NSAttributedString(string: segment, attributes: attributes))
+        }
+        return result
+    }
+}
+
+/// Offscreen TextKit stack used to measure chat text. Measuring must never
+/// touch the displayed NSTextView's own text container: mutating it during
+/// SwiftUI's sizing probes leaves the container and frame inconsistent, which
+/// breaks reflow when the bubble is resized.
+@MainActor
+private enum ChatTextMeasurer {
+    private static let storage = NSTextStorage()
+    private static let manager = NSLayoutManager()
+    private static let container: NSTextContainer = {
+        let container = NSTextContainer(size: .zero)
+        container.lineFragmentPadding = 0
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
+        return container
+    }()
+
+    static func size(of attributed: NSAttributedString, width: CGFloat) -> CGSize {
+        storage.setAttributedString(attributed)
+        container.size = NSSize(width: max(width, 8), height: .greatestFiniteMagnitude)
+        manager.ensureLayout(for: container)
+        let used = manager.usedRect(for: container)
+        return CGSize(
+            width: min(used.width.rounded(.up), width),
+            height: used.height.rounded(.up)
+        )
+    }
+}
+
+/// Chat text rendered by NSTextView so links get the pointing-hand cursor on
+/// hover — SwiftUI Text can't change the cursor per-run. Also provides native
+/// text selection and opens links with the default browser.
+private struct LinkedText: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> NSTextView {
+        let view = NSTextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.drawsBackground = false
+        view.textContainerInset = .zero
+        view.textContainer?.lineFragmentPadding = 0
+        // Track the final SwiftUI-assigned frame so text re-wraps to the real
+        // width even when it differs from the last sizeThatFits probe.
+        view.textContainer?.widthTracksTextView = true
+        view.linkTextAttributes = [
+            .foregroundColor: NSColor.linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .cursor: NSCursor.pointingHand,
+        ]
+        return view
+    }
+
+    func updateNSView(_ view: NSTextView, context: Context) {
+        view.textStorage?.setAttributedString(ChatTextFormatter.displayText(text))
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView: NSTextView,
+        context: Context
+    ) -> CGSize? {
+        let width = proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            ?? ChatBubblePlacement.defaultSize.width
+        return ChatTextMeasurer.size(of: ChatTextFormatter.displayText(text), width: width)
     }
 }
 
@@ -102,6 +222,8 @@ private final class ChatBubbleModel {
     var entries: [ChatBubbleEntry] = []
     var status = "Thinking…"
     var phase: ChatBubblePhase = .idle
+    var availableChats: [ChatSummary] = []
+    var currentChatID: UUID?
 
     var isStreaming: Bool { phase == .streaming }
 
@@ -121,19 +243,40 @@ final class ChatBubbleWindowController {
     private let ollamaClient: OllamaClient
     private let geminiClient: GeminiClient
     private var streamTask: Task<Void, Never>?
-    /// Conversation memory for the app's lifetime; survives bubble dismissal.
-    /// Capped at the most recent messages to keep the request context small.
-    private var history: [OllamaMessage] = []
-    private static let maxHistoryMessages = 100
+    /// The active conversation; persisted after every exchange and reloaded
+    /// across app launches. Never trimmed — the request-time cap for the
+    /// local model happens in startStream.
+    private let chatStore: ChatStore
+    private var currentChat: StoredChat
+    /// Request cap for the local Ollama model (Gemini gets the full history).
+    private static let maxOllamaHistoryMessages = 100
     private var activeStreamID: UUID?
+
+    private var history: [OllamaMessage] {
+        get { currentChat.messages }
+        set { currentChat.messages = newValue }
+    }
 
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
     private var windowObservers: [NSObjectProtocol] = []
 
-    init(ollamaClient: OllamaClient = OllamaClient(), geminiClient: GeminiClient = GeminiClient()) {
+    init(
+        ollamaClient: OllamaClient = OllamaClient(),
+        geminiClient: GeminiClient = GeminiClient(),
+        chatStore: ChatStore = ChatStore()
+    ) {
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
+        self.chatStore = chatStore
+
+        // Resume the most recent chat across launches; start fresh otherwise.
+        if let recent = chatStore.listSummaries().first,
+           let chat = chatStore.load(id: recent.id) {
+            currentChat = chat
+        } else {
+            currentChat = StoredChat()
+        }
     }
 
     func present(
@@ -151,8 +294,11 @@ final class ChatBubbleWindowController {
             let bubbleView = ChatBubbleView(
                 model: model,
                 onDismiss: { [weak self] in self?.dismiss(notify: true) },
-                onSubmit: { [weak self] message in self?.startStream(userMessage: message) }
+                onSubmit: { [weak self] message in self?.startStream(userMessage: message) },
+                onNewChat: { [weak self] in self?.startNewChat() },
+                onSelectChat: { [weak self] id in self?.switchToChat(id: id) }
             )
+            refreshChatList()
             let panel = makePanel(rootView: bubbleView)
             self.panel = panel
             installEventMonitors()
@@ -210,12 +356,16 @@ final class ChatBubbleWindowController {
         model.entries.append(ChatBubbleEntry(role: .assistant, text: ""))
         setExpanded(true)
 
-        appendToHistory(OllamaMessage(role: "user", content: userMessage))
+        history.append(OllamaMessage(role: "user", content: userMessage))
 
         let useGemini = ChatProviderPreference.useGemini
         let client: any ChatClient = useGemini ? geminiClient : ollamaClient
         let model = model
-        let messages = history
+        // Gemini's context fits the whole conversation; only the local model
+        // needs a request-time cap. Storage and transcript are never trimmed.
+        let messages = useGemini
+            ? history
+            : Array(history.suffix(Self.maxOllamaHistoryMessages))
         let streamID = UUID()
         activeStreamID = streamID
 
@@ -263,21 +413,77 @@ final class ChatBubbleWindowController {
                     model.entries.removeLast()
                 }
             } else {
-                self.appendToHistory(OllamaMessage(role: "assistant", content: streamed))
+                self.history.append(OllamaMessage(role: "assistant", content: streamed))
+                self.persistCurrentChat()
             }
         }
     }
 
-    private func appendToHistory(_ message: OllamaMessage) {
-        history.append(message)
-        if history.count > Self.maxHistoryMessages {
-            history.removeFirst(history.count - Self.maxHistoryMessages)
+    private func persistCurrentChat() {
+        if currentChat.title.isEmpty,
+           let firstUserTurn = history.first(where: { $0.role == "user" }) {
+            currentChat.title = ChatStore.title(for: firstUserTurn.content)
         }
+        currentChat.updatedAt = Date()
+        chatStore.save(currentChat)
+        refreshChatList()
+    }
+
+    private func refreshChatList() {
+        model.availableChats = chatStore.listSummaries()
+        model.currentChatID = currentChat.id
+    }
+
+    private func startNewChat() {
+        streamTask?.cancel()
+        streamTask = nil
+        chatStore.save(currentChat)
+        currentChat = StoredChat()
+        model.entries = []
+        model.phase = .idle
+        refreshChatList()
+    }
+
+    private func switchToChat(id: UUID) {
+        guard id != currentChat.id, let chat = chatStore.load(id: id) else { return }
+        streamTask?.cancel()
+        streamTask = nil
+        chatStore.save(currentChat)
+        currentChat = chat
+        model.phase = .idle
+        model.entries = chat.messages.map { turn in
+            ChatBubbleEntry(role: turn.role == "user" ? .user : .assistant, text: turn.content)
+        }
+        refreshChatList()
+        setExpanded(true)
+    }
+
+    private static let savedWidthKey = "chatBubbleExpandedWidth"
+    private static let savedHeightKey = "chatBubbleExpandedHeight"
+
+    /// The expanded size, honoring whatever size the user last dragged the
+    /// bubble to.
+    private var expandedSize: CGSize {
+        let defaults = UserDefaults.standard
+        let width = defaults.double(forKey: Self.savedWidthKey)
+        let height = defaults.double(forKey: Self.savedHeightKey)
+        guard width >= ChatBubblePlacement.minPanelSize.width,
+              height >= ChatBubblePlacement.minPanelSize.height else {
+            return ChatBubblePlacement.expandedSize
+        }
+        return CGSize(width: width, height: height)
+    }
+
+    private func persistPanelSize() {
+        guard let panel else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(Double(panel.frame.width), forKey: Self.savedWidthKey)
+        defaults.set(Double(panel.frame.height), forKey: Self.savedHeightKey)
     }
 
     private func setExpanded(_ expanded: Bool) {
         guard let panel else { return }
-        let size = expanded ? ChatBubblePlacement.expandedSize : ChatBubblePlacement.defaultSize
+        let size = expanded ? expandedSize : ChatBubblePlacement.defaultSize
         guard panel.frame.size != size else { return }
         panel.setContentSize(size)
         reposition()
@@ -286,10 +492,12 @@ final class ChatBubbleWindowController {
     private func makePanel(rootView: ChatBubbleView) -> ChatBubblePanel {
         let panel = ChatBubblePanel(
             contentRect: CGRect(origin: .zero, size: ChatBubblePlacement.defaultSize),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .resizable],
             backing: .buffered,
             defer: false
         )
+        panel.minSize = ChatBubblePlacement.minPanelSize
+        panel.maxSize = ChatBubblePlacement.maxPanelSize
         panel.isReleasedWhenClosed = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -359,6 +567,20 @@ final class ChatBubbleWindowController {
             self?.reposition()
         }
         windowObservers.append(screenObserver)
+
+        // After the user drags the bubble to a new size, remember it and
+        // re-anchor so the tail points back at the pet.
+        if let panel {
+            let resizeObserver = center.addObserver(
+                forName: NSWindow.didEndLiveResizeNotification,
+                object: panel,
+                queue: .main
+            ) { [weak self] _ in
+                self?.persistPanelSize()
+                self?.reposition()
+            }
+            windowObservers.append(resizeObserver)
+        }
     }
 
     private func removeWindowObservers() {
@@ -383,6 +605,8 @@ private struct ChatBubbleView: View {
     @Bindable var model: ChatBubbleModel
     let onDismiss: () -> Void
     let onSubmit: (String) -> Void
+    let onNewChat: () -> Void
+    let onSelectChat: (UUID) -> Void
 
     @FocusState private var inputIsFocused: Bool
 
@@ -406,6 +630,32 @@ private struct ChatBubbleView: View {
                         .font(.system(size: 14, weight: .semibold))
 
                     Spacer()
+
+                    Menu {
+                        Button("New Chat", action: onNewChat)
+                        if !model.availableChats.isEmpty {
+                            Divider()
+                            ForEach(model.availableChats) { chat in
+                                Button {
+                                    onSelectChat(chat.id)
+                                } label: {
+                                    if chat.id == model.currentChatID {
+                                        Label(chat.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(chat.title)
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .accessibilityLabel("Chats")
 
                     Button(action: onDismiss) {
                         Image(systemName: "xmark")
@@ -507,9 +757,7 @@ private struct ChatBubbleView: View {
     private func transcriptRow(for entry: ChatBubbleEntry) -> some View {
         switch entry.role {
         case .user:
-            Text(ChatTextFormatter.linkified(entry.text))
-                .font(.system(size: 12))
-                .textSelection(.enabled)
+            LinkedText(text: entry.text)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(
@@ -519,9 +767,7 @@ private struct ChatBubbleView: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         case .assistant:
             if !entry.text.isEmpty {
-                Text(ChatTextFormatter.linkified(entry.text))
-                    .font(.system(size: 12))
-                    .textSelection(.enabled)
+                LinkedText(text: entry.text)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

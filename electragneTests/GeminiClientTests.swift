@@ -17,7 +17,28 @@ struct GeminiClientTests {
         let chunk = GeminiClient.decodeChunk(fromLine: line)
 
         #expect(chunk?.text == "87F")
-        #expect(chunk?.sourceURLs == ["https://example.com/wx", "https://example.org/kc"])
+        #expect(chunk?.sources == [
+            GeminiSource(title: "Weather", uri: "https://example.com/wx"),
+            GeminiSource(title: nil, uri: "https://example.org/kc"),
+        ])
+    }
+
+    @Test func formatsSourcesAsShortMarkdownLinks() {
+        let text = GeminiClient.formatSources([
+            GeminiSource(title: "kcstar.com", uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC"),
+            GeminiSource(title: nil, uri: "https://example.org/some/long/path"),
+        ])
+
+        #expect(text == "\n\nSources: [kcstar.com](https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC) · [example.org](https://example.org/some/long/path)")
+    }
+
+    @Test func sourceFormattingCapsCountAndHandlesEmpty() {
+        #expect(GeminiClient.formatSources([]) == "")
+
+        let many = (1...5).map { GeminiSource(title: "s\($0)", uri: "https://example.com/\($0)") }
+        let text = GeminiClient.formatSources(many)
+        #expect(text.contains("[s3]"))
+        #expect(!text.contains("[s4]"))
     }
 
     @Test func rejectsNonDataAndMalformedLines() {
