@@ -111,6 +111,51 @@ struct ChatInteractionTests {
         #expect(clamped == CGPoint(x: 0, y: 0))
     }
 
+    @Test func summonLeavesRestingPetsOnTheMainScreenInPlace() {
+        let mainScreen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let onMain = CGRect(x: 500, y: 0, width: 90, height: 90)
+
+        let stayPutStates: [PetState] = [
+            .walking,
+            .sleeping(phase: 1),
+            .walkingOnDock,
+            .walkingOnWindow,
+            .chatting(restingPlace: .ground),
+        ]
+        for state in stayPutStates {
+            #expect(!PetViewModel.shouldRelocateForSummon(
+                state: state, petFrame: onMain, mainScreenFrame: mainScreen
+            ))
+        }
+    }
+
+    @Test func summonRelocatesMovingPetsAndPetsOnOtherScreens() {
+        let mainScreen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let onMain = CGRect(x: 500, y: 0, width: 90, height: 90)
+        let onSecondScreen = CGRect(x: -800, y: 100, width: 90, height: 90)
+
+        let movingStates: [PetState] = [
+            .falling(velocity: 2, bounceCount: 0),
+            .jumping,
+            .jumpingToDock,
+            .jumpingToLedge,
+            .jumpingOffDock,
+            .climbingWindow,
+            .lookingDown,
+            .dragging(mouseOffset: .zero),
+        ]
+        for state in movingStates {
+            #expect(PetViewModel.shouldRelocateForSummon(
+                state: state, petFrame: onMain, mainScreenFrame: mainScreen
+            ))
+        }
+
+        // Even a resting pet relocates when it's on another screen.
+        #expect(PetViewModel.shouldRelocateForSummon(
+            state: .walking, petFrame: onSecondScreen, mainScreenFrame: mainScreen
+        ))
+    }
+
     @Test func chatTextTurnsURLsIntoLinks() {
         let attributed = ChatTextFormatter.linkified(
             "check https://example.com/page?q=1 or www.ollama.com for details"

@@ -262,12 +262,36 @@ class PetViewModel {
         return CGPoint(x: max(visibleFrame.minX, x), y: screenFrame.minY)
     }
 
-    /// Teleports the pet to the right third of the primary screen and opens
-    /// chat, whatever it was doing before (global-hotkey entry point).
+    /// A summoned pet stays put if it's already somewhere it can chat from on
+    /// the main screen (walking, sleeping, on the dock or a window top); it
+    /// relocates when it's mid-motion (jumping, falling, climbing, …) or on
+    /// any other screen. Pure so it can be unit tested.
+    nonisolated static func shouldRelocateForSummon(
+        state: PetState,
+        petFrame: CGRect,
+        mainScreenFrame: CGRect
+    ) -> Bool {
+        guard mainScreenFrame.intersects(petFrame) else { return true }
+        return state.chatRestingPlace == nil && !state.isChatting
+    }
+
+    /// Opens chat where the pet stands, or teleports it to the right third of
+    /// the primary screen first if needed (global-hotkey entry point).
     func summonToChat() {
         guard !isPaused,
               let window = petWindow,
               let screen = NSScreen.screens.first else { return }
+
+        guard Self.shouldRelocateForSummon(
+            state: state,
+            petFrame: window.frame,
+            mainScreenFrame: screen.frame
+        ) else {
+            if !state.isChatting {
+                beginChat()
+            }
+            return
+        }
 
         stopAllTimers()
         climbWindowID = nil
