@@ -15,7 +15,12 @@ struct ContentView: View {
 
 struct ElectragneView: View {
     @State private var viewModel = PetViewModel()
+    @State private var chatBubbleController = ChatBubbleWindowController()
+    @State private var pressStartMouseLocation: NSPoint?
     @AppStorage(PetSizeConstants.storageKey) private var petSize: Double = PetSizeConstants.defaultSize
+
+    /// Screen-space mouse travel below which a press counts as a click.
+    private static let dragActivationDistance: CGFloat = 3
 
     var body: some View {
         ZStack {
@@ -39,29 +44,59 @@ struct ElectragneView: View {
         .frame(width: petSize, height: petSize)
         .background(WindowAccessor { window in
             viewModel.petWindow = window
+            syncChatBubble()
         })
         .gesture(
+            // Click-vs-drag is decided from NSEvent.mouseLocation (screen
+            // space), not gesture-local coordinates: while the pet walks, the
+            // window moves under a stationary cursor, which reads as pointer
+            // movement in window space and would defeat a TapGesture.
             DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { _ in
                     let mouseLocation = NSEvent.mouseLocation
+                    if pressStartMouseLocation == nil {
+                        pressStartMouseLocation = mouseLocation
+                    }
 
                     if !viewModel.state.isDragging {
+                        guard let start = pressStartMouseLocation,
+                              hypot(mouseLocation.x - start.x, mouseLocation.y - start.y)
+                                  >= Self.dragActivationDistance,
+                              viewModel.state.canInteract,
+                              let window = viewModel.petWindow else { return }
                         // Calculate offset from mouse to window origin
-                        if viewModel.state.canInteract, let window = viewModel.petWindow {
-                            let offset = NSPoint(
-                                x: mouseLocation.x - window.frame.origin.x,
-                                y: mouseLocation.y - window.frame.origin.y
-                            )
-                            viewModel.startDragging(mouseOffset: offset)
-                        }
+                        let offset = NSPoint(
+                            x: mouseLocation.x - window.frame.origin.x,
+                            y: mouseLocation.y - window.frame.origin.y
+                        )
+                        viewModel.startDragging(mouseOffset: offset)
                     }
 
                     viewModel.updateWindowPosition(to: mouseLocation)
                 }
                 .onEnded { _ in
-                    viewModel.endDragging()
+                    defer { pressStartMouseLocation = nil }
+
+                    if viewModel.state.isDragging {
+                        viewModel.endDragging()
+                        return
+                    }
+
+                    let end = NSEvent.mouseLocation
+                    guard let start = pressStartMouseLocation,
+                          hypot(end.x - start.x, end.y - start.y) < Self.dragActivationDistance
+                    else { return }
+
+                    if viewModel.state.isChatting {
+                        viewModel.dismissChat()
+                    } else {
+                        viewModel.beginChat()
+                    }
                 }
         )
+        .onChange(of: viewModel.state) { _, _ in
+            syncChatBubble()
+        }
         .onAppear {
             viewModel.loadAnimations()
 
@@ -72,6 +107,24 @@ struct ElectragneView: View {
                 viewModel.startFalling()
             }
         }
+        .onDisappear {
+            chatBubbleController.dismiss(notify: false)
+        }
+    }
+
+    private func syncChatBubble() {
+        guard viewModel.state.isChatting, let window = viewModel.petWindow else {
+            chatBubbleController.dismiss(notify: false)
+            return
+        }
+
+        chatBubbleController.present(
+            anchoredTo: window,
+            onDismiss: { viewModel.dismissChat() },
+            onSubmit: { _ in
+                // Intentionally inert until the LLM integration is added.
+            }
+        )
     }
 }
 

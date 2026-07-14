@@ -217,6 +217,69 @@ class PetViewModel {
         startWalking()
     }
 
+    // MARK: - Chat
+
+    /// Stops the pet on its current surface and turns it toward the user.
+    func beginChat() {
+        guard let restingPlace = state.chatRestingPlace else { return }
+
+        stopAllTimers()
+        state = .chatting(restingPlace: restingPlace)
+        recordInteraction()
+
+        animationManager.playAnimationOnce(AnimationID.rotate1a.rawValue) { [weak self] in
+            self?.freezeFrontFacingFrame()
+        }
+        startDynamicAnimationTimer()
+    }
+
+    /// Closes chat and returns the pet to motion on the surface it was using.
+    func dismissChat() {
+        guard case .chatting(let restingPlace) = state else { return }
+        stopAllTimers()
+        resumeAfterChat(from: restingPlace)
+    }
+
+    private func freezeFrontFacingFrame() {
+        guard state.isChatting else { return }
+        animationTimer?.invalidate()
+        animationTimer = nil
+    }
+
+    private func resumeAfterChat(from restingPlace: ChatRestingPlace) {
+        switch restingPlace {
+        case .ground:
+            startWalking()
+
+        case .dock:
+            guard let window = petWindow, let screen = currentScreen else {
+                startFalling()
+                return
+            }
+            cachedDockInfo = dockDetector.getDockInfo(for: screen)
+            guard let dockInfo = cachedDockInfo,
+                  dockInfo.position == .bottom,
+                  dockInfo.containsX(window.frame.origin.x, petWidth: window.frame.width) else {
+                startFalling()
+                return
+            }
+            window.setFrameOrigin(NSPoint(x: window.frame.origin.x, y: dockInfo.frame.maxY))
+            startWalkingOnDock()
+
+        case .window:
+            guard let window = petWindow,
+                  let id = climbWindowID,
+                  let hostFrame = windowDetector.frame(ofWindow: id) else {
+                startFalling()
+                return
+            }
+            let clampedX = min(max(window.frame.origin.x, hostFrame.minX),
+                               hostFrame.maxX - window.frame.width)
+            window.setFrameOrigin(NSPoint(x: clampedX, y: hostFrame.maxY))
+            startWalkingOnWindow()
+        }
+    }
+
     func startJumping() {
         // The basic jump is animation-driven (updateBasicJumpMovement reads the
         // jump sprite's own movement curve), so it needs no ballistic arc — only
@@ -1052,6 +1115,17 @@ class PetViewModel {
     private func pause() {
         guard !isPaused else { return }
         isPaused = true
+
+        // Hiding the pet also closes chat. Save the corresponding resting
+        // state so showing it again resumes normal behavior without briefly
+        // reopening the bubble.
+        if case .chatting(let restingPlace) = state {
+            switch restingPlace {
+            case .ground: state = .walking
+            case .dock: state = .walkingOnDock
+            case .window: state = .walkingOnWindow
+            }
+        }
         stateBeforePause = state
         stopAllTimers()
         pauseChildWindows()
@@ -1106,6 +1180,8 @@ class PetViewModel {
         case .jumpingOffDock:
             startDynamicAnimationTimer()
             startJumpOffMovementTimer()
+        case .chatting:
+            break
         }
 
         stateBeforePause = nil

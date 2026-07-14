@@ -1,0 +1,81 @@
+import AppKit
+import Testing
+@testable import electragne
+
+struct ChatInteractionTests {
+    @Test func stableStatesMapToTheirChatSurface() {
+        #expect(PetState.walking.chatRestingPlace == .ground)
+        #expect(PetState.sleeping(phase: 2).chatRestingPlace == .ground)
+        #expect(PetState.walkingOnDock.chatRestingPlace == .dock)
+        #expect(PetState.walkingOnWindow.chatRestingPlace == .window)
+    }
+
+    @Test func movingAndTransitionalStatesCannotStartChat() {
+        let ineligibleStates: [PetState] = [
+            .falling(velocity: 1, bounceCount: 0),
+            .dragging(mouseOffset: .zero),
+            .jumping,
+            .jumpingToDock,
+            .jumpingToLedge,
+            .climbingWindow,
+            .lookingDown,
+            .jumpingOffDock,
+            .chatting(restingPlace: .ground),
+        ]
+
+        for state in ineligibleStates {
+            #expect(!state.canStartChat)
+            #expect(state.chatRestingPlace == nil)
+        }
+    }
+
+    @Test func bubbleIsCenteredAbovePetWhenThereIsRoom() {
+        let placement = ChatBubblePlacement.calculate(
+            petFrame: CGRect(x: 700, y: 0, width: 40, height: 40),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900)
+        )
+
+        #expect(placement.origin == CGPoint(x: 580, y: 44))
+        #expect(placement.tailEdge == .bottom)
+        #expect(placement.tailOffset == 140)
+    }
+
+    @Test func bubbleClampsAtHorizontalScreenEdges() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let left = ChatBubblePlacement.calculate(
+            petFrame: CGRect(x: 0, y: 100, width: 40, height: 40),
+            visibleFrame: screen
+        )
+        let right = ChatBubblePlacement.calculate(
+            petFrame: CGRect(x: 1400, y: 100, width: 40, height: 40),
+            visibleFrame: screen
+        )
+
+        #expect(left.origin.x == 8)
+        #expect(left.tailOffset == 28)
+        #expect(right.origin.x == 1152)
+        #expect(right.tailOffset == 252)
+    }
+
+    @Test func bubbleFlipsBelowPetNearTopOfScreen() {
+        let placement = ChatBubblePlacement.calculate(
+            petFrame: CGRect(x: 700, y: 820, width: 40, height: 40),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900)
+        )
+
+        #expect(placement.origin == CGPoint(x: 580, y: 694))
+        #expect(placement.tailEdge == .top)
+        #expect(placement.tailOffset == 140)
+    }
+
+    @Test func bubbleUsesOffsetDisplayCoordinates() {
+        let placement = ChatBubblePlacement.calculate(
+            petFrame: CGRect(x: -1400, y: 100, width: 40, height: 40),
+            visibleFrame: CGRect(x: -1440, y: 0, width: 1440, height: 900)
+        )
+
+        #expect(placement.origin == CGPoint(x: -1432, y: 144))
+        #expect(placement.tailEdge == .bottom)
+        #expect(placement.tailOffset == 52)
+    }
+}

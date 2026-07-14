@@ -26,6 +26,13 @@ struct Weak<T: AnyObject> {
 
 // MARK: - Pet State Machine
 
+/// The surface to return to after the user closes the chat bubble.
+enum ChatRestingPlace: Equatable {
+    case ground
+    case dock
+    case window
+}
+
 /// Represents the current state of the pet with associated data
 enum PetState: Equatable {
     case falling(velocity: CGFloat, bounceCount: Int)
@@ -40,6 +47,7 @@ enum PetState: Equatable {
     case walkingOnWindow         // Walking on top of an app window
     case lookingDown             // Peering over dock/window edge
     case jumpingOffDock          // Jumping down from dock or window top
+    case chatting(restingPlace: ChatRestingPlace)
 
     var isFalling: Bool {
         if case .falling = self { return true }
@@ -61,6 +69,29 @@ enum PetState: Equatable {
     var isDragging: Bool {
         if case .dragging = self { return true }
         return false
+    }
+
+    var isChatting: Bool {
+        if case .chatting = self { return true }
+        return false
+    }
+
+    /// Chat opens only while the pet is resting on a stable surface.
+    var canStartChat: Bool {
+        chatRestingPlace != nil
+    }
+
+    var chatRestingPlace: ChatRestingPlace? {
+        switch self {
+        case .walking, .sleeping:
+            return .ground
+        case .walkingOnDock:
+            return .dock
+        case .walkingOnWindow:
+            return .window
+        default:
+            return nil
+        }
     }
 
     var isJumping: Bool {
@@ -94,7 +125,7 @@ enum PetState: Equatable {
         switch self {
         case .falling, .walking, .walkingOnDock, .sleeping, .jumping, .climbingWindow, .walkingOnWindow:
             return true
-        case .dragging, .jumpingToDock, .jumpingToLedge, .lookingDown, .jumpingOffDock:
+        case .dragging, .jumpingToDock, .jumpingToLedge, .lookingDown, .jumpingOffDock, .chatting:
             return false
         }
     }
