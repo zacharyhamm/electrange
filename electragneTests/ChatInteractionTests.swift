@@ -82,6 +82,35 @@ struct ChatInteractionTests {
         #expect(placement.tailOffset == 140)
     }
 
+    @Test func summonPlacesPetInRightThirdOnTheGround() {
+        let origin = PetViewModel.summonOrigin(
+            petSize: 90,
+            screenFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875)
+        )
+
+        // Right third spans x 960...1440; the pet (90 wide) centers at 1155.
+        #expect(origin == CGPoint(x: 1155, y: 0))
+    }
+
+    @Test func summonRespectsOffsetScreensAndOversizedPets() {
+        let offset = PetViewModel.summonOrigin(
+            petSize: 90,
+            screenFrame: CGRect(x: -1440, y: -100, width: 1440, height: 900),
+            visibleFrame: CGRect(x: -1440, y: -100, width: 1440, height: 875)
+        )
+        #expect(offset == CGPoint(x: -285, y: -100))
+
+        // A pet absurdly wider than the screen clamps to the left edge
+        // instead of being pushed off-screen by the centering math.
+        let clamped = PetViewModel.summonOrigin(
+            petSize: 3000,
+            screenFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875)
+        )
+        #expect(clamped == CGPoint(x: 0, y: 0))
+    }
+
     @Test func chatTextTurnsURLsIntoLinks() {
         let attributed = ChatTextFormatter.linkified(
             "check https://example.com/page?q=1 or www.ollama.com for details"

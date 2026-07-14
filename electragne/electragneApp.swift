@@ -5,6 +5,7 @@
 //  Created by zacharyhamm on 2/3/26.
 //
 
+import Carbon.HIToolbox
 import SwiftUI
 
 @main
@@ -26,10 +27,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     weak var petWindow: NSWindow?
     private var toggleVisibilityMenuItem: NSMenuItem?
     private var isPetVisible = true
+    private var summonHotkey: GlobalHotkey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create menu bar item
         setupMenuBar()
+
+        // Cmd-Shift-E anywhere summons the pet for a chat
+        summonHotkey = GlobalHotkey(
+            keyCode: kVK_ANSI_E,
+            modifiers: cmdKey | shiftKey
+        ) { [weak self] in
+            self?.summonPetToChat()
+        }
 
         // Delay window configuration to ensure SwiftUI has finished its initial layout pass
         // Using asyncAfter to give SwiftUI time to complete layout
@@ -88,6 +98,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         toggleVisibilityMenuItem = toggleItem
         menu.addItem(toggleItem)
 
+        let chatItem = NSMenuItem(
+            title: "Chat with Pet",
+            action: #selector(summonPetToChatFromMenu),
+            keyEquivalent: "E"
+        )
+        chatItem.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(chatItem)
+
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Increase Size", action: #selector(increaseSize), keyEquivalent: "+"))
         menu.addItem(NSMenuItem(title: "Decrease Size", action: #selector(decreaseSize), keyEquivalent: "-"))
@@ -95,6 +113,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
 
         statusItem?.menu = menu
+    }
+
+    @objc func summonPetToChatFromMenu() {
+        summonPetToChat()
+    }
+
+    private func summonPetToChat() {
+        if !isPetVisible {
+            toggleVisibility()
+        }
+        // The chat text field can only take keystrokes if the app is active.
+        NSApp.activate(ignoringOtherApps: true)
+        NotificationCenter.default.post(name: .petShouldSummonChat, object: nil)
     }
 
     @objc func toggleVisibility() {

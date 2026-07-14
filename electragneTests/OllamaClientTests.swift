@@ -87,6 +87,26 @@ struct OllamaClientTests {
         }
     }
 
+    @Test func systemPromptIncludesUserNameWhenKnown() throws {
+        #expect(OllamaClient.makeSystemPrompt(userName: nil) == OllamaClient.systemPrompt)
+        #expect(OllamaClient.makeSystemPrompt(userName: "") == OllamaClient.systemPrompt)
+
+        let personalized = OllamaClient.makeSystemPrompt(userName: "Zachary Hamm")
+        #expect(personalized.hasPrefix(OllamaClient.systemPrompt))
+        #expect(personalized.contains("named Zachary Hamm"))
+
+        let body = try OllamaClient.makeRequestBody(
+            model: "gemma4:latest",
+            history: [],
+            userName: "Zachary Hamm"
+        )
+        let json = try #require(
+            try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        let messages = try #require(json["messages"] as? [[String: Any]])
+        #expect((messages[0]["content"] as? String)?.contains("Zachary Hamm") == true)
+    }
+
     @Test func requestBodyDeclaresWebSearchTool() throws {
         let body = try OllamaClient.makeRequestBody(model: "gemma4:latest", history: [])
 

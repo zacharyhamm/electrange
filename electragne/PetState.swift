@@ -12,6 +12,7 @@ import Foundation
 extension Notification.Name {
     static let petShouldPause = Notification.Name("petShouldPause")
     static let petShouldResume = Notification.Name("petShouldResume")
+    static let petShouldSummonChat = Notification.Name("petShouldSummonChat")
 }
 
 // MARK: - Weak Reference Wrapper

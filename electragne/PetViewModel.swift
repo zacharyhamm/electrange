@@ -105,6 +105,12 @@ class PetViewModel {
         )
         NotificationCenter.default.addObserver(
             self,
+            selector: #selector(handleSummonChatNotification),
+            name: .petShouldSummonChat,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
             selector: #selector(handleScreenParametersChange),
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
@@ -127,6 +133,10 @@ class PetViewModel {
             stopAllTimers()
             startFalling()
         }
+    }
+
+    @objc private func handleSummonChatNotification() {
+        summonToChat()
     }
 
     @objc private func handlePauseNotification() {
@@ -238,6 +248,46 @@ class PetViewModel {
         guard case .chatting(let restingPlace) = state else { return }
         stopAllTimers()
         resumeAfterChat(from: restingPlace)
+    }
+
+    /// Where the pet stands when summoned: centered in the right third of the
+    /// screen, on the ground. Pure so it can be unit tested.
+    nonisolated static func summonOrigin(
+        petSize: CGFloat,
+        screenFrame: CGRect,
+        visibleFrame: CGRect
+    ) -> CGPoint {
+        let thirdWidth = visibleFrame.width / 3
+        let x = visibleFrame.maxX - thirdWidth + (thirdWidth - petSize) / 2
+        return CGPoint(x: max(visibleFrame.minX, x), y: screenFrame.minY)
+    }
+
+    /// Teleports the pet to the right third of the primary screen and opens
+    /// chat, whatever it was doing before (global-hotkey entry point).
+    func summonToChat() {
+        guard !isPaused,
+              let window = petWindow,
+              let screen = NSScreen.screens.first else { return }
+
+        stopAllTimers()
+        climbWindowID = nil
+        landOnWindowsWhileFalling = false
+
+        let origin = Self.summonOrigin(
+            petSize: window.frame.width,
+            screenFrame: screen.frame,
+            visibleFrame: screen.visibleFrame
+        )
+        window.setFrameOrigin(origin)
+
+        if state.isChatting {
+            // Bubble is already open and follows the window move; the pet now
+            // rests on the ground regardless of where chat started.
+            state = .chatting(restingPlace: .ground)
+            return
+        }
+        state = .walking
+        beginChat()
     }
 
     private func freezeFrontFacingFrame() {

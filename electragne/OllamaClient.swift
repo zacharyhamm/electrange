@@ -143,6 +143,20 @@ struct OllamaClient {
         and facts you are not sure about. When you answer from web search \
         results, always share the links (plain URLs) to the sources you used.
         """
+
+    /// The full system prompt, personalized with the owner's name when known.
+    nonisolated static func makeSystemPrompt(userName: String?) -> String {
+        guard let userName, !userName.isEmpty else { return systemPrompt }
+        return systemPrompt + " The owner you are chatting with is named \(userName)."
+    }
+
+    /// The owner's name from macOS account info, for the system prompt.
+    nonisolated static func detectedUserName() -> String? {
+        let fullName = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fullName.isEmpty { return fullName }
+        let shortName = NSUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+        return shortName.isEmpty ? nil : shortName
+    }
     /// Ollama defaults num_ctx to a few thousand tokens; raise it so long
     /// conversations keep their earlier turns in context.
     nonisolated static let contextWindowTokens = 32768
@@ -152,6 +166,7 @@ struct OllamaClient {
     var baseURL = defaultBaseURL
     var model = defaultModel
     var webSearch = OllamaWebSearch()
+    var userName: String? = detectedUserName()
 
     private nonisolated struct ChatRequest: Encodable {
         struct Options: Encodable {
@@ -222,10 +237,15 @@ struct OllamaClient {
         let done: Bool?
     }
 
-    nonisolated static func makeRequestBody(model: String, history: [OllamaMessage]) throws -> Data {
+    nonisolated static func makeRequestBody(
+        model: String,
+        history: [OllamaMessage],
+        userName: String? = nil
+    ) throws -> Data {
         let request = ChatRequest(
             model: model,
-            messages: [OllamaMessage(role: "system", content: systemPrompt)] + history,
+            messages: [OllamaMessage(role: "system", content: makeSystemPrompt(userName: userName))]
+                + history,
             stream: true,
             options: ChatRequest.Options(numCtx: contextWindowTokens),
             tools: [webSearchTool]
@@ -264,7 +284,11 @@ struct OllamaClient {
             var request = URLRequest(url: baseURL.appendingPathComponent("api/chat"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try Self.makeRequestBody(model: model, history: messages)
+            request.httpBody = try Self.makeRequestBody(
+                model: model,
+                history: messages,
+                userName: userName
+            )
 
             let (bytes, response) = try await URLSession.shared.bytes(for: request)
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
