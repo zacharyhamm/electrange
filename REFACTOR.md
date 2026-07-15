@@ -16,7 +16,7 @@ independently landable).
 | A2 | Single window-wiring path, `ClickDragClassifier`, shared `AnimationPlayback` | **Done** |
 | A3 | Environment seams for the pet core | **Done** |
 | A4 | Pure per-state movement policies + characterization tests | **Done** |
-| A5 | Behavior controllers + declarative timers | Pending |
+| A5 | Behavior controllers + declarative timers | **Done** |
 | B1 | Chat transport seam + config + first streaming tests | Pending |
 | B2 | Neutral `ChatMessage` + shared `ChatProviderEngine` | Pending |
 | B3 | `ChatBubbleWindowController` slim-down | Pending |
@@ -158,6 +158,11 @@ arithmetic) into a pure `IdleBehaviorPolicy` with an injected roll.
 climb, dock, jumps).
 
 ## A5 — Behavior controllers + declarative timers
+
+**Status: Done.** Pause normalization is pure and characterized; every
+`PetState` now maps through one behavior factory. State entry and resume both
+apply the behavior's declarative `TimerNeeds`, and the old per-state timer
+starters, update methods, and 13-case resume switch have been removed.
 
 Goal: kill the duplicated timer knowledge — each `start*()` method's
 ritual and the 13-case `resume()` switch collapse into one declarative
