@@ -19,7 +19,7 @@ independently landable).
 | A5 | Behavior controllers + declarative timers | **Done** |
 | B1 | Chat transport seam + config + first streaming tests | **Done** |
 | B2 | Neutral `ChatMessage` + shared `ChatProviderEngine` | **Done** |
-| B3 | `ChatBubbleWindowController` slim-down | Pending |
+| B3 | `ChatBubbleWindowController` slim-down | **Done** |
 
 Learnings that changed the original plan:
 
@@ -333,6 +333,10 @@ final class ChatProviderEngine: ChatClient { /* round loop, trimming, fan-out */
 lands in the same commit as the type swap.
 
 ## B3 — `ChatBubbleWindowController` slim-down
+
+**Status: Done.** The controller now receives one `ChatToolRouter`, and
+`ConfirmationBroker` owns continuation approval, cancellation, and superseding
+with focused tests for each path.
 
 1. Replace the 8-executor-parameter init with a single injected
    `ChatToolRouter` (C2's dispatch table already exists; tests inject

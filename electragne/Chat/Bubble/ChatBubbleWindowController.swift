@@ -20,7 +20,7 @@ final class ChatBubbleWindowController {
     private let geminiClient: GeminiClient
     private let toolRouter: ChatToolRouter
     private var streamTask: Task<Void, Never>?
-    private var confirmationContinuation: CheckedContinuation<Bool, Never>?
+    private let confirmationBroker = ConfirmationBroker()
     /// The active conversation; persisted after every exchange and reloaded
     /// across app launches. Never trimmed — the request-time cap for the
     /// local model happens in startStream.
@@ -40,24 +40,12 @@ final class ChatBubbleWindowController {
     init(
         ollamaClient: OllamaClient = OllamaClient(),
         geminiClient: GeminiClient = GeminiClient(),
-        reminderToolExecutor: (any ReminderToolExecuting)? = nil,
-        notesToolExecutor: (any NotesToolExecuting)? = nil,
-        desktopToolExecutor: (any DesktopToolExecuting)? = nil,
-        timerToolExecutor: (any TimerToolExecuting)? = nil,
-        gmailToolExecutor: (any GmailToolExecuting)? = nil,
-        calendarToolExecutor: (any CalendarToolExecuting)? = nil,
+        toolRouter: ChatToolRouter,
         chatStore: ChatStore = ChatStore()
     ) {
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
-        self.toolRouter = ChatToolRouter(
-            reminderExecutor: reminderToolExecutor ?? AppleReminderService(),
-            notesExecutor: notesToolExecutor ?? AppleNotesService(),
-            desktopExecutor: desktopToolExecutor ?? DesktopToolService(),
-            timerExecutor: timerToolExecutor ?? TimerToolService(),
-            gmailExecutor: gmailToolExecutor,
-            calendarExecutor: calendarToolExecutor
-        )
+        self.toolRouter = toolRouter
         self.chatStore = chatStore
 
         // Resume the most recent chat across launches; start fresh otherwise.
@@ -217,33 +205,22 @@ final class ChatBubbleWindowController {
     }
 
     private func requestConfirmation(_ details: ToolConfirmationDetails) async -> Bool {
+        let id = UUID()
         model.pendingToolConfirmation = PendingToolConfirmation(
-            id: UUID(),
+            id: id,
             details: details
         )
         model.status = "Confirm action…"
-        let approved = await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                if Task.isCancelled {
-                    model.pendingToolConfirmation = nil
-                    continuation.resume(returning: false)
-                } else {
-                    confirmationContinuation = continuation
-                }
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.resolveToolConfirmation(approved: false)
-            }
+        let approved = await confirmationBroker.request()
+        if model.pendingToolConfirmation?.id == id {
+            model.pendingToolConfirmation = nil
         }
         return approved && !Task.isCancelled
     }
 
     private func resolveToolConfirmation(approved: Bool) {
         model.pendingToolConfirmation = nil
-        guard let continuation = confirmationContinuation else { return }
-        confirmationContinuation = nil
-        continuation.resume(returning: approved)
+        confirmationBroker.resolve(approved: approved)
     }
 
     private func persistCurrentChat() {

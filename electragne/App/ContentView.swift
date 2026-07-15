@@ -18,7 +18,7 @@ struct ContentView: View {
 
 struct ElectragneView: View {
     let viewModel: PetViewModel
-    @State private var chatBubbleController = ChatBubbleWindowController()
+    @State private var chatBubbleController = ChatBubbleWindowController(toolRouter: ChatToolRouter())
     @State private var pressStartMouseLocation: NSPoint?
     @AppStorage(PetSizeConstants.storageKey) private var petSize: Double = PetSizeConstants.defaultSize
 

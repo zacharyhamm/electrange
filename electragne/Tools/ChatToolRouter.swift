@@ -4,6 +4,15 @@ import Foundation
 final class ChatToolRouter {
     private let executors: [ChatToolFamily: any ToolExecuting]
 
+    convenience init() {
+        self.init(
+            reminderExecutor: AppleReminderService(),
+            notesExecutor: AppleNotesService(),
+            desktopExecutor: DesktopToolService(),
+            timerExecutor: TimerToolService()
+        )
+    }
+
     init(
         reminderExecutor: any ReminderToolExecuting,
         notesExecutor: any NotesToolExecuting,
