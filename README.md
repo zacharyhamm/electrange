@@ -1,5 +1,12 @@
 Electrange, an electric sheep for macOS.
 
+(A note on spelling: the GitHub repo is "electrange", the Xcode target and
+bundle identifier use "electragne", and the app presents itself as
+"Electragne". This is historical accident, not a typo in any one place; the
+internal "electragne" spelling is consistent throughout the code and is
+intentionally left alone because renaming the target/bundle id would
+invalidate stored Keychain items and preferences.)
+
 A "desktop pet", based on the old "esheep.exe" for Windows. It was built by
 tasking claude code (Opus 4.5) with porting functionality from
 https://github.com/Adrianotiger/desktopPet over to macOS, and then lots of

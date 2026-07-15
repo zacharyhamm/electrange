@@ -1,0 +1,320 @@
+//
+//  ChatBubbleViews.swift
+//  electragne
+//
+//  SwiftUI views for the chat bubble: the bubble itself, the transcript,
+//  and the speech-bubble shape.
+//
+
+import SwiftUI
+
+struct ChatBubbleView: View {
+    @Bindable var model: ChatBubbleModel
+    let onDismiss: () -> Void
+    let onSubmit: (String) -> Void
+    let onNewChat: () -> Void
+    let onSelectChat: (UUID) -> Void
+    let onConfirmTool: () -> Void
+    let onCancelTool: () -> Void
+
+    @FocusState private var inputIsFocused: Bool
+
+    private var trimmedText: String {
+        model.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        ZStack {
+            ChatBubbleShape(edge: model.tailEdge, tailOffset: model.tailOffset)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .overlay {
+                    ChatBubbleShape(edge: model.tailEdge, tailOffset: model.tailOffset)
+                        .stroke(Color.primary.opacity(0.7), lineWidth: 1.5)
+                }
+                .shadow(color: .black.opacity(0.16), radius: 4, y: 2)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center) {
+                    Text("sheepchat. baaa.")
+                        .font(.system(size: 14, weight: .semibold))
+
+                    Spacer()
+
+                    Menu {
+                        Button("New Chat", action: onNewChat)
+                        if !model.availableChats.isEmpty {
+                            Divider()
+                            ForEach(model.availableChats) { chat in
+                                Button {
+                                    onSelectChat(chat.id)
+                                } label: {
+                                    if chat.id == model.currentChatID {
+                                        Label(chat.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(chat.title)
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .accessibilityLabel("Chats")
+
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close chat")
+                }
+
+                HStack(spacing: 8) {
+                    TextField("Ask me anything…", text: $model.text)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($inputIsFocused)
+                        .onSubmit(submit)
+
+                    Button(action: submit) {
+                        Image(systemName: "paperplane.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(trimmedText.isEmpty || model.isStreaming)
+                    .accessibilityLabel("Send")
+                }
+
+                if model.phase != .idle || !model.entries.isEmpty {
+                    Divider()
+                    // A separate view so per-keystroke updates to model.text
+                    // don't re-evaluate (and re-measure) the transcript.
+                    ChatTranscriptView(
+                        model: model,
+                        onConfirmTool: onConfirmTool,
+                        onCancelTool: onCancelTool
+                    )
+                }
+            }
+            .padding(.top, model.tailEdge == .top ? 19 : 12)
+            .padding(.bottom, model.tailEdge == .bottom ? 19 : 12)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .onExitCommand(perform: onDismiss)
+        .background {
+            // Window-scoped shortcuts. Invisible buttons let SwiftUI route
+            // them while the chat panel is the key window.
+            Group {
+                Button("", action: onNewChat)
+                    .keyboardShortcut("n", modifiers: .command)
+                Button("") { model.adjustFontSize(by: 1) }
+                    .keyboardShortcut("+", modifiers: .command)
+                Button("") { model.adjustFontSize(by: 1) }
+                    .keyboardShortcut("=", modifiers: .command)
+                Button("") { model.adjustFontSize(by: -1) }
+                    .keyboardShortcut("-", modifiers: .command)
+            }
+            .buttonStyle(.plain)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+        }
+        .onAppear {
+            DispatchQueue.main.async {
+                inputIsFocused = true
+            }
+        }
+        .onChange(of: model.isStreaming) { _, streaming in
+            if !streaming {
+                inputIsFocused = true
+            }
+        }
+    }
+
+    private func submit() {
+        guard !trimmedText.isEmpty, !model.isStreaming else { return }
+        onSubmit(trimmedText)
+    }
+}
+
+/// The scrollable conversation. Kept separate from ChatBubbleView so typing
+/// (which mutates model.text every keystroke) doesn't re-render the rows.
+private struct ChatTranscriptView: View {
+    let model: ChatBubbleModel
+    let onConfirmTool: () -> Void
+    let onCancelTool: () -> Void
+
+    private var showsStatusRow: Bool {
+        guard model.isStreaming else { return false }
+        guard model.pendingToolConfirmation == nil else { return false }
+        // Before the first token, or whenever a web search is in flight.
+        if model.entries.last?.text.isEmpty == true { return true }
+        return model.status.hasPrefix("Searching")
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.entries) { entry in
+                        transcriptRow(for: entry)
+                    }
+
+                    if let confirmation = model.pendingToolConfirmation {
+                        toolConfirmationCard(confirmation)
+                    }
+
+                    if case .failed(let message) = model.phase {
+                        Label(message, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: model.fontSize))
+                            .foregroundStyle(.red)
+                    }
+
+                    if showsStatusRow {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(model.status)
+                                .font(.system(size: model.fontSize))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear
+                    .frame(height: 1)
+                    .id("bottom")
+            }
+            .onChange(of: model.entries) { _, _ in
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            .onChange(of: model.phase) { _, _ in
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            .onChange(of: model.pendingToolConfirmation) { _, _ in
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            .onAppear {
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+        }
+    }
+
+    private func toolConfirmationCard(
+        _ confirmation: PendingToolConfirmation
+    ) -> some View {
+        let details = confirmation.details
+        return VStack(alignment: .leading, spacing: 7) {
+            Label(details.title, systemImage: "checkmark.shield")
+                .font(.system(size: model.fontSize, weight: .semibold))
+
+            Text(details.primaryText)
+                .font(.system(size: model.fontSize, weight: .medium))
+                .textSelection(.enabled)
+
+            ForEach(Array(details.details.enumerated()), id: \.offset) { _, detail in
+                detailRow(label: detail.label, value: detail.value)
+            }
+
+            HStack {
+                Button("Cancel", action: onCancelTool)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button(details.actionLabel, action: onConfirmTool)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.secondary.opacity(0.35))
+        )
+    }
+
+    private func detailRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text("\(label):")
+                .foregroundStyle(.secondary)
+            Text(value)
+                .textSelection(.enabled)
+        }
+        .font(.system(size: model.fontSize))
+    }
+
+    @ViewBuilder
+    private func transcriptRow(for entry: ChatBubbleEntry) -> some View {
+        switch entry.role {
+        case .user:
+            LinkedText(text: entry.text, fontSize: model.fontSize)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 9)
+                        .fill(Color.accentColor.opacity(0.18))
+                )
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        case .assistant:
+            if !entry.text.isEmpty {
+                LinkedText(text: entry.text, fontSize: model.fontSize)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+private struct ChatBubbleShape: Shape {
+    let edge: ChatBubbleTailEdge
+    let tailOffset: CGFloat
+
+    private let tailHeight: CGFloat = 10
+    private let tailHalfWidth: CGFloat = 9
+    private let cornerRadius: CGFloat = 13
+
+    func path(in rect: CGRect) -> Path {
+        let bodyRect: CGRect
+        switch edge {
+        case .top:
+            bodyRect = CGRect(
+                x: rect.minX,
+                y: rect.minY + tailHeight,
+                width: rect.width,
+                height: rect.height - tailHeight
+            )
+        case .bottom:
+            bodyRect = CGRect(
+                x: rect.minX,
+                y: rect.minY,
+                width: rect.width,
+                height: rect.height - tailHeight
+            )
+        }
+
+        var path = Path(roundedRect: bodyRect, cornerRadius: cornerRadius)
+        var tail = Path()
+        switch edge {
+        case .top:
+            tail.move(to: CGPoint(x: tailOffset - tailHalfWidth, y: bodyRect.minY + 1))
+            tail.addLine(to: CGPoint(x: tailOffset, y: rect.minY))
+            tail.addLine(to: CGPoint(x: tailOffset + tailHalfWidth, y: bodyRect.minY + 1))
+        case .bottom:
+            tail.move(to: CGPoint(x: tailOffset - tailHalfWidth, y: bodyRect.maxY - 1))
+            tail.addLine(to: CGPoint(x: tailOffset, y: rect.maxY))
+            tail.addLine(to: CGPoint(x: tailOffset + tailHalfWidth, y: bodyRect.maxY - 1))
+        }
+        tail.closeSubpath()
+        path.addPath(tail)
+        return path
+    }
+}

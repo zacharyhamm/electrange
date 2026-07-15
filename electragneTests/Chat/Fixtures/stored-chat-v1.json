@@ -1,0 +1,18 @@
+{
+  "id": "8AA30C8E-AE65-4772-B9A4-C21E5B5ADF5E",
+  "title": "Legacy fixture",
+  "createdAt": "2026-07-14T12:00:00Z",
+  "updatedAt": "2026-07-14T12:01:00Z",
+  "messages": [
+    {"role": "user", "content": "Find sheep news"},
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {"function": {"name": "web_search", "arguments": {"query": "sheep news"}}}
+      ]
+    },
+    {"role": "tool", "content": "No results found.", "tool_name": "web_search"},
+    {"role": "assistant", "content": "No fresh sheep news today."}
+  ]
+}
