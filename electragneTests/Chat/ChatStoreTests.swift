@@ -16,8 +16,8 @@ struct ChatStoreTests {
         let chat = StoredChat(
             title: "Sheep talk",
             messages: [
-                OllamaMessage(role: "user", content: "hello"),
-                OllamaMessage(role: "assistant", content: "Baa! **Hi** there."),
+                ChatMessage(role: "user", content: "hello"),
+                ChatMessage(role: "assistant", content: "Baa! **Hi** there."),
             ]
         )
         store.save(chat)
@@ -29,6 +29,26 @@ struct ChatStoreTests {
         #expect(loaded?.messages.first?.toolCalls == nil)
     }
 
+    @Test func legacyStoredChatFixtureIsJSONCompatible() throws {
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/stored-chat-v1.json")
+        let original = try Data(contentsOf: fixture)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let chat = try decoder.decode(StoredChat.self, from: original)
+
+        #expect(chat.messages[1].toolCalls?.first?.name == "web_search")
+        #expect(chat.messages[2].toolName == "web_search")
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(chat)
+        let before = try JSONSerialization.jsonObject(with: original) as? NSDictionary
+        let after = try JSONSerialization.jsonObject(with: encoded) as? NSDictionary
+        #expect(before == after)
+    }
+
     @Test func summariesAreSortedMostRecentFirstAndEmptyChatsSkipped() throws {
         let store = try makeTempStore()
         defer { try? FileManager.default.removeItem(at: store.directory) }
@@ -36,12 +56,12 @@ struct ChatStoreTests {
         let older = StoredChat(
             title: "older",
             updatedAt: Date(timeIntervalSince1970: 1000),
-            messages: [OllamaMessage(role: "user", content: "a")]
+            messages: [ChatMessage(role: "user", content: "a")]
         )
         let newer = StoredChat(
             title: "newer",
             updatedAt: Date(timeIntervalSince1970: 2000),
-            messages: [OllamaMessage(role: "user", content: "b")]
+            messages: [ChatMessage(role: "user", content: "b")]
         )
         let empty = StoredChat(title: "empty")
         store.save(older)

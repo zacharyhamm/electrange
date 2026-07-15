@@ -18,7 +18,7 @@ struct GeminiClientTests {
         var calls: [String] = []
 
         try await client.streamChat(
-            history: [OllamaMessage(role: "user", content: "Do two things")],
+            history: [ChatMessage(role: "user", content: "Do two things")],
             onStatus: { statuses.append($0) },
             onToolCall: { call in
                 calls.append(call.name)
@@ -39,7 +39,7 @@ struct GeminiClientTests {
             transport: StubChatHTTPTransport([.init(status: 429)]),
             apiKey: { "test-key" }
         )
-        await #expect(throws: GeminiError.quotaExceeded) {
+        await #expect(throws: ChatProviderError.quotaExceeded) {
             try await quota.streamChat(history: [], onStatus: { _ in }, onToolCall: { _ in .error("") }, onToken: { _ in })
         }
 
@@ -47,7 +47,7 @@ struct GeminiClientTests {
             transport: StubChatHTTPTransport([.init(status: 500)]),
             apiKey: { "test-key" }
         )
-        await #expect(throws: GeminiError.badStatus(500)) {
+        await #expect(throws: ChatProviderError.badStatus(500)) {
             try await server.streamChat(history: [], onStatus: { _ in }, onToolCall: { _ in .error("") }, onToken: { _ in })
         }
     }
@@ -112,9 +112,9 @@ struct GeminiClientTests {
 
     @Test func requestBodyMapsRolesAndDeclaresSearchAndReminderTools() throws {
         let history = [
-            OllamaMessage(role: "user", content: "What's your name?"),
-            OllamaMessage(role: "assistant", content: "I'm a sheep!"),
-            OllamaMessage(role: "user", content: "Search for sheep facts"),
+            ChatMessage(role: "user", content: "What's your name?"),
+            ChatMessage(role: "assistant", content: "I'm a sheep!"),
+            ChatMessage(role: "user", content: "Search for sheep facts"),
         ]
         let body = try GeminiClient.makeRequestBody(history: history, userName: "Zed")
 

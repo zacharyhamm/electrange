@@ -18,7 +18,7 @@ struct OllamaClientTests {
         var calls: [String] = []
 
         try await client.streamChat(
-            history: [OllamaMessage(role: "user", content: "Do two things")],
+            history: [ChatMessage(role: "user", content: "Do two things")],
             onStatus: { statuses.append($0) },
             onToolCall: { call in
                 calls.append(call.name)
@@ -36,8 +36,25 @@ struct OllamaClientTests {
 
     @Test func streamThrowsHTTPError() async {
         let client = OllamaClient(transport: StubChatHTTPTransport([.init(status: 503)]))
-        await #expect(throws: OllamaError.badStatus(503)) {
+        await #expect(throws: ChatProviderError.badStatus(503)) {
             try await client.streamChat(history: [], onToken: { _ in })
+        }
+    }
+
+    @Test func missingWebSearchKeyKeepsTheSettingsError() async {
+        let transport = StubChatHTTPTransport([
+            .init(lines: [#"{"message":{"content":"","tool_calls":[{"function":{"name":"web_search","arguments":{"query":"news"}}}]},"done":true}"#]),
+        ])
+        let client = OllamaClient(transport: transport)
+
+        await #expect(throws: ChatProviderError.missingAPIKey(.ollama)) {
+            try await client.streamChat(
+                history: [],
+                onToolCall: { _ in
+                    .error("Web search needs an ollama.com API key. Add it in Electragne Settings.")
+                },
+                onToken: { _ in }
+            )
         }
     }
 
@@ -72,8 +89,8 @@ struct OllamaClientTests {
         let chunk = OllamaClient.decodeChunk(fromLine: line)
 
         #expect(chunk?.toolCalls.count == 1)
-        #expect(chunk?.toolCalls.first?.function.name == "web_search")
-        #expect(chunk?.toolCalls.first?.function.arguments["query"]?.stringValue == "weather today")
+        #expect(chunk?.toolCalls.first?.name == "web_search")
+        #expect(chunk?.toolCalls.first?.arguments["query"]?.stringValue == "weather today")
     }
 
     @Test func rejectsBlankAndMalformedLines() {
@@ -86,7 +103,7 @@ struct OllamaClientTests {
     @Test func requestBodyContainsModelMessageAndStreamFlag() throws {
         let body = try OllamaClient.makeRequestBody(
             model: "gemma4:latest",
-            history: [OllamaMessage(role: "user", content: "Hello, sheep!")]
+            history: [ChatMessage(role: "user", content: "Hello, sheep!")]
         )
 
         let json = try #require(
@@ -116,9 +133,9 @@ struct OllamaClientTests {
 
     @Test func requestBodyPreservesConversationHistoryOrder() throws {
         let history = [
-            OllamaMessage(role: "user", content: "What's your name?"),
-            OllamaMessage(role: "assistant", content: "I'm a sheep!"),
-            OllamaMessage(role: "user", content: "What did I just ask you?"),
+            ChatMessage(role: "user", content: "What's your name?"),
+            ChatMessage(role: "assistant", content: "I'm a sheep!"),
+            ChatMessage(role: "user", content: "What did I just ask you?"),
         ]
         let body = try OllamaClient.makeRequestBody(model: "gemma4:latest", history: history)
 
@@ -172,17 +189,16 @@ struct OllamaClientTests {
 
     @Test func toolMessagesEncodeOllamaFieldNames() throws {
         let history = [
-            OllamaMessage(
+            ChatMessage(
                 role: "assistant",
                 content: "",
-                toolCalls: [OllamaToolCall(
-                    function: OllamaToolCall.Function(
-                        name: "web_search",
-                        arguments: ["query": .string("news")]
-                    )
+                toolCalls: [ChatToolCall(
+                    id: "",
+                    name: "web_search",
+                    arguments: ["query": .string("news")]
                 )]
             ),
-            OllamaMessage(role: "tool", content: "Result 1: …", toolName: "web_search"),
+            ChatMessage(role: "tool", content: "Result 1: …", toolName: "web_search"),
         ]
         let body = try OllamaClient.makeRequestBody(model: "gemma4:latest", history: history)
 

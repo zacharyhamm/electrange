@@ -119,10 +119,7 @@ final class CalendarToolAdapter: ToolExecuting {
 
 // MARK: - Web search
 
-/// Runs the hosted ollama.com web search. Ollama currently intercepts
-/// web_search inline in its streaming loop before the router sees it, so
-/// this executor is only reached if a provider forwards the call — but the
-/// registry entry now has a real executor instead of a hard-coded refusal.
+/// Runs the hosted ollama.com web search through the shared tool router.
 @MainActor
 final class WebSearchExecutor: ToolExecuting {
     private let webSearch: OllamaWebSearch
@@ -138,7 +135,7 @@ final class WebSearchExecutor: ToolExecuting {
                     "status": .string("ok"),
                     "results": .string(text),
                 ])
-            } catch OllamaError.missingAPIKey {
+            } catch ChatProviderError.missingAPIKey(.ollama) {
                 return .error("Web search needs an ollama.com API key. Add it in Electragne Settings.")
             } catch {
                 // Let the model explain the failure instead of aborting.

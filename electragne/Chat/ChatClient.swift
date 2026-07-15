@@ -67,10 +67,52 @@ nonisolated enum ChatToolValue: Equatable, Codable, Sendable {
     }
 }
 
-nonisolated struct ChatToolCall: Equatable, Sendable {
+nonisolated struct ChatToolCall: Equatable, Codable, Sendable {
     let id: String
     let name: String
     let arguments: [String: ChatToolValue]
+
+    /// Provider-only context needed during a tool round (for example Gemini
+    /// thought signatures). It is transient and never persisted in chat JSON.
+    var providerContext: ChatToolValue? = nil
+
+    private struct Function: Codable {
+        let name: String
+        let arguments: [String: ChatToolValue]
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, function }
+
+    init(
+        id: String,
+        name: String,
+        arguments: [String: ChatToolValue],
+        providerContext: ChatToolValue? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.arguments = arguments
+        self.providerContext = providerContext
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
+        let function = try container.decode(Function.self, forKey: .function)
+        name = function.name
+        arguments = function.arguments
+        providerContext = nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if !id.isEmpty { try container.encode(id, forKey: .id) }
+        try container.encode(Function(name: name, arguments: arguments), forKey: .function)
+    }
+
+    static func == (lhs: ChatToolCall, rhs: ChatToolCall) -> Bool {
+        lhs.id == rhs.id && lhs.name == rhs.name && lhs.arguments == rhs.arguments
+    }
 }
 
 nonisolated struct ChatToolResult: Equatable, Sendable {
@@ -92,10 +134,37 @@ nonisolated struct ChatToolResult: Equatable, Sendable {
     }
 }
 
+/// Provider-neutral chat history. Its coding keys intentionally match the
+/// legacy OllamaMessage format so existing stored chats decode unchanged.
+nonisolated struct ChatMessage: Equatable, Codable, Sendable {
+    var role: String
+    var content: String
+    var toolName: String? = nil
+    var toolCalls: [ChatToolCall]? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case toolName = "tool_name"
+        case toolCalls = "tool_calls"
+    }
+}
+
+nonisolated enum ChatSystemPrompt {
+    static func make(providerDetails: String) -> String {
+        """
+        You are Baaz, a highly intelligent sheep living as a desktop pet, \
+        chatting with your owner. Respond as if chatting: keep replies short and \
+        chat-sized — a sentence or two, or a brief list when that is clearer. \
+        \(providerDetails)
+        """
+    }
+}
+
 /// A chat backend the bubble can stream a reply from.
 protocol ChatClient {
     func streamChat(
-        history: [OllamaMessage],
+        history: [ChatMessage],
         onStatus: (String) -> Void,
         onToolCall: (ChatToolCall) async -> ChatToolResult,
         onToken: (String) -> Void

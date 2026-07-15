@@ -10,7 +10,7 @@ enum UserPreferences {
     nonisolated static let preferredNameKey = "preferredUserName"
 
     /// The name typed in Settings, or nil when unset/blank.
-    static func preferredName(in defaults: UserDefaults = .standard) -> String? {
+    nonisolated static func preferredName(in defaults: UserDefaults = .standard) -> String? {
         guard let raw = defaults.string(forKey: preferredNameKey) else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
@@ -18,7 +18,7 @@ enum UserPreferences {
 
     /// The name the pet should use: the Settings override when present,
     /// otherwise the macOS account's full name.
-    static func resolvedUserName() -> String? {
+    nonisolated static func resolvedUserName() -> String? {
         preferredName() ?? OllamaClient.detectedUserName()
     }
 

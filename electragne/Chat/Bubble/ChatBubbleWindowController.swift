@@ -18,7 +18,6 @@ final class ChatBubbleWindowController {
     private var onDismiss: (() -> Void)?
     private let ollamaClient: OllamaClient
     private let geminiClient: GeminiClient
-    private let chatConfig: ChatConfig
     private let toolRouter: ChatToolRouter
     private var streamTask: Task<Void, Never>?
     private var confirmationContinuation: CheckedContinuation<Bool, Never>?
@@ -29,7 +28,7 @@ final class ChatBubbleWindowController {
     private var currentChat: StoredChat
     private var activeStreamID: UUID?
 
-    private var history: [OllamaMessage] {
+    private var history: [ChatMessage] {
         get { currentChat.messages }
         set { currentChat.messages = newValue }
     }
@@ -47,12 +46,10 @@ final class ChatBubbleWindowController {
         timerToolExecutor: (any TimerToolExecuting)? = nil,
         gmailToolExecutor: (any GmailToolExecuting)? = nil,
         calendarToolExecutor: (any CalendarToolExecuting)? = nil,
-        chatStore: ChatStore = ChatStore(),
-        chatConfig: ChatConfig = .default
+        chatStore: ChatStore = ChatStore()
     ) {
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
-        self.chatConfig = chatConfig
         self.toolRouter = ChatToolRouter(
             reminderExecutor: reminderToolExecutor ?? AppleReminderService(),
             notesExecutor: notesToolExecutor ?? AppleNotesService(),
@@ -153,16 +150,12 @@ final class ChatBubbleWindowController {
         model.entries.append(ChatBubbleEntry(role: .assistant, text: ""))
         setExpanded(true)
 
-        history.append(OllamaMessage(role: "user", content: userMessage))
+        history.append(ChatMessage(role: "user", content: userMessage))
 
         let useGemini = ChatProviderPreference.useGemini
         let client: any ChatClient = useGemini ? geminiClient : ollamaClient
         let model = model
-        // Gemini's context fits the whole conversation; only the local model
-        // needs a request-time cap. Storage and transcript are never trimmed.
-        let messages = useGemini
-            ? history
-            : Array(history.suffix(chatConfig.maxHistoryMessages))
+        let messages = history
         let streamID = UUID()
         activeStreamID = streamID
 
@@ -186,22 +179,12 @@ final class ChatBubbleWindowController {
                 // Bubble dismissed or a new message superseded this stream.
             } catch let error as URLError where error.code == .cancelled {
                 // URLSession reports Task cancellation as URLError.cancelled.
-            } catch OllamaError.missingAPIKey {
-                model.phase = .failed(
-                    "Web search needs an ollama.com API key — add it in Electragne Settings"
-                )
-            } catch GeminiError.missingAPIKey {
-                model.phase = .failed(
-                    "Gemini needs an API key — add it in Electragne Settings"
-                )
-            } catch GeminiError.quotaExceeded {
-                model.phase = .failed("Gemini quota exceeded — try again later")
-            } catch GeminiError.toolRoundLimit {
-                model.phase = .failed("Gemini used too many tool steps — try a simpler request")
-            } catch is URLError {
-                model.phase = .failed(useGemini ? "Gemini not reachable" : "Ollama not reachable")
             } catch {
-                model.phase = .failed("Something went wrong")
+                model.phase = .failed(
+                    error is URLError
+                        ? (useGemini ? "Gemini not reachable" : "Ollama not reachable")
+                        : error.localizedDescription
+                )
             }
 
             // Record the exchange, unless a newer stream has taken over the
@@ -216,7 +199,7 @@ final class ChatBubbleWindowController {
                     model.entries.removeLast()
                 }
             } else {
-                self.history.append(OllamaMessage(role: "assistant", content: streamed))
+                self.history.append(ChatMessage(role: "assistant", content: streamed))
                 self.persistCurrentChat()
             }
         }

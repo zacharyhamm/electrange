@@ -18,7 +18,7 @@ independently landable).
 | A4 | Pure per-state movement policies + characterization tests | **Done** |
 | A5 | Behavior controllers + declarative timers | **Done** |
 | B1 | Chat transport seam + config + first streaming tests | **Done** |
-| B2 | Neutral `ChatMessage` + shared `ChatProviderEngine` | Pending |
+| B2 | Neutral `ChatMessage` + shared `ChatProviderEngine` | **Done** |
 | B3 | `ChatBubbleWindowController` slim-down | Pending |
 
 Learnings that changed the original plan:
@@ -279,6 +279,12 @@ struct URLSessionTransport: ChatHTTPTransport { let session: URLSession }
    behavior before B2 restructures.
 
 ## B2 — Neutral `ChatMessage` + shared `ChatProviderEngine`
+
+**Status: Done.** Stored chats now use the Ollama-JSON-compatible neutral
+`ChatMessage`; both providers translate through thin backends while
+`ChatProviderEngine` owns history trimming, tool rounds, and event fan-out.
+Provider errors and prompt scaffolding are shared, and missing Ollama web-search
+keys still surface the Settings hint.
 
 1. `ChatMessage` (role / content / toolCalls / toolName) with a Codable
    representation **byte-compatible with the current `OllamaMessage`
