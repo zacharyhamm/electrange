@@ -50,11 +50,7 @@ class PetViewModel {
     /// side when moving right, the right side when moving left)
     private var climbingOnLeftSide = true
 
-    private enum ClimbPhase {
-        case ascending   // Going up the side
-        case toppingOut  // Crawling over the edge onto the top
-    }
-    private var climbPhase: ClimbPhase = .ascending
+    private var climbPhase: ClimbPolicy.Phase = .ascending
 
     /// Whether the current fall may land on window tops. Set when the pet is
     /// dropped from a drag; ordinary falls go all the way to the ground.
@@ -448,49 +444,21 @@ class PetViewModel {
 
     // MARK: - Window Climbing
 
-    /// A window edge the pet just walked into and decided to climb
-    private struct ClimbOpportunity {
-        let surface: WindowSurface
-        let startX: CGFloat
-    }
-
     /// Check whether the pet's step from currentX to newX crosses the side of
     /// a climbable window. The window qualifies only if its top leaves room
     /// for the pet below the top of the screen, its top is above the pet's
     /// head (something to actually climb), and its side reaches down to the
     /// pet. Rolls the climb chance per crossing.
     private func findClimbOpportunity(on screen: ScreenInfo, currentX: CGFloat, newX: CGFloat,
-                                      footY: CGFloat, petSize: CGFloat) -> ClimbOpportunity? {
-        let topLimit = screen.visibleFrame.maxY
-
-        for candidate in environment.snapshot(includeWindows: true).windowSurfaces {
-            let frame = candidate.frame
-
-            // The pet must fit between the window top and the top of the screen
-            guard frame.maxY + petSize <= topLimit else { continue }
-            // The top must be above the pet's head, else there's nothing to climb
-            guard frame.maxY > footY + petSize else { continue }
-            // The side must reach down to where the pet is walking
-            guard frame.minY <= footY + petSize else { continue }
-            // And the top must be wide enough to stand on
-            guard frame.width >= petSize else { continue }
-
-            if isMovingRight {
-                // Just crossed the window's left edge this tick
-                if currentX + petSize <= frame.minX && newX + petSize >= frame.minX,
-                   Int.random(in: 1...100) <= BehaviorConstants.climbChance {
-                    return ClimbOpportunity(surface: candidate, startX: frame.minX - petSize)
-                }
-            } else {
-                // Just crossed the window's right edge this tick
-                if currentX >= frame.maxX && newX <= frame.maxX,
-                   Int.random(in: 1...100) <= BehaviorConstants.climbChance {
-                    return ClimbOpportunity(surface: candidate, startX: frame.maxX)
-                }
-            }
-        }
-
-        return nil
+                                      footY: CGFloat, petSize: CGFloat) -> (WindowSurface, CGPoint)? {
+        let snapshot = environment.snapshot(includeWindows: true)
+        let action = ClimbPolicy.evaluate(.init(
+            env: snapshot,
+            mode: .find(screen: screen, currentX: currentX, newX: newX,
+                        footY: footY, isMovingRight: isMovingRight)
+        )) { Int.random(in: 1...$0) }
+        guard case .begin(let candidate, let point) = action else { return nil }
+        return (candidate, point)
     }
 
     func startClimbingWindow(_ surface: WindowSurface) {
@@ -517,53 +485,29 @@ class PetViewModel {
     private func updateClimbMovement() {
         guard petWindow != nil else { return }
         guard case .climbingWindow = state else { return }
-        guard let id = climbWindowID,
-              let frame = windowFrame(id: id),
-              let screen = currentScreen else {
-            // The window went away mid-climb
+        guard let id = climbWindowID, let screen = currentScreen else {
             abortClimb()
             return
         }
-
-        let petSize = surface.frame.width
-
-        // If the window moved up so the pet no longer fits on top, let go
-        if frame.maxY + petSize > screen.visibleFrame.maxY {
+        let action = ClimbPolicy.evaluate(.init(
+            env: environment.snapshot(includeWindows: true),
+            mode: .climb(windowID: id, screen: screen, onLeftSide: climbingOnLeftSide,
+                         phase: climbPhase, moveY: scaledMoveY(),
+                         tickScale: PhysicsConstants.tickScale)
+        )) { Int.random(in: 1...$0) }
+        switch action {
+        case .move(let point):
+            surface.setOrigin(point)
+        case .beginTopOut(let point):
+            climbPhase = .toppingOut
+            surface.setOrigin(point)
+            animationManager.playAnimationOnce(AnimationID.verticalWalkOver.rawValue) { [weak self] in
+                self?.finishToppingOut()
+            }
+        case .abort:
             abortClimb()
-            return
-        }
-
-        // Hug the wall, following the window if it moves
-        let wallX = climbingOnLeftSide ? frame.minX - petSize : frame.maxX
-
-        switch climbPhase {
-        case .ascending:
-            // Climb at the animation's own vertical speed
-            let climbSpeed = abs(scaledMoveY())
-            let newY = surface.frame.origin.y + climbSpeed
-
-            if newY >= frame.maxY {
-                // Reached the top: crawl over the edge
-                climbPhase = .toppingOut
-                surface.setOrigin(NSPoint(x: wallX, y: frame.maxY))
-                animationManager.playAnimationOnce(AnimationID.verticalWalkOver.rawValue) { [weak self] in
-                    self?.finishToppingOut()
-                }
-            } else {
-                surface.setOrigin(NSPoint(x: wallX, y: newY))
-            }
-
-        case .toppingOut:
-            // Slide from the wall onto the window top while crawling over
-            let targetX = climbingOnLeftSide ? frame.minX : frame.maxX - petSize
-            var newX = surface.frame.origin.x
-            let step: CGFloat = 1.5 * PhysicsConstants.tickScale
-            if abs(targetX - newX) <= step {
-                newX = targetX
-            } else {
-                newX += targetX > newX ? step : -step
-            }
-            surface.setOrigin(NSPoint(x: newX, y: frame.maxY))
+        case .none, .begin:
+            break
         }
     }
 
@@ -1305,10 +1249,10 @@ class PetViewModel {
         }
 
         // Check for a window side the pet feels like climbing
-        if let climb = findClimbOpportunity(on: screen, currentX: currentX, newX: newX,
+        if let (candidate, point) = findClimbOpportunity(on: screen, currentX: currentX, newX: newX,
                                             footY: footY, petSize: petSize) {
-            surface.setOrigin(NSPoint(x: climb.startX, y: footY))
-            startClimbingWindow(climb.surface)
+            surface.setOrigin(point)
+            startClimbingWindow(candidate)
             return
         }
 
