@@ -108,12 +108,23 @@ nonisolated enum ReminderToolRequest: Equatable, Sendable {
     }
 }
 
-nonisolated enum ReminderRequestError: Error, Equatable {
+nonisolated enum ReminderRequestError: LocalizedError, Equatable {
     case unsupportedTool(String)
     case missingTitle
     case missingArgument(String)
     case invalidCompletion(String)
     case noChanges
+
+    var errorDescription: String? {
+        switch self {
+        // missingTitle and unsupportedTool keep the wording the router's
+        // former generic catch produced for them.
+        case .unsupportedTool, .missingTitle: "That reminder request was invalid."
+        case .missingArgument(let name): "The ‘\(name)’ argument is required."
+        case .invalidCompletion: "Reminder completion must be incomplete, completed, or all."
+        case .noChanges: "At least one reminder change is required."
+        }
+    }
 }
 
 nonisolated enum ParsedReminderDue: Equatable, Sendable {
@@ -195,7 +206,7 @@ final class AppleReminderService: ReminderToolExecuting {
 
     func execute(_ request: ReminderToolRequest) async -> ChatToolResult {
         guard await ensureAccess() else {
-            return Self.result(status: "permission_denied", message: "Reminders access was denied. Enable it in System Settings > Privacy & Security > Reminders.")
+            return .make(status: "permission_denied", message: "Reminders access was denied. Enable it in System Settings > Privacy & Security > Reminders.")
         }
         switch request {
         case .create(let value): return create(value)
@@ -217,7 +228,7 @@ final class AppleReminderService: ReminderToolExecuting {
 
     private func create(_ request: ReminderRequest) -> ChatToolResult {
         guard let calendar = calendar(named: request.listName) else {
-            return Self.result(status: "validation_error", message: request.listName == nil
+            return .make(status: "validation_error", message: request.listName == nil
                 ? "Apple Reminders has no default list available."
                 : "No unique Reminders list named ‘\(request.listName!)’ exists.")
         }
@@ -227,14 +238,14 @@ final class AppleReminderService: ReminderToolExecuting {
         reminder.calendar = calendar
         if let due = request.due {
             guard applyDue(due, to: reminder) else {
-                return Self.result(status: "validation_error", message: "The due date ‘\(due)’ is invalid.")
+                return .make(status: "validation_error", message: "The due date ‘\(due)’ is invalid.")
             }
         }
         do {
             try store.save(reminder, commit: true)
             return reminderResult(reminder, status: "created", message: "Created ‘\(request.title)’ in ‘\(calendar.title)’.")
         } catch {
-            return Self.result(status: "error", message: "The reminder could not be saved: \(error.localizedDescription)")
+            return .make(status: "error", message: "The reminder could not be saved: \(error.localizedDescription)")
         }
     }
 
@@ -242,7 +253,7 @@ final class AppleReminderService: ReminderToolExecuting {
         let calendars: [EKCalendar]?
         if let listName = request.listName {
             guard let selected = calendar(named: listName) else {
-                return Self.result(status: "validation_error", message: "No unique Reminders list named ‘\(listName)’ exists.")
+                return .make(status: "validation_error", message: "No unique Reminders list named ‘\(listName)’ exists.")
             }
             calendars = [selected]
         } else { calendars = nil }
@@ -276,13 +287,13 @@ final class AppleReminderService: ReminderToolExecuting {
 
     private func update(_ request: ReminderUpdateRequest) -> ChatToolResult {
         guard let reminder = store.calendarItem(withIdentifier: request.identifier) as? EKReminder else {
-            return Self.result(status: "not_found", message: "That reminder no longer exists. List reminders again.")
+            return .make(status: "not_found", message: "That reminder no longer exists. List reminders again.")
         }
         if let title = request.title { reminder.title = title }
         if request.clearNotes { reminder.notes = nil } else if let notes = request.notes { reminder.notes = notes }
         if let listName = request.listName {
             guard let calendar = calendar(named: listName) else {
-                return Self.result(status: "validation_error", message: "No unique Reminders list named ‘\(listName)’ exists.")
+                return .make(status: "validation_error", message: "No unique Reminders list named ‘\(listName)’ exists.")
             }
             reminder.calendar = calendar
         }
@@ -290,27 +301,27 @@ final class AppleReminderService: ReminderToolExecuting {
             reminder.dueDateComponents = nil
             reminder.alarms?.forEach(reminder.removeAlarm)
         } else if let due = request.due, !applyDue(due, to: reminder) {
-            return Self.result(status: "validation_error", message: "The due date ‘\(due)’ is invalid.")
+            return .make(status: "validation_error", message: "The due date ‘\(due)’ is invalid.")
         }
         if let completed = request.completed { reminder.isCompleted = completed }
         do {
             try store.save(reminder, commit: true)
             return reminderResult(reminder, status: "updated", message: "Updated ‘\(reminder.title ?? "Untitled")’.")
         } catch {
-            return Self.result(status: "error", message: "The reminder could not be updated: \(error.localizedDescription)")
+            return .make(status: "error", message: "The reminder could not be updated: \(error.localizedDescription)")
         }
     }
 
     private func delete(_ identifier: String) -> ChatToolResult {
         guard let reminder = store.calendarItem(withIdentifier: identifier) as? EKReminder else {
-            return Self.result(status: "not_found", message: "That reminder no longer exists. List reminders again.")
+            return .make(status: "not_found", message: "That reminder no longer exists. List reminders again.")
         }
         let title = reminder.title ?? "Untitled"
         do {
             try store.remove(reminder, commit: true)
-            return Self.result(status: "deleted", message: "Deleted ‘\(title)’.")
+            return .make(status: "deleted", message: "Deleted ‘\(title)’.")
         } catch {
-            return Self.result(status: "error", message: "The reminder could not be deleted: \(error.localizedDescription)")
+            return .make(status: "error", message: "The reminder could not be deleted: \(error.localizedDescription)")
         }
     }
 
@@ -382,7 +393,4 @@ final class AppleReminderService: ReminderToolExecuting {
         return date + String(format: "T%02d:%02d", hour, minute)
     }
 
-    private static func result(status: String, message: String) -> ChatToolResult {
-        ChatToolResult(response: ["status": .string(status), "message": .string(message)])
-    }
 }

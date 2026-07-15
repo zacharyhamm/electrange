@@ -82,6 +82,14 @@ nonisolated struct ChatToolResult: Equatable, Sendable {
             "message": .string(message),
         ])
     }
+
+    /// The common status+message result shape shared by every tool executor.
+    static func make(status: String, message: String) -> ChatToolResult {
+        ChatToolResult(response: [
+            "status": .string(status),
+            "message": .string(message),
+        ])
+    }
 }
 
 /// A chat backend the bubble can stream a reply from.

@@ -34,10 +34,18 @@ nonisolated enum NoteToolRequest: Equatable, Sendable {
     }
 }
 
-nonisolated enum NoteToolError: Error, Equatable {
+nonisolated enum NoteToolError: LocalizedError, Equatable {
     case unsupportedTool(String)
     case missingArgument(String)
     case noChanges
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedTool: "That Notes request was invalid."
+        case .missingArgument(let name): "The ‘\(name)’ argument is required."
+        case .noChanges: "At least one note change is required."
+        }
+    }
 }
 
 nonisolated enum NotesTextEncoding {
@@ -229,7 +237,7 @@ final class AppleNotesService: NotesToolExecuting {
             switch await Self.run(NotesScriptBuilder.delete(rawID: item.rawID)) {
             case .success(let output):
                 references[id] = nil
-                return result(status: "deleted", message: "Deleted ‘\(output.string ?? item.title)’.")
+                return .make(status: "deleted", message: "Deleted ‘\(output.string ?? item.title)’.")
             case .failure(let message): return automationError(message)
             }
         }
@@ -258,7 +266,7 @@ final class AppleNotesService: NotesToolExecuting {
         switch await Self.run(script) {
         case .success(let output):
             let parts = (output.string ?? "").split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-            guard parts.count >= 3 else { return result(status: "error", message: "Notes returned an unexpected response.") }
+            guard parts.count >= 3 else { return .make(status: "error", message: "Notes returned an unexpected response.") }
             let id = existingID ?? UUID().uuidString
             references[id] = NoteReference(rawID: parts[0], title: parts[1], folder: parts[2])
             return ChatToolResult(response: ["status": .string(status), "noteID": .string(id),
@@ -285,11 +293,8 @@ final class AppleNotesService: NotesToolExecuting {
     }
 
     private func reference(_ id: String) -> NoteReference? { references[id] }
-    private func staleResult() -> ChatToolResult { result(status: "not_found", message: "That note result is no longer available. Search Notes again first.") }
+    private func staleResult() -> ChatToolResult { .make(status: "not_found", message: "That note result is no longer available. Search Notes again first.") }
     private func automationError(_ message: String) -> ChatToolResult {
-        result(status: "automation_error", message: "Apple Notes could not complete the request: \(message). If prompted, allow Electragne to control Notes in System Settings > Privacy & Security > Automation.")
-    }
-    private func result(status: String, message: String) -> ChatToolResult {
-        ChatToolResult(response: ["status": .string(status), "message": .string(message)])
+        .make(status: "automation_error", message: "Apple Notes could not complete the request: \(message). If prompted, allow Electragne to control Notes in System Settings > Privacy & Security > Automation.")
     }
 }

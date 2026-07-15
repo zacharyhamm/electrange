@@ -43,7 +43,7 @@ final class DesktopToolService: DesktopToolExecuting {
             guard NSWorkspace.shared.open(url) else {
                 return .error("macOS could not open \(url.absoluteString).")
             }
-            return Self.result(status: "opened", message: "Opened \(url.absoluteString).")
+            return .make(status: "opened", message: "Opened \(url.absoluteString).")
         case .findFiles(let query):
             return await findFiles(query: query)
         case .revealInFinder(let fileID):
@@ -51,7 +51,7 @@ final class DesktopToolService: DesktopToolExecuting {
                 return .error("That file result is no longer available. Search for it again first.")
             }
             NSWorkspace.shared.activateFileViewerSelecting([url])
-            return Self.result(status: "revealed", message: "Revealed \(url.lastPathComponent) in Finder.")
+            return .make(status: "revealed", message: "Revealed \(url.lastPathComponent) in Finder.")
         }
     }
 
@@ -74,7 +74,7 @@ final class DesktopToolService: DesktopToolExecuting {
                 at: appURL,
                 configuration: NSWorkspace.OpenConfiguration()
             )
-            return Self.result(status: "opened", message: "Opened \(appURL.deletingPathExtension().lastPathComponent).")
+            return .make(status: "opened", message: "Opened \(appURL.deletingPathExtension().lastPathComponent).")
         } catch {
             return .error("The app could not be opened: \(error.localizedDescription)")
         }
@@ -83,7 +83,7 @@ final class DesktopToolService: DesktopToolExecuting {
     private func findFiles(query: String) async -> ChatToolResult {
         let scopes = scopeStore.scopes()
         guard !scopes.isEmpty else {
-            return Self.result(
+            return .make(
                 status: "needs_setup",
                 message: "No file-search folders are configured. Add one in Electragne Settings."
             )
@@ -136,10 +136,4 @@ final class DesktopToolService: DesktopToolExecuting {
         ])
     }
 
-    private static func result(status: String, message: String) -> ChatToolResult {
-        ChatToolResult(response: [
-            "status": .string(status),
-            "message": .string(message),
-        ])
-    }
 }

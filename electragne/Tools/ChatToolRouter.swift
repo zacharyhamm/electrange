@@ -62,12 +62,8 @@ final class ChatToolRouter {
         let request: ReminderToolRequest
         do {
             request = try ReminderToolRequest(toolCall: call)
-        } catch ReminderRequestError.missingArgument(let name) {
-            return .error("The ‘\(name)’ argument is required.")
-        } catch ReminderRequestError.invalidCompletion {
-            return .error("Reminder completion must be incomplete, completed, or all.")
-        } catch ReminderRequestError.noChanges {
-            return .error("At least one reminder change is required.")
+        } catch let error as ReminderRequestError {
+            return .error(error.localizedDescription)
         } catch {
             return .error("That reminder request was invalid.")
         }
@@ -87,10 +83,8 @@ final class ChatToolRouter {
         let request: NoteToolRequest
         do {
             request = try NoteToolRequest(toolCall: call)
-        } catch NoteToolError.missingArgument(let name) {
-            return .error("The ‘\(name)’ argument is required.")
-        } catch NoteToolError.noChanges {
-            return .error("At least one note change is required.")
+        } catch let error as NoteToolError {
+            return .error(error.localizedDescription)
         } catch {
             return .error("That Notes request was invalid.")
         }
@@ -110,10 +104,8 @@ final class ChatToolRouter {
         let request: DesktopToolRequest
         do {
             request = try DesktopToolRequest(toolCall: call)
-        } catch DesktopToolError.missingArgument(let name) {
-            return .error("The ‘\(name)’ argument is required.")
-        } catch DesktopToolError.invalidWebURL {
-            return .error("Only complete HTTP and HTTPS web addresses can be opened.")
+        } catch let error as DesktopToolError {
+            return .error(error.localizedDescription)
         } catch {
             return .error("That tool request was invalid.")
         }
@@ -133,10 +125,8 @@ final class ChatToolRouter {
         let request: TimerToolRequest
         do {
             request = try TimerToolRequest(toolCall: call)
-        } catch TimerToolError.missingArgument(let name) {
-            return .error("The ‘\(name)’ argument is required.")
-        } catch TimerToolError.invalidDuration {
-            return .error("Timer duration must be a whole number from 1 second to 7 days.")
+        } catch let error as TimerToolError {
+            return .error(error.localizedDescription)
         } catch {
             return .error("That timer request was invalid.")
         }

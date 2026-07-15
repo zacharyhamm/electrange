@@ -77,8 +77,16 @@ nonisolated enum DesktopToolRequest: Equatable, Sendable {
     }
 }
 
-nonisolated enum DesktopToolError: Error, Equatable {
+nonisolated enum DesktopToolError: LocalizedError, Equatable {
     case unsupportedTool(String)
     case missingArgument(String)
     case invalidWebURL(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedTool: "That tool request was invalid."
+        case .missingArgument(let name): "The ‘\(name)’ argument is required."
+        case .invalidWebURL: "Only complete HTTP and HTTPS web addresses can be opened."
+        }
+    }
 }

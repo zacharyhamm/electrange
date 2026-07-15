@@ -45,10 +45,18 @@ nonisolated enum TimerToolRequest: Equatable, Sendable {
     }
 }
 
-nonisolated enum TimerToolError: Error, Equatable {
+nonisolated enum TimerToolError: LocalizedError, Equatable {
     case unsupportedTool(String)
     case missingArgument(String)
     case invalidDuration
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedTool: "That timer request was invalid."
+        case .missingArgument(let name): "The ‘\(name)’ argument is required."
+        case .invalidDuration: "Timer duration must be a whole number from 1 second to 7 days."
+        }
+    }
 }
 
 nonisolated struct TimerStore {
@@ -167,7 +175,7 @@ final class TimerToolService: TimerToolExecuting {
         switch request {
         case .create(let label, let seconds):
             guard await scheduler.ensureAuthorization() else {
-                return Self.result(
+                return .make(
                     status: "permission_denied",
                     message: "Notifications are disabled. Enable them in System Settings > Notifications > Electragne."
                 )
@@ -193,7 +201,7 @@ final class TimerToolService: TimerToolExecuting {
                     message: "Started ‘\(timer.label)’ for \(Self.durationText(seconds))."
                 )
             } catch {
-                return Self.result(
+                return .make(
                     status: "error",
                     message: "The timer notification could not be scheduled: \(error.localizedDescription)"
                 )
@@ -216,7 +224,7 @@ final class TimerToolService: TimerToolExecuting {
         case .cancel(let timerID):
             var timers = activeTimers()
             guard let index = timers.firstIndex(where: { $0.id == timerID }) else {
-                return Self.result(
+                return .make(
                     status: "not_found",
                     message: "That timer is no longer active. List timers again to get a current ID."
                 )
@@ -256,9 +264,6 @@ final class TimerToolService: TimerToolExecuting {
         ]
     }
 
-    private static func result(status: String, message: String) -> ChatToolResult {
-        ChatToolResult(response: ["status": .string(status), "message": .string(message)])
-    }
 
     nonisolated static func durationText(_ seconds: Int) -> String {
         let days = seconds / 86_400
