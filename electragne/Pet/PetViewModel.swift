@@ -595,48 +595,28 @@ class PetViewModel {
     private func updateWindowTopMovement() {
         guard petWindow != nil else { return }
         guard case .walkingOnWindow = state else { return }
-        guard let id = climbWindowID,
-              let frame = windowFrame(id: id),
-              let screen = currentScreen else {
-            // The window disappeared from under the pet
+        guard let id = climbWindowID, let screen = currentScreen else { return }
+        let action = WindowTopPolicy.evaluate(.init(
+            env: environment.snapshot(includeWindows: true),
+            windowID: id,
+            screen: screen,
+            moveX: scaledMoveX(),
+            isMovingRight: isMovingRight
+        ))
+        switch action {
+        case .move(let point):
+            surface.setOrigin(point)
+        case .lookDown(let point):
+            surface.setOrigin(point)
+            startLookingDown()
+        case .jumpDown(let frame):
+            stopIdleTimer()
+            startJumpingDown(fromPlatform: frame)
+        case .fall:
             stopMovementTimer()
             stopIdleTimer()
             startFalling()
-            return
         }
-
-        let petSize = surface.frame.width
-
-        // If the window moved up under the menu bar, hop down
-        if frame.maxY + petSize > screen.visibleFrame.maxY {
-            stopIdleTimer()
-            startJumpingDown(fromPlatform: frame)
-            return
-        }
-
-        let moveX = abs(scaledMoveX())
-        var newX = surface.frame.origin.x
-
-        if isMovingRight {
-            newX += moveX
-        } else {
-            newX -= moveX
-        }
-
-        // Check window-top boundaries
-        let atRightEdge = newX + petSize >= frame.maxX
-        let atLeftEdge = newX <= frame.minX
-
-        if atRightEdge || atLeftEdge {
-            // At edge of the window, trigger look_down
-            newX = atRightEdge ? frame.maxX - petSize : frame.minX
-            surface.setOrigin(NSPoint(x: newX, y: frame.maxY))
-            startLookingDown()
-            return
-        }
-
-        // Ride the window top (it may be moving)
-        surface.setOrigin(NSPoint(x: newX, y: frame.maxY))
     }
 
     // MARK: - Dock State Transitions
