@@ -27,7 +27,7 @@ nonisolated enum GmailToolRequest: Equatable, Sendable {
         let accountID = value("accountID")
 
         switch toolCall.name {
-        case "list_google_accounts", "list_gmail_accounts":
+        case "list_google_accounts":
             self = .listAccounts
         case "search_gmail":
             let rawLimit = toolCall.arguments["limit"]?.numberValue ?? 10

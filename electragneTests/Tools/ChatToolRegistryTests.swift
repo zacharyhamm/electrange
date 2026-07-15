@@ -16,9 +16,11 @@ struct ChatToolRegistryTests {
         let gemini = ChatToolRegistry.definitions(for: .gemini)
         let ollama = ChatToolRegistry.definitions(for: .ollama)
 
-        #expect(gemini.count == 25)
+        // web_search is the only Ollama-only tool: Gemini uses server-side
+        // grounding instead. Every other definition is shared.
+        #expect(gemini.count == ChatToolRegistry.definitions.count - 1)
         #expect(!gemini.contains { $0.name == "web_search" })
-        #expect(ollama.count == 26)
+        #expect(ollama.count == ChatToolRegistry.definitions.count)
         #expect(ollama.first?.name == "web_search")
         #expect(Set(gemini.map(\.name)).isSubset(of: Set(ollama.map(\.name))))
     }

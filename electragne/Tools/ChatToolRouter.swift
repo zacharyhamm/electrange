@@ -2,12 +2,7 @@ import Foundation
 
 @MainActor
 final class ChatToolRouter {
-    private let reminderExecutor: any ReminderToolExecuting
-    private let notesExecutor: any NotesToolExecuting
-    private let desktopExecutor: any DesktopToolExecuting
-    private let timerExecutor: any TimerToolExecuting
-    private let gmailExecutor: any GmailToolExecuting
-    private let calendarExecutor: any CalendarToolExecuting
+    private let executors: [ChatToolFamily: any ToolExecuting]
 
     init(
         reminderExecutor: any ReminderToolExecuting,
@@ -15,14 +10,18 @@ final class ChatToolRouter {
         desktopExecutor: any DesktopToolExecuting,
         timerExecutor: any TimerToolExecuting,
         gmailExecutor: (any GmailToolExecuting)? = nil,
-        calendarExecutor: (any CalendarToolExecuting)? = nil
+        calendarExecutor: (any CalendarToolExecuting)? = nil,
+        webSearchExecutor: (any ToolExecuting)? = nil
     ) {
-        self.reminderExecutor = reminderExecutor
-        self.notesExecutor = notesExecutor
-        self.desktopExecutor = desktopExecutor
-        self.timerExecutor = timerExecutor
-        self.gmailExecutor = gmailExecutor ?? GmailToolService()
-        self.calendarExecutor = calendarExecutor ?? CalendarToolService()
+        executors = [
+            .reminders: ReminderToolAdapter(reminderExecutor),
+            .notes: NotesToolAdapter(notesExecutor),
+            .desktop: DesktopToolAdapter(desktopExecutor),
+            .timers: TimerToolAdapter(timerExecutor),
+            .gmail: GmailToolAdapter(gmailExecutor ?? GmailToolService()),
+            .calendar: CalendarToolAdapter(calendarExecutor ?? CalendarToolService()),
+            .webSearch: webSearchExecutor ?? WebSearchExecutor(),
+        ]
     }
 
     func execute(
@@ -31,174 +30,22 @@ final class ChatToolRouter {
         onStatus: (String) -> Void
     ) async -> ChatToolResult {
         guard let definition = ChatToolRegistry.definition(named: call.name),
-              definition.family != .webSearch else {
+              let executor = executors[definition.family] else {
             return .error("Unknown tool ‘\(call.name)’.")
         }
 
-        switch definition.family {
-        case .reminders:
-            return await executeReminder(call, definition: definition, confirm: confirm, onStatus: onStatus)
-        case .notes:
-            return await executeNote(call, definition: definition, confirm: confirm, onStatus: onStatus)
-        case .desktop:
-            return await executeDesktop(call, definition: definition, confirm: confirm, onStatus: onStatus)
-        case .timers:
-            return await executeTimer(call, definition: definition, confirm: confirm, onStatus: onStatus)
-        case .gmail:
-            return await executeGmail(call, definition: definition, confirm: confirm, onStatus: onStatus)
-        case .calendar:
-            return await executeCalendar(call, definition: definition, confirm: confirm, onStatus: onStatus)
-        case .webSearch:
-            return .error("Unknown tool ‘\(call.name)’.")
-        }
-    }
-
-    private func executeReminder(
-        _ call: ChatToolCall,
-        definition: ChatToolDefinition,
-        confirm: (ToolConfirmationDetails) async -> Bool,
-        onStatus: (String) -> Void
-    ) async -> ChatToolResult {
-        let request: ReminderToolRequest
+        let action: PreparedToolAction
         do {
-            request = try ReminderToolRequest(toolCall: call)
-        } catch let error as ReminderRequestError {
-            return .error(error.localizedDescription)
+            action = try await executor.prepare(call)
         } catch {
-            return .error("That reminder request was invalid.")
+            return .error(error.localizedDescription)
         }
-        guard await approve(reminderExecutor.confirmationDetails(for: request), using: confirm) else {
-            return Self.cancelledResult
+
+        if let confirmation = action.confirmation {
+            guard await confirm(confirmation) else { return Self.cancelledResult }
         }
         onStatus(definition.executionStatus)
-        return await reminderExecutor.execute(request)
-    }
-
-    private func executeNote(
-        _ call: ChatToolCall,
-        definition: ChatToolDefinition,
-        confirm: (ToolConfirmationDetails) async -> Bool,
-        onStatus: (String) -> Void
-    ) async -> ChatToolResult {
-        let request: NoteToolRequest
-        do {
-            request = try NoteToolRequest(toolCall: call)
-        } catch let error as NoteToolError {
-            return .error(error.localizedDescription)
-        } catch {
-            return .error("That Notes request was invalid.")
-        }
-        guard await approve(notesExecutor.confirmationDetails(for: request), using: confirm) else {
-            return Self.cancelledResult
-        }
-        onStatus(definition.executionStatus)
-        return await notesExecutor.execute(request)
-    }
-
-    private func executeDesktop(
-        _ call: ChatToolCall,
-        definition: ChatToolDefinition,
-        confirm: (ToolConfirmationDetails) async -> Bool,
-        onStatus: (String) -> Void
-    ) async -> ChatToolResult {
-        let request: DesktopToolRequest
-        do {
-            request = try DesktopToolRequest(toolCall: call)
-        } catch let error as DesktopToolError {
-            return .error(error.localizedDescription)
-        } catch {
-            return .error("That tool request was invalid.")
-        }
-        guard await approve(desktopExecutor.confirmationDetails(for: request), using: confirm) else {
-            return Self.cancelledResult
-        }
-        onStatus(definition.executionStatus)
-        return await desktopExecutor.execute(request)
-    }
-
-    private func executeTimer(
-        _ call: ChatToolCall,
-        definition: ChatToolDefinition,
-        confirm: (ToolConfirmationDetails) async -> Bool,
-        onStatus: (String) -> Void
-    ) async -> ChatToolResult {
-        let request: TimerToolRequest
-        do {
-            request = try TimerToolRequest(toolCall: call)
-        } catch let error as TimerToolError {
-            return .error(error.localizedDescription)
-        } catch {
-            return .error("That timer request was invalid.")
-        }
-        guard await approve(timerExecutor.confirmationDetails(for: request), using: confirm) else {
-            return Self.cancelledResult
-        }
-        onStatus(definition.executionStatus)
-        return await timerExecutor.execute(request)
-    }
-
-    private func executeGmail(
-        _ call: ChatToolCall,
-        definition: ChatToolDefinition,
-        confirm: (ToolConfirmationDetails) async -> Bool,
-        onStatus: (String) -> Void
-    ) async -> ChatToolResult {
-        let request: GmailToolRequest
-        do {
-            request = try GmailToolRequest(toolCall: call)
-        } catch let error as GmailToolError {
-            return .error(error.localizedDescription)
-        } catch {
-            return .error("That Gmail request was invalid.")
-        }
-
-        let prepared: GmailPreparedRequest
-        do {
-            prepared = try await gmailExecutor.prepare(request)
-        } catch {
-            return .error(error.localizedDescription)
-        }
-        guard await approve(prepared.confirmation, using: confirm) else {
-            return Self.cancelledResult
-        }
-        onStatus(definition.executionStatus)
-        return await gmailExecutor.execute(prepared)
-    }
-
-    private func executeCalendar(
-        _ call: ChatToolCall,
-        definition: ChatToolDefinition,
-        confirm: (ToolConfirmationDetails) async -> Bool,
-        onStatus: (String) -> Void
-    ) async -> ChatToolResult {
-        let request: CalendarToolRequest
-        do {
-            request = try CalendarToolRequest(toolCall: call)
-        } catch let error as CalendarToolError {
-            return .error(error.localizedDescription)
-        } catch {
-            return .error("That Google Calendar request was invalid.")
-        }
-
-        let prepared: CalendarPreparedRequest
-        do {
-            prepared = try await calendarExecutor.prepare(request)
-        } catch {
-            return .error(error.localizedDescription)
-        }
-        guard await approve(prepared.confirmation, using: confirm) else {
-            return Self.cancelledResult
-        }
-        onStatus(definition.executionStatus)
-        return await calendarExecutor.execute(prepared)
-    }
-
-    private func approve(
-        _ details: ToolConfirmationDetails?,
-        using confirm: (ToolConfirmationDetails) async -> Bool
-    ) async -> Bool {
-        guard let details else { return true }
-        return await confirm(details)
+        return await action.execute()
     }
 
     private static let cancelledResult = ChatToolResult(response: [

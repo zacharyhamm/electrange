@@ -53,6 +53,25 @@ struct ChatToolRouterTests {
         #expect(timers.executed.isEmpty)
     }
 
+    @Test func everyRegistryToolResolvesToAnExecutor() async {
+        // Each registered tool must dispatch to a real executor: the result
+        // may be a validation error (no arguments were supplied), but never
+        // the router's unknown-tool refusal.
+        let router = makeRouter(
+            MockReminderExecutor(), MockNotesExecutor(), MockDesktopExecutor(), MockTimerExecutor()
+        )
+
+        for definition in ChatToolRegistry.definitions {
+            let result = await router.execute(
+                call(definition.name), confirm: { _ in true }, onStatus: { _ in }
+            )
+            #expect(
+                result.response["message"]?.stringValue != "Unknown tool ‘\(definition.name)’.",
+                "\(definition.name) has no executor"
+            )
+        }
+    }
+
     @Test func reportsUnknownToolsAndFamilyValidationErrors() async {
         let router = makeRouter(
             MockReminderExecutor(), MockNotesExecutor(), MockDesktopExecutor(), MockTimerExecutor()
@@ -83,7 +102,8 @@ struct ChatToolRouterTests {
             desktopExecutor: desktop,
             timerExecutor: timers,
             gmailExecutor: gmail ?? MockGmailExecutor(),
-            calendarExecutor: calendar ?? MockCalendarExecutor()
+            calendarExecutor: calendar ?? MockCalendarExecutor(),
+            webSearchExecutor: MockWebSearchExecutor()
         )
     }
 
@@ -136,6 +156,17 @@ private final class MockTimerExecutor: TimerToolExecuting {
     func execute(_ request: TimerToolRequest) async -> ChatToolResult {
         executed.append(request)
         return ChatToolResult(response: ["status": .string("ok")])
+    }
+}
+
+@MainActor
+private final class MockWebSearchExecutor: ToolExecuting {
+    var executed: [ChatToolCall] = []
+    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
+        PreparedToolAction(confirmation: nil, execute: { [weak self] in
+            self?.executed.append(call)
+            return ChatToolResult(response: ["status": .string("ok")])
+        })
     }
 }
 
