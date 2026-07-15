@@ -4,6 +4,20 @@ import Security
 nonisolated enum ChatAPIProvider: String, CaseIterable, Sendable {
     case gemini
     case ollama
+
+    var environmentKey: String {
+        switch self {
+        case .gemini: "GEMINI_API_KEY"
+        case .ollama: "OLLAMA_API_KEY"
+        }
+    }
+
+    var keyFile: String {
+        switch self {
+        case .gemini: ".gemini.api.key"
+        case .ollama: ".ollama/api_key"
+        }
+    }
 }
 
 nonisolated enum ChatAPIKeyStoreError: LocalizedError, Equatable {
@@ -31,6 +45,29 @@ nonisolated enum ChatAPIKeyStore {
         }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Keychain first, then environment for terminal launches, then the
+    /// provider CLI's key file for Finder launches.
+    static func load(for provider: ChatAPIProvider) -> String? {
+        load(for: provider, keychainKey: key(for: provider))
+    }
+
+    static func load(
+        for provider: ChatAPIProvider,
+        keychainKey: String?,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: String = HomeDirectory.realPath
+    ) -> String? {
+        for rawValue in [keychainKey, environment[provider.environmentKey]] {
+            if let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+                return value
+            }
+        }
+        let url = URL(fileURLWithPath: homeDirectory).appendingPathComponent(provider.keyFile)
+        guard let value = try? String(contentsOf: url, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        return value
     }
 
     static func setKey(_ rawValue: String, for provider: ChatAPIProvider) throws {

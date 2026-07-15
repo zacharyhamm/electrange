@@ -18,6 +18,7 @@ final class ChatBubbleWindowController {
     private var onDismiss: (() -> Void)?
     private let ollamaClient: OllamaClient
     private let geminiClient: GeminiClient
+    private let chatConfig: ChatConfig
     private let toolRouter: ChatToolRouter
     private var streamTask: Task<Void, Never>?
     private var confirmationContinuation: CheckedContinuation<Bool, Never>?
@@ -26,8 +27,6 @@ final class ChatBubbleWindowController {
     /// local model happens in startStream.
     private let chatStore: ChatStore
     private var currentChat: StoredChat
-    /// Request cap for the local Ollama model (Gemini gets the full history).
-    private static let maxOllamaHistoryMessages = 100
     private var activeStreamID: UUID?
 
     private var history: [OllamaMessage] {
@@ -48,10 +47,12 @@ final class ChatBubbleWindowController {
         timerToolExecutor: (any TimerToolExecuting)? = nil,
         gmailToolExecutor: (any GmailToolExecuting)? = nil,
         calendarToolExecutor: (any CalendarToolExecuting)? = nil,
-        chatStore: ChatStore = ChatStore()
+        chatStore: ChatStore = ChatStore(),
+        chatConfig: ChatConfig = .default
     ) {
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
+        self.chatConfig = chatConfig
         self.toolRouter = ChatToolRouter(
             reminderExecutor: reminderToolExecutor ?? AppleReminderService(),
             notesExecutor: notesToolExecutor ?? AppleNotesService(),
@@ -161,7 +162,7 @@ final class ChatBubbleWindowController {
         // needs a request-time cap. Storage and transcript are never trimmed.
         let messages = useGemini
             ? history
-            : Array(history.suffix(Self.maxOllamaHistoryMessages))
+            : Array(history.suffix(chatConfig.maxHistoryMessages))
         let streamID = UUID()
         activeStreamID = streamID
 
@@ -446,4 +447,3 @@ private final class ChatBubblePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 }
-

@@ -3,6 +3,53 @@ import Testing
 @testable import electragne
 
 struct OllamaClientTests {
+    @Test func streamAssemblesTokensStatusesAndMultipleToolRounds() async throws {
+        let transport = StubChatHTTPTransport([
+            .init(lines: [#"{"message":{"content":"","tool_calls":[{"function":{"name":"list_timers","arguments":{}}}]},"done":true}"#]),
+            .init(lines: [#"{"message":{"content":"","tool_calls":[{"function":{"name":"open_app","arguments":{"name":"Notes"}}}]},"done":true}"#]),
+            .init(lines: [
+                #"{"message":{"content":"Hel"},"done":false}"#,
+                #"{"message":{"content":"lo"},"done":true}"#,
+            ]),
+        ])
+        let client = OllamaClient(transport: transport)
+        var tokens = ""
+        var statuses: [String] = []
+        var calls: [String] = []
+
+        try await client.streamChat(
+            history: [OllamaMessage(role: "user", content: "Do two things")],
+            onStatus: { statuses.append($0) },
+            onToolCall: { call in
+                calls.append(call.name)
+                return .make(status: "ok", message: "done")
+            },
+            onToken: { tokens += $0 }
+        )
+
+        #expect(tokens == "Hello")
+        #expect(calls == ["list_timers", "open_app"])
+        #expect(statuses.last == "Thinking…")
+        #expect(transport.requests.count == 3)
+        #expect(String(decoding: transport.requests[1].httpBody ?? Data(), as: UTF8.self).contains("tool_name"))
+    }
+
+    @Test func streamThrowsHTTPError() async {
+        let client = OllamaClient(transport: StubChatHTTPTransport([.init(status: 503)]))
+        await #expect(throws: OllamaError.badStatus(503)) {
+            try await client.streamChat(history: [], onToken: { _ in })
+        }
+    }
+
+    @Test func streamPropagatesCancellation() async {
+        let client = OllamaClient(transport: StubChatHTTPTransport([
+            .init(error: CancellationError()),
+        ]))
+        await #expect(throws: CancellationError.self) {
+            try await client.streamChat(history: [], onToken: { _ in })
+        }
+    }
+
     @Test func decodesStreamingContentLine() {
         let line = #"{"model":"gemma4:latest","created_at":"2026-07-14T00:00:00Z","message":{"role":"assistant","content":"Hel"},"done":false}"#
 
@@ -182,7 +229,8 @@ struct OllamaClientTests {
 
     @Test func apiKeyComesFromEnvironmentFirstThenFile() throws {
         #expect(
-            OllamaWebSearch.loadAPIKey(
+            ChatAPIKeyStore.load(
+                for: .ollama,
                 keychainKey: nil,
                 environment: ["OLLAMA_API_KEY": " key-from-env\n"],
                 homeDirectory: "/nonexistent"
@@ -202,10 +250,11 @@ struct OllamaClientTests {
         )
         defer { try? FileManager.default.removeItem(at: home) }
 
-        #expect(OllamaWebSearch.loadAPIKey(keychainKey: nil, environment: [:], homeDirectory: home.path) == "key-from-file")
-        #expect(OllamaWebSearch.loadAPIKey(keychainKey: nil, environment: [:], homeDirectory: "/nonexistent") == nil)
+        #expect(ChatAPIKeyStore.load(for: .ollama, keychainKey: nil, environment: [:], homeDirectory: home.path) == "key-from-file")
+        #expect(ChatAPIKeyStore.load(for: .ollama, keychainKey: nil, environment: [:], homeDirectory: "/nonexistent") == nil)
         #expect(
-            OllamaWebSearch.loadAPIKey(
+            ChatAPIKeyStore.load(
+                for: .ollama,
                 keychainKey: " key-from-keychain ",
                 environment: ["OLLAMA_API_KEY": "key-from-env"],
                 homeDirectory: home.path

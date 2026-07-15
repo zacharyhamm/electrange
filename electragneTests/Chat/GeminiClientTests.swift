@@ -3,6 +3,65 @@ import Testing
 @testable import electragne
 
 struct GeminiClientTests {
+    @Test func streamAssemblesTokensStatusesAndMultipleToolRounds() async throws {
+        let transport = StubChatHTTPTransport([
+            .init(lines: [#"data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"list_timers","id":"one","args":{}},"thoughtSignature":"a"}]}}]}"#]),
+            .init(lines: [#"data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"open_app","id":"two","args":{"name":"Notes"}},"thoughtSignature":"b"}]}}]}"#]),
+            .init(lines: [
+                #"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hel"}]}}]}"#,
+                #"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"lo"}]}}]}"#,
+            ]),
+        ])
+        let client = GeminiClient(transport: transport, apiKey: { "test-key" })
+        var tokens = ""
+        var statuses: [String] = []
+        var calls: [String] = []
+
+        try await client.streamChat(
+            history: [OllamaMessage(role: "user", content: "Do two things")],
+            onStatus: { statuses.append($0) },
+            onToolCall: { call in
+                calls.append(call.name)
+                return .make(status: "ok", message: "done")
+            },
+            onToken: { tokens += $0 }
+        )
+
+        #expect(tokens == "Hello")
+        #expect(calls == ["list_timers", "open_app"])
+        #expect(statuses.last == "Thinking…")
+        #expect(transport.requests.count == 3)
+        #expect(String(decoding: transport.requests[1].httpBody ?? Data(), as: UTF8.self).contains("functionResponse"))
+    }
+
+    @Test func streamThrowsHTTPAndQuotaErrors() async {
+        let quota = GeminiClient(
+            transport: StubChatHTTPTransport([.init(status: 429)]),
+            apiKey: { "test-key" }
+        )
+        await #expect(throws: GeminiError.quotaExceeded) {
+            try await quota.streamChat(history: [], onStatus: { _ in }, onToolCall: { _ in .error("") }, onToken: { _ in })
+        }
+
+        let server = GeminiClient(
+            transport: StubChatHTTPTransport([.init(status: 500)]),
+            apiKey: { "test-key" }
+        )
+        await #expect(throws: GeminiError.badStatus(500)) {
+            try await server.streamChat(history: [], onStatus: { _ in }, onToolCall: { _ in .error("") }, onToken: { _ in })
+        }
+    }
+
+    @Test func streamPropagatesCancellation() async {
+        let client = GeminiClient(
+            transport: StubChatHTTPTransport([.init(error: CancellationError())]),
+            apiKey: { "test-key" }
+        )
+        await #expect(throws: CancellationError.self) {
+            try await client.streamChat(history: [], onStatus: { _ in }, onToolCall: { _ in .error("") }, onToken: { _ in })
+        }
+    }
+
     @Test func decodesTextFromSSEDataLine() {
         let line = #"data: {"candidates":[{"content":{"parts":[{"text":"Baa! "},{"text":"Hello."}],"role":"model"}}],"modelVersion":"gemini-3.1-flash-lite"}"#
 
@@ -147,7 +206,8 @@ struct GeminiClientTests {
 
     @Test func apiKeyComesFromEnvironmentFirstThenFile() throws {
         #expect(
-            GeminiClient.loadAPIKey(
+            ChatAPIKeyStore.load(
+                for: .gemini,
                 keychainKey: nil,
                 environment: ["GEMINI_API_KEY": " gm-key-env\n"],
                 homeDirectory: "/nonexistent"
@@ -164,10 +224,11 @@ struct GeminiClientTests {
         )
         defer { try? FileManager.default.removeItem(at: home) }
 
-        #expect(GeminiClient.loadAPIKey(keychainKey: nil, environment: [:], homeDirectory: home.path) == "gm-key-file")
-        #expect(GeminiClient.loadAPIKey(keychainKey: nil, environment: [:], homeDirectory: "/nonexistent") == nil)
+        #expect(ChatAPIKeyStore.load(for: .gemini, keychainKey: nil, environment: [:], homeDirectory: home.path) == "gm-key-file")
+        #expect(ChatAPIKeyStore.load(for: .gemini, keychainKey: nil, environment: [:], homeDirectory: "/nonexistent") == nil)
         #expect(
-            GeminiClient.loadAPIKey(
+            ChatAPIKeyStore.load(
+                for: .gemini,
                 keychainKey: " key-from-keychain ",
                 environment: ["GEMINI_API_KEY": "key-from-env"],
                 homeDirectory: home.path

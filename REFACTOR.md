@@ -17,7 +17,7 @@ independently landable).
 | A3 | Environment seams for the pet core | **Done** |
 | A4 | Pure per-state movement policies + characterization tests | **Done** |
 | A5 | Behavior controllers + declarative timers | **Done** |
-| B1 | Chat transport seam + config + first streaming tests | Pending |
+| B1 | Chat transport seam + config + first streaming tests | **Done** |
 | B2 | Neutral `ChatMessage` + shared `ChatProviderEngine` | Pending |
 | B3 | `ChatBubbleWindowController` slim-down | Pending |
 
@@ -239,6 +239,11 @@ per-state smoke item after each.
 ---
 
 ## B1 — Chat transport seam + config (shapes unchanged)
+
+**Status: Done.** Both providers and Ollama web search now use the injected
+`ChatHTTPTransport`; API-key fallback and chat limits/defaults are centralized,
+Gemini request URLs fail safely, and stub-transport tests cover streaming,
+status callbacks, multi-round tools, HTTP failures, and cancellation.
 
 1. `Chat/ChatHTTPTransport.swift`:
 

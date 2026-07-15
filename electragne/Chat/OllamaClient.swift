@@ -41,6 +41,11 @@ nonisolated struct OllamaWebSearch {
     static let endpoint = URL(string: "https://ollama.com/api/web_search")!
     static let maxResults = 4
     static let maxResultCharacters = 1500
+    let transport: any ChatHTTPTransport
+
+    init(transport: any ChatHTTPTransport = URLSessionTransport(session: .shared)) {
+        self.transport = transport
+    }
 
     private struct SearchRequest: Encodable {
         let query: String
@@ -62,41 +67,8 @@ nonisolated struct OllamaWebSearch {
         let results: [Result]
     }
 
-    /// The env var works for terminal launches; the key file works when the
-    /// app is launched from Finder (GUI apps don't inherit shell env).
-    nonisolated static func loadAPIKey(
-        keychainKey: String? = ChatAPIKeyStore.key(for: .ollama),
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        homeDirectory: String = realHomeDirectory()
-    ) -> String? {
-        if let key = keychainKey?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !key.isEmpty {
-            return key
-        }
-        if let key = environment["OLLAMA_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !key.isEmpty {
-            return key
-        }
-        let keyFile = URL(fileURLWithPath: homeDirectory).appendingPathComponent(".ollama/api_key")
-        if let key = try? String(contentsOf: keyFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !key.isEmpty {
-            return key
-        }
-        return nil
-    }
-
-    /// The sandbox reports the container as home; the key file lives in the
-    /// user's real home directory.
-    nonisolated static func realHomeDirectory() -> String {
-        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
-            return String(cString: dir)
-        }
-        return NSHomeDirectory()
-    }
-
     func resultsText(query: String) async throws -> String {
-        guard let key = Self.loadAPIKey() else { throw OllamaError.missingAPIKey }
+        guard let key = ChatAPIKeyStore.load(for: .ollama) else { throw OllamaError.missingAPIKey }
 
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
@@ -106,7 +78,7 @@ nonisolated struct OllamaWebSearch {
             SearchRequest(query: query, maxResults: Self.maxResults)
         )
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await transport.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw OllamaError.badStatus(http.statusCode)
         }
@@ -132,7 +104,7 @@ nonisolated struct OllamaWebSearch {
 /// Minimal streaming client for a local Ollama server.
 struct OllamaClient: ChatClient {
     nonisolated static let defaultBaseURL = URL(string: "http://localhost:11434")!
-    nonisolated static let defaultModel = "gemma4:latest"
+    nonisolated static let defaultModel = ChatConfig.default.ollamaModel
     nonisolated static let systemPrompt = """
         You are Baaz, a highly intelligent sheep living as a desktop pet, \
         chatting with your owner. Respond as if chatting: keep replies short and \
@@ -168,15 +140,30 @@ struct OllamaClient: ChatClient {
     }
     /// Ollama defaults num_ctx to a few thousand tokens; raise it so long
     /// conversations keep their earlier turns in context.
-    nonisolated static let contextWindowTokens = 32768
+    nonisolated static let contextWindowTokens = ChatConfig.default.contextWindowTokens
     /// Bound on search → answer round-trips per user message.
-    nonisolated static let maxToolRounds = 3
+    nonisolated static let maxToolRounds = ChatConfig.default.maxToolRounds
 
-    var baseURL = defaultBaseURL
-    var model = defaultModel
-    var webSearch = OllamaWebSearch()
+    var baseURL: URL
+    var model: String
+    var webSearch: OllamaWebSearch
+    let transport: any ChatHTTPTransport
+    let config: ChatConfig
     /// Resolved per request so Settings changes apply immediately.
     var userName: String? { UserPreferences.resolvedUserName() }
+
+    init(
+        baseURL: URL = defaultBaseURL,
+        model: String? = nil,
+        transport: any ChatHTTPTransport = URLSessionTransport(session: .shared),
+        config: ChatConfig = .default
+    ) {
+        self.baseURL = baseURL
+        self.model = model ?? config.ollamaModel
+        self.transport = transport
+        self.config = config
+        self.webSearch = OllamaWebSearch(transport: transport)
+    }
 
     private nonisolated struct ChatRequest: Encodable {
         struct Options: Encodable {
@@ -251,7 +238,8 @@ struct OllamaClient: ChatClient {
     nonisolated static func makeRequestBody(
         model: String,
         history: [OllamaMessage],
-        userName: String? = nil
+        userName: String? = nil,
+        contextWindowTokens: Int = ChatConfig.default.contextWindowTokens
     ) throws -> Data {
         let request = ChatRequest(
             model: model,
@@ -291,7 +279,7 @@ struct OllamaClient: ChatClient {
     ) async throws {
         var messages = history
 
-        for round in 0...Self.maxToolRounds {
+        for round in 0...config.maxToolRounds {
             var toolCalls: [OllamaToolCall] = []
             var roundContent = ""
 
@@ -301,15 +289,16 @@ struct OllamaClient: ChatClient {
             request.httpBody = try Self.makeRequestBody(
                 model: model,
                 history: messages,
-                userName: userName
+                userName: userName,
+                contextWindowTokens: config.contextWindowTokens
             )
 
-            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            let (lines, response) = try await transport.lines(for: request)
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                 throw OllamaError.badStatus(http.statusCode)
             }
 
-            for try await line in bytes.lines {
+            for try await line in lines {
                 guard let chunk = Self.decodeChunk(fromLine: line) else { continue }
                 if !chunk.content.isEmpty {
                     roundContent += chunk.content
@@ -319,7 +308,7 @@ struct OllamaClient: ChatClient {
                 if chunk.done { break }
             }
 
-            guard !toolCalls.isEmpty, round < Self.maxToolRounds else { return }
+            guard !toolCalls.isEmpty, round < config.maxToolRounds else { return }
 
             messages.append(
                 OllamaMessage(role: "assistant", content: roundContent, toolCalls: toolCalls)

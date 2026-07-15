@@ -5,6 +5,7 @@ enum GeminiError: Error, Equatable {
     case quotaExceeded
     case missingAPIKey
     case toolRoundLimit
+    case invalidModelName
 }
 
 /// One grounding source (search result) attached to a Gemini answer.
@@ -33,7 +34,7 @@ nonisolated struct GeminiContent: Equatable, Codable, Sendable {
 /// stored chat history remains provider-neutral user/model text.
 struct GeminiClient: ChatClient {
     nonisolated static let defaultBaseURL = URL(string: "https://generativelanguage.googleapis.com")!
-    nonisolated static let defaultModel = "gemini-3.1-flash-lite"
+    nonisolated static let defaultModel = ChatConfig.default.geminiModel
     nonisolated static let systemPrompt = """
         You are Baaz, a highly intelligent sheep living as a desktop pet, \
         chatting with your owner. Respond as if chatting: keep replies short and \
@@ -52,11 +53,28 @@ struct GeminiClient: ChatClient {
         reports success.
         """
     nonisolated static let maxSourceLinks = 3
-    nonisolated static let maxToolRounds = 3
+    nonisolated static let maxToolRounds = ChatConfig.default.maxToolRounds
 
-    var baseURL = defaultBaseURL
-    var model = defaultModel
+    var baseURL: URL
+    var model: String
+    let transport: any ChatHTTPTransport
+    let config: ChatConfig
+    let apiKey: @Sendable () -> String?
     var userName: String? { UserPreferences.resolvedUserName() }
+
+    init(
+        baseURL: URL = defaultBaseURL,
+        model: String? = nil,
+        transport: any ChatHTTPTransport = URLSessionTransport(session: .shared),
+        config: ChatConfig = .default,
+        apiKey: @escaping @Sendable () -> String? = { ChatAPIKeyStore.load(for: .gemini) }
+    ) {
+        self.baseURL = baseURL
+        self.model = model ?? config.geminiModel
+        self.transport = transport
+        self.config = config
+        self.apiKey = apiKey
+    }
 
     private nonisolated struct GenerateRequest: Encodable {
         struct SystemInstruction: Encodable {
@@ -250,35 +268,13 @@ struct GeminiClient: ChatClient {
         return "\n\nSources: " + links.joined(separator: " · ")
     }
 
-    nonisolated static func loadAPIKey(
-        keychainKey: String? = ChatAPIKeyStore.key(for: .gemini),
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        homeDirectory: String = OllamaWebSearch.realHomeDirectory()
-    ) -> String? {
-        if let key = keychainKey?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !key.isEmpty {
-            return key
-        }
-        if let key = environment["GEMINI_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !key.isEmpty {
-            return key
-        }
-        let keyFile = URL(fileURLWithPath: homeDirectory).appendingPathComponent(".gemini.api.key")
-        if let key = try? String(contentsOf: keyFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !key.isEmpty {
-            return key
-        }
-        return nil
-    }
-
     func streamChat(
         history: [OllamaMessage],
         onStatus: (String) -> Void,
         onToolCall: (ChatToolCall) async -> ChatToolResult,
         onToken: (String) -> Void
     ) async throws {
-        guard let key = Self.loadAPIKey() else { throw GeminiError.missingAPIKey }
+        guard let key = apiKey() else { throw GeminiError.missingAPIKey }
 
         var contents = history.map { turn in
             GeminiContent(
@@ -290,12 +286,15 @@ struct GeminiClient: ChatClient {
         let requestNow = Date()
         let requestTimeZone = TimeZone.current
 
-        for round in 0...Self.maxToolRounds {
+        for round in 0...config.maxToolRounds {
             let url = baseURL.appendingPathComponent("v1beta/models/\(model):streamGenerateContent")
-            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+            guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+                throw GeminiError.invalidModelName
+            }
             components.queryItems = [URLQueryItem(name: "alt", value: "sse")]
 
-            var request = URLRequest(url: components.url!)
+            guard let requestURL = components.url else { throw GeminiError.invalidModelName }
+            var request = URLRequest(url: requestURL)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
@@ -306,7 +305,7 @@ struct GeminiClient: ChatClient {
                 timeZone: requestTimeZone
             )
 
-            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            let (lines, response) = try await transport.lines(for: request)
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                 throw http.statusCode == 429
                     ? GeminiError.quotaExceeded
@@ -315,7 +314,7 @@ struct GeminiClient: ChatClient {
 
             var modelParts: [ChatToolValue] = []
             var toolCalls: [ChatToolCall] = []
-            for try await line in bytes.lines {
+            for try await line in lines {
                 guard let chunk = Self.decodeChunk(fromLine: line) else { continue }
                 modelParts.append(contentsOf: chunk.modelParts)
                 if !chunk.text.isEmpty { onToken(chunk.text) }
@@ -332,7 +331,7 @@ struct GeminiClient: ChatClient {
                 if !sourcesText.isEmpty { onToken(sourcesText) }
                 return
             }
-            guard round < Self.maxToolRounds else { throw GeminiError.toolRoundLimit }
+            guard round < config.maxToolRounds else { throw GeminiError.toolRoundLimit }
 
             contents.append(GeminiContent(role: "model", parts: modelParts))
             var responseParts: [ChatToolValue] = []
