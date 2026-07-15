@@ -212,6 +212,88 @@ struct ChatInteractionTests {
         #expect(foundLink)
     }
 
+    @Test func inlineMathParserFindsBothSupportedDelimiterStyles() {
+        let extraction = InlineMathParser.extract(
+            from: "Euler: $e^{i\\pi}+1=0$ and \\(a^2+b^2=c^2\\)."
+        )
+
+        #expect(extraction.replacements.count == 2)
+        let replacements = Array(extraction.replacements.values)
+        #expect(replacements.contains { $0.source == "$e^{i\\pi}+1=0$" && $0.latex == "e^{i\\pi}+1=0" })
+        #expect(replacements.contains { $0.source == "\\(a^2+b^2=c^2\\)" && $0.latex == "a^2+b^2=c^2" })
+        #expect(!extraction.protectedText.contains("e^{i"))
+    }
+
+    @Test func inlineMathParserIgnoresCodeEscapesAndUnmatchedDelimiters() {
+        let source = #"`$code$` costs \$5, then $unfinished"#
+        let extraction = InlineMathParser.extract(from: source)
+
+        #expect(extraction.replacements.isEmpty)
+        #expect(extraction.protectedText == source)
+    }
+
+    @Test @MainActor func unmatchedBackslashDelimitersRemainVerbatim() {
+        let unfinished = #"Unfinished \(x + 1."#
+        let stray = #"A stray \) delimiter."#
+
+        #expect(ChatTextFormatter.displayText(unfinished).string == unfinished)
+        #expect(ChatTextFormatter.displayText(stray).string == stray)
+    }
+
+    @Test func displayMathDelimitersAreKeptAsLiteralText() {
+        let source = #"Keep $$x^2$$ and \[y^2\] literal."#
+        let extraction = InlineMathParser.extract(from: source)
+
+        #expect(extraction.replacements.count == 2)
+        #expect(extraction.replacements.values.allSatisfy { $0.latex == nil })
+    }
+
+    @Test @MainActor func displayTextRendersValidInlineMathAsAttachments() {
+        let display = ChatTextFormatter.displayText(
+            "Energy **$E=mc^2$** and \\(\\frac{a}{b}\\)."
+        )
+
+        var attachments = 0
+        var boldAttachment = false
+        display.enumerateAttributes(
+            in: NSRange(location: 0, length: display.length)
+        ) { attributes, _, _ in
+            guard attributes[.attachment] is NSTextAttachment else { return }
+            attachments += 1
+            if let font = attributes[.font] as? NSFont,
+               font.fontDescriptor.symbolicTraits.contains(.bold) {
+                boldAttachment = true
+            }
+        }
+        #expect(attachments == 2)
+        #expect(boldAttachment)
+    }
+
+    @Test @MainActor func invalidAndUnsupportedMathFallsBackToItsSource() {
+        let display = ChatTextFormatter.displayText(
+            #"Bad $\notARealCommand{x}$; keep $$z^2$$ and \[q\]."#
+        )
+
+        #expect(display.string == #"Bad $\notARealCommand{x}$; keep $$z^2$$ and \[q\]."#)
+        var attachmentFound = false
+        display.enumerateAttribute(
+            .attachment,
+            in: NSRange(location: 0, length: display.length)
+        ) { value, _, _ in
+            attachmentFound = attachmentFound || value != nil
+        }
+        #expect(!attachmentFound)
+    }
+
+    @Test @MainActor func inlineMathCanRenderForBothAppearances() {
+        let light = ChatTextFormatter.displayText("$x+1$", colorScheme: .light)
+        let dark = ChatTextFormatter.displayText("$x+1$", colorScheme: .dark)
+
+        #expect(light.attribute(.attachment, at: 0, effectiveRange: nil) is NSTextAttachment)
+        #expect(dark.attribute(.attachment, at: 0, effectiveRange: nil) is NSTextAttachment)
+        #expect((light.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment)?.image?.size.width ?? 0 > 0)
+    }
+
     @Test func chatTextWithoutURLsHasNoLinks() {
         let attributed = ChatTextFormatter.linkified("just a friendly plain sentence")
 

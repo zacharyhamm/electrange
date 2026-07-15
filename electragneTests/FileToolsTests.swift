@@ -85,6 +85,26 @@ struct FileToolsTests {
         #expect(matches.first?.relativePath == "Invoices 2026/Acme.pdf")
     }
 
+    @Test func breadthFirstSearchReachesSiblingBeforeVisitLimit() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("electragne-wide-search-\(UUID().uuidString)", isDirectory: true)
+        let large = root.appendingPathComponent("A-Large", isDirectory: true)
+        let nested = large.appendingPathComponent("Level", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try Data().write(to: nested.appendingPathComponent("unrelated.txt"))
+        try Data().write(to: root.appendingPathComponent("Z-Target.txt"))
+
+        let outcome = FileSearchEngine.searchWithDiagnostics(
+            query: "target", roots: [root], visitLimitPerRoot: 3
+        )
+
+        #expect(outcome.matches.map(\.relativePath) == ["Z-Target.txt"])
+        #expect(outcome.visitedItemCount == 3)
+        #expect(outcome.wasTruncated)
+    }
+
     private func call(_ name: String, _ arguments: [String: ChatToolValue]) -> ChatToolCall {
         ChatToolCall(id: "test-call", name: name, arguments: arguments)
     }

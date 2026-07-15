@@ -50,6 +50,16 @@ nonisolated enum ChatToolValue: Equatable, Codable, Sendable {
         guard case .object(let value) = self else { return nil }
         return value
     }
+
+    var boolValue: Bool? {
+        guard case .bool(let value) = self else { return nil }
+        return value
+    }
+
+    var numberValue: Double? {
+        guard case .number(let value) = self else { return nil }
+        return value
+    }
 }
 
 nonisolated struct ChatToolCall: Equatable, Sendable {

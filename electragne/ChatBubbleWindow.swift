@@ -101,8 +101,13 @@ enum ChatTextFormatter {
 
     /// AppKit rendition of `linkified` for NSTextView: inline presentation
     /// intents become concrete fonts, links keep their `.link` attribute.
-    static func displayText(_ text: String, size: CGFloat = 12) -> NSAttributedString {
-        let attributed = linkified(text)
+    static func displayText(
+        _ text: String,
+        size: CGFloat = 12,
+        colorScheme: ChatMathColorScheme = .light
+    ) -> NSAttributedString {
+        let extraction = InlineMathParser.extract(from: text)
+        let attributed = linkified(extraction.protectedText)
         let base = NSFont.systemFont(ofSize: size)
         let result = NSMutableAttributedString()
 
@@ -130,7 +135,39 @@ enum ChatTextFormatter {
             if let link = run.link {
                 attributes[.link] = link
             }
-            result.append(NSAttributedString(string: segment, attributes: attributes))
+            var plain = ""
+            func flushPlainText() {
+                guard !plain.isEmpty else { return }
+                result.append(NSAttributedString(string: plain, attributes: attributes))
+                plain = ""
+            }
+
+            for character in segment {
+                guard let replacement = extraction.replacements[character] else {
+                    plain.append(character)
+                    continue
+                }
+                flushPlainText()
+                if let latex = replacement.latex,
+                   let attachment = InlineMathRenderer.attachment(
+                    latex: latex,
+                    font: font,
+                    colorScheme: colorScheme
+                   ) {
+                    let rendered = NSMutableAttributedString(attachment: attachment)
+                    rendered.addAttributes(
+                        attributes,
+                        range: NSRange(location: 0, length: rendered.length)
+                    )
+                    result.append(rendered)
+                } else {
+                    result.append(NSAttributedString(
+                        string: replacement.source,
+                        attributes: attributes
+                    ))
+                }
+            }
+            flushPlainText()
         }
         return result
     }
@@ -168,6 +205,7 @@ private enum ChatTextMeasurer {
 /// hover — SwiftUI Text can't change the cursor per-run. Also provides native
 /// text selection and opens links with the default browser.
 private struct LinkedText: NSViewRepresentable {
+    @Environment(\.colorScheme) private var colorScheme
     let text: String
     var fontSize: CGFloat = UserPreferences.defaultChatFontSize
 
@@ -177,17 +215,30 @@ private struct LinkedText: NSViewRepresentable {
     final class Coordinator {
         private var cachedText: String?
         private var cachedFontSize: CGFloat?
+        private var cachedColorScheme: ChatMathColorScheme?
         private var cachedDisplay: NSAttributedString?
         private var sizesByWidth: [CGFloat: CGSize] = [:]
         var appliedToView = false
 
-        func display(for text: String, size: CGFloat) -> NSAttributedString {
-            if let cachedDisplay, cachedText == text, cachedFontSize == size {
+        func display(
+            for text: String,
+            size: CGFloat,
+            colorScheme: ChatMathColorScheme
+        ) -> NSAttributedString {
+            if let cachedDisplay,
+               cachedText == text,
+               cachedFontSize == size,
+               cachedColorScheme == colorScheme {
                 return cachedDisplay
             }
-            let display = ChatTextFormatter.displayText(text, size: size)
+            let display = ChatTextFormatter.displayText(
+                text,
+                size: size,
+                colorScheme: colorScheme
+            )
             cachedText = text
             cachedFontSize = size
+            cachedColorScheme = colorScheme
             cachedDisplay = display
             sizesByWidth = [:]
             appliedToView = false
@@ -227,7 +278,11 @@ private struct LinkedText: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSTextView, context: Context) {
-        let display = context.coordinator.display(for: text, size: fontSize)
+        let display = context.coordinator.display(
+            for: text,
+            size: fontSize,
+            colorScheme: colorScheme == .dark ? .dark : .light
+        )
         if !context.coordinator.appliedToView {
             view.textStorage?.setAttributedString(display)
             context.coordinator.appliedToView = true
@@ -241,7 +296,11 @@ private struct LinkedText: NSViewRepresentable {
     ) -> CGSize? {
         let width = proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
             ?? ChatBubblePlacement.defaultSize.width
-        let display = context.coordinator.display(for: text, size: fontSize)
+        let display = context.coordinator.display(
+            for: text,
+            size: fontSize,
+            colorScheme: colorScheme == .dark ? .dark : .light
+        )
         return context.coordinator.measuredSize(for: display, width: width)
     }
 }
@@ -297,7 +356,8 @@ final class ChatBubbleWindowController {
     private var onDismiss: (() -> Void)?
     private let ollamaClient: OllamaClient
     private let geminiClient: GeminiClient
-    private let reminderCreator: any ReminderCreating
+    private let reminderToolExecutor: any ReminderToolExecuting
+    private let notesToolExecutor: any NotesToolExecuting
     private let desktopToolExecutor: any DesktopToolExecuting
     private var streamTask: Task<Void, Never>?
     private var confirmationContinuation: CheckedContinuation<Bool, Never>?
@@ -322,13 +382,15 @@ final class ChatBubbleWindowController {
     init(
         ollamaClient: OllamaClient = OllamaClient(),
         geminiClient: GeminiClient = GeminiClient(),
-        reminderCreator: (any ReminderCreating)? = nil,
+        reminderToolExecutor: (any ReminderToolExecuting)? = nil,
+        notesToolExecutor: (any NotesToolExecuting)? = nil,
         desktopToolExecutor: (any DesktopToolExecuting)? = nil,
         chatStore: ChatStore = ChatStore()
     ) {
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
-        self.reminderCreator = reminderCreator ?? AppleReminderService()
+        self.reminderToolExecutor = reminderToolExecutor ?? AppleReminderService()
+        self.notesToolExecutor = notesToolExecutor ?? AppleNotesService()
         self.desktopToolExecutor = desktopToolExecutor ?? DesktopToolService()
         self.chatStore = chatStore
 
@@ -492,28 +554,48 @@ final class ChatBubbleWindowController {
     }
 
     private func executeToolCall(_ call: ChatToolCall) async -> ChatToolResult {
-        if call.name == "create_reminder" {
-            let request: ReminderRequest
+        if ["create_reminder", "list_reminders", "update_reminder", "delete_reminder"].contains(call.name) {
+            let request: ReminderToolRequest
             do {
-                request = try ReminderRequest(toolCall: call)
+                request = try ReminderToolRequest(toolCall: call)
+            } catch ReminderRequestError.missingArgument(let name) {
+                return .error("The ‘\(name)’ argument is required.")
+            } catch ReminderRequestError.invalidCompletion {
+                return .error("Reminder completion must be incomplete, completed, or all.")
+            } catch ReminderRequestError.noChanges {
+                return .error("At least one reminder change is required.")
             } catch {
-                return .error("A reminder title is required.")
+                return .error("That reminder request was invalid.")
             }
-            let details = ToolConfirmationDetails(
-                title: "Create this reminder?",
-                primaryText: request.title,
-                details: [
-                    ("List", request.listName ?? "Default"),
-                    ("Due", request.due ?? "None"),
-                    ("Notes", request.notes ?? "None"),
-                ].filter { $0.1 != "None" },
-                actionLabel: "Create"
-            )
-            guard await requestConfirmation(details) else {
+            if let details = reminderToolExecutor.confirmationDetails(for: request),
+               !(await requestConfirmation(details)) {
                 return Self.cancelledToolResult()
             }
-            model.status = "Saving reminder…"
-            return await reminderCreator.createReminder(request)
+            if case .list = request { model.status = "Reading reminders…" }
+            else { model.status = "Updating reminders…" }
+            return await reminderToolExecutor.execute(request)
+        }
+
+        if ["list_notes", "search_notes", "create_note", "update_note", "append_to_note", "delete_note"].contains(call.name) {
+            let request: NoteToolRequest
+            do {
+                request = try NoteToolRequest(toolCall: call)
+            } catch NoteToolError.missingArgument(let name) {
+                return .error("The ‘\(name)’ argument is required.")
+            } catch NoteToolError.noChanges {
+                return .error("At least one note change is required.")
+            } catch {
+                return .error("That Notes request was invalid.")
+            }
+            if let details = notesToolExecutor.confirmationDetails(for: request),
+               !(await requestConfirmation(details)) {
+                return Self.cancelledToolResult()
+            }
+            switch request {
+            case .list, .search: model.status = "Reading Notes…"
+            default: model.status = "Updating Notes…"
+            }
+            return await notesToolExecutor.execute(request)
         }
 
         let request: DesktopToolRequest
@@ -593,8 +675,10 @@ final class ChatBubbleWindowController {
         resolveToolConfirmation(approved: false)
         streamTask?.cancel()
         streamTask = nil
+        activeStreamID = nil
         chatStore.save(currentChat)
         currentChat = StoredChat()
+        model.text = ""
         model.entries = []
         model.phase = .idle
         refreshChatList()
@@ -858,9 +942,11 @@ private struct ChatBubbleView: View {
         }
         .onExitCommand(perform: onDismiss)
         .background {
-            // Invisible buttons so Cmd+/Cmd- adjust the chat font while the
-            // bubble is the key window ("+" is also reachable as Cmd-=).
+            // Window-scoped shortcuts. Invisible buttons let SwiftUI route
+            // them while the chat panel is the key window.
             Group {
+                Button("", action: onNewChat)
+                    .keyboardShortcut("n", modifiers: .command)
                 Button("") { model.adjustFontSize(by: 1) }
                     .keyboardShortcut("+", modifiers: .command)
                 Button("") { model.adjustFontSize(by: 1) }

@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		EE0000000000000000000001 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = EE0000000000000000000003 /* SwiftMath */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		DD000000000000000000000B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -39,6 +43,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EE0000000000000000000001 /* SwiftMath in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,6 +95,7 @@
 			);
 			name = electragne;
 			packageProductDependencies = (
+				EE0000000000000000000003 /* SwiftMath */,
 			);
 			productName = electragne;
 			productReference = 3F53307D2F32F272003EA740 /* electragne.app */;
@@ -148,6 +154,9 @@
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3F53307E2F32F272003EA740 /* Products */;
+			packageReferences = (
+				EE0000000000000000000002 /* XCRemoteSwiftPackageReference "SwiftMath" */,
+			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -198,6 +207,25 @@
 			targetProxy = DD000000000000000000000B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		EE0000000000000000000002 /* XCRemoteSwiftPackageReference "SwiftMath" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mgriebling/SwiftMath.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.7.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EE0000000000000000000003 /* SwiftMath */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EE0000000000000000000002 /* XCRemoteSwiftPackageReference "SwiftMath" */;
+			productName = SwiftMath;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		3F5330862F32F273003EA740 /* Debug */ = {
@@ -334,7 +362,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Electragne creates Apple Reminders that you explicitly confirm in chat.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Electragne reads your reminders and makes changes that you explicitly confirm in chat.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -369,7 +397,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Electragne creates Apple Reminders that you explicitly confirm in chat.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Electragne reads your reminders and makes changes that you explicitly confirm in chat.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

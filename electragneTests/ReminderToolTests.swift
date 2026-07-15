@@ -65,4 +65,33 @@ struct ReminderToolTests {
         expected.calendar = nil
         #expect(parsed == .timed(expected))
     }
+
+    @Test func parsesListUpdateAndDeleteRequests() throws {
+        let list = try ReminderToolRequest(toolCall: call("list_reminders", [
+            "query": .string(" bills "), "completion": .string("all"), "limit": .number(500),
+        ]))
+        #expect(list == .list(ReminderListRequest(query: "bills", listName: nil, completion: .all, limit: 50)))
+
+        let update = try ReminderToolRequest(toolCall: call("update_reminder", [
+            "identifier": .string(" reminder-1 "), "clearDue": .bool(true), "completed": .bool(true),
+        ]))
+        #expect(update == .update(ReminderUpdateRequest(
+            identifier: "reminder-1", title: nil, notes: nil, clearNotes: false,
+            listName: nil, due: nil, clearDue: true, completed: true
+        )))
+        #expect(try ReminderToolRequest(toolCall: call("delete_reminder", ["identifier": .string("r2")])) == .delete(identifier: "r2"))
+    }
+
+    @Test func rejectsInvalidReminderMutations() {
+        #expect(throws: ReminderRequestError.noChanges) {
+            try ReminderToolRequest(toolCall: call("update_reminder", ["identifier": .string("r1")]))
+        }
+        #expect(throws: ReminderRequestError.invalidCompletion("later")) {
+            try ReminderToolRequest(toolCall: call("list_reminders", ["completion": .string("later")]))
+        }
+    }
+
+    private func call(_ name: String, _ arguments: [String: ChatToolValue]) -> ChatToolCall {
+        ChatToolCall(id: "test", name: name, arguments: arguments)
+    }
 }
