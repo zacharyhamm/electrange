@@ -45,7 +45,7 @@ final class GmailToolService: GmailToolExecuting {
             var details = [(label: "Account", value: account.email), (label: "To", value: to)]
             if let cc { details.append(("CC", cc)) }
             if let bcc { details.append(("BCC", bcc)) }
-            details.append(("Body", Self.preview(body)))
+            details.append(("Body", GoogleToolSupport.preview(body)))
             confirmation = ToolConfirmationDetails(
                 title: "Create this Gmail draft?", primaryText: subject,
                 details: details, actionLabel: "Create Draft"
@@ -58,7 +58,7 @@ final class GmailToolService: GmailToolExecuting {
                 details: [
                     ("Account", account.email),
                     ("To", draft.message.header("To") ?? "Unknown recipient"),
-                    ("Body", Self.preview(GmailMessageParser.bodyText(draft.message.payload))),
+                    ("Body", GoogleToolSupport.preview(GmailMessageParser.bodyText(draft.message.payload))),
                 ], actionLabel: "Send"
             )
         default:
@@ -116,7 +116,7 @@ final class GmailToolService: GmailToolExecuting {
             query: [URLQueryItem(name: "q", value: query), URLQueryItem(name: "maxResults", value: String(limit))],
             body: nil
         )
-        let list = try JSONDecoder().decode(GmailMessageList.self, from: data)
+        let list = try GoogleToolSupport.decoder.decode(GmailMessageList.self, from: data)
         var summaries: [ChatToolValue] = []
         for item in list.messages ?? [] {
             let message = try await fetchMessage(id: item.id, accountID: account.id, format: "metadata")
@@ -161,12 +161,12 @@ final class GmailToolService: GmailToolExecuting {
         account: GoogleAccount
     ) async throws -> ChatToolResult {
         let raw = GmailMIME.message(to: to, cc: cc, bcc: bcc, subject: subject, body: body)
-        let requestBody = try JSONEncoder().encode(GmailDraftCreate(message: .init(raw: raw)))
+        let requestBody = try GoogleToolSupport.encoder.encode(GmailDraftCreate(message: .init(raw: raw)))
         let data = try await transport.data(
             accountID: account.id, method: "POST", path: "gmail/v1/users/me/drafts",
             query: [], body: requestBody
         )
-        let draft = try JSONDecoder().decode(GmailDraft.self, from: data)
+        let draft = try GoogleToolSupport.decoder.decode(GmailDraft.self, from: data)
         return ChatToolResult(response: [
             "status": .string("created"), "account": .string(account.email),
             "draftID": .string(draft.id), "messageID": .string(draft.message.id),
@@ -175,12 +175,12 @@ final class GmailToolService: GmailToolExecuting {
     }
 
     private func sendDraft(id: String, account: GoogleAccount) async throws -> ChatToolResult {
-        let body = try JSONEncoder().encode(["id": id])
+        let body = try GoogleToolSupport.encoder.encode(["id": id])
         let data = try await transport.data(
             accountID: account.id, method: "POST", path: "gmail/v1/users/me/drafts/send",
             query: [], body: body
         )
-        let message = try JSONDecoder().decode(GmailMessage.self, from: data)
+        let message = try GoogleToolSupport.decoder.decode(GmailMessage.self, from: data)
         return ChatToolResult(response: [
             "status": .string("sent"), "account": .string(account.email),
             "messageID": .string(message.id), "threadID": .string(message.threadId ?? ""),
@@ -199,7 +199,7 @@ final class GmailToolService: GmailToolExecuting {
             accountID: accountID, method: "GET", path: "gmail/v1/users/me/messages/\(id)",
             query: query, body: nil
         )
-        return try JSONDecoder().decode(GmailMessage.self, from: data)
+        return try GoogleToolSupport.decoder.decode(GmailMessage.self, from: data)
     }
 
     private func fetchDraft(id: String, accountID: String) async throws -> GmailDraft {
@@ -207,13 +207,9 @@ final class GmailToolService: GmailToolExecuting {
             accountID: accountID, method: "GET", path: "gmail/v1/users/me/drafts/\(id)",
             query: [URLQueryItem(name: "format", value: "full")], body: nil
         )
-        return try JSONDecoder().decode(GmailDraft.self, from: data)
+        return try GoogleToolSupport.decoder.decode(GmailDraft.self, from: data)
     }
 
-    nonisolated private static func preview(_ text: String) -> String {
-        let normalized = text.replacingOccurrences(of: "\n", with: " ")
-        return normalized.count > 180 ? String(normalized.prefix(177)) + "…" : normalized
-    }
 }
 
 nonisolated private struct GmailMessageList: Decodable {

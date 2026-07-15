@@ -15,14 +15,10 @@ nonisolated enum GmailToolRequest: Equatable, Sendable {
     case sendDraft(draftID: String, accountID: String?)
 
     init(toolCall: ChatToolCall) throws {
-        func value(_ key: String) -> String? {
-            let text = toolCall.arguments[key]?.stringValue?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return text?.isEmpty == false ? text : nil
-        }
+        let args = ToolCallArguments(toolCall)
+        func value(_ key: String) -> String? { args.string(key) }
         func required(_ key: String) throws -> String {
-            guard let text = value(key) else { throw GmailToolError.missingArgument(key) }
-            return text
+            try args.required(key, onMissing: GmailToolError.missingArgument)
         }
         let accountID = value("accountID")
 
@@ -30,7 +26,7 @@ nonisolated enum GmailToolRequest: Equatable, Sendable {
         case "list_google_accounts":
             self = .listAccounts
         case "search_gmail":
-            let rawLimit = toolCall.arguments["limit"]?.numberValue ?? 10
+            let rawLimit = args.number("limit") ?? 10
             guard rawLimit.isFinite, rawLimit.rounded() == rawLimit, (1...25).contains(Int(rawLimit)) else {
                 throw GmailToolError.invalidLimit
             }

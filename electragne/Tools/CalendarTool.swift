@@ -12,14 +12,10 @@ nonisolated enum CalendarToolRequest: Equatable, Sendable {
     )
 
     init(toolCall: ChatToolCall) throws {
-        func value(_ key: String) -> String? {
-            let text = toolCall.arguments[key]?.stringValue?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return text?.isEmpty == false ? text : nil
-        }
+        let args = ToolCallArguments(toolCall)
+        func value(_ key: String) -> String? { args.string(key) }
         func required(_ key: String) throws -> String {
-            guard let text = value(key) else { throw CalendarToolError.missingArgument(key) }
-            return text
+            try args.required(key, onMissing: CalendarToolError.missingArgument)
         }
         let accountID = value("accountID")
         let calendarID = value("calendarID")
@@ -28,7 +24,7 @@ nonisolated enum CalendarToolRequest: Equatable, Sendable {
         case "list_google_calendars":
             self = .listCalendars(accountID: accountID)
         case "list_calendar_events":
-            let rawLimit = toolCall.arguments["limit"]?.numberValue ?? 20
+            let rawLimit = args.number("limit") ?? 20
             guard rawLimit.isFinite, rawLimit.rounded() == rawLimit,
                   rawLimit >= 1, rawLimit <= 50 else {
                 throw CalendarToolError.invalidLimit
@@ -168,7 +164,7 @@ final class CalendarToolService: CalendarToolExecuting {
                 (label: "Ends", value: end),
             ]
             if let location { details.append(("Location", location)) }
-            if let description { details.append(("Description", Self.preview(description))) }
+            if let description { details.append(("Description", GoogleToolSupport.preview(description))) }
             confirmation = ToolConfirmationDetails(
                 title: "Create this Google Calendar event?",
                 primaryText: summary,
@@ -210,9 +206,9 @@ final class CalendarToolService: CalendarToolExecuting {
             path: "calendar/v3/users/me/calendarList",
             query: [URLQueryItem(name: "maxResults", value: "250")], body: nil
         )
-        guard let response = try? JSONDecoder().decode(CalendarListResponse.self, from: data) else {
-            throw CalendarToolError.invalidResponse
-        }
+        let response = try GoogleToolSupport.decode(
+            CalendarListResponse.self, from: data, orThrow: CalendarToolError.invalidResponse
+        )
         return ChatToolResult(response: [
             "status": .string("ok"),
             "account": .string(account.email),
@@ -263,9 +259,9 @@ final class CalendarToolService: CalendarToolExecuting {
             path: "calendar/v3/calendars/\(calendarID)/events",
             query: queryItems, body: nil
         )
-        guard let response = try? JSONDecoder().decode(CalendarEventsResponse.self, from: data) else {
-            throw CalendarToolError.invalidResponse
-        }
+        let response = try GoogleToolSupport.decode(
+            CalendarEventsResponse.self, from: data, orThrow: CalendarToolError.invalidResponse
+        )
         return ChatToolResult(response: [
             "status": .string("ok"), "account": .string(account.email),
             "calendarID": .string(calendarID),
@@ -284,11 +280,11 @@ final class CalendarToolService: CalendarToolExecuting {
         let data = try await transport.data(
             accountID: account.id, method: "POST",
             path: "calendar/v3/calendars/\(calendarID)/events",
-            query: [], body: try JSONEncoder().encode(body)
+            query: [], body: try GoogleToolSupport.encoder.encode(body)
         )
-        guard let event = try? JSONDecoder().decode(CalendarEvent.self, from: data) else {
-            throw CalendarToolError.invalidResponse
-        }
+        let event = try GoogleToolSupport.decode(
+            CalendarEvent.self, from: data, orThrow: CalendarToolError.invalidResponse
+        )
         var response = Self.eventValue(event).objectValue ?? [:]
         response["status"] = .string("created")
         response["account"] = .string(account.email)
@@ -310,10 +306,6 @@ final class CalendarToolService: CalendarToolExecuting {
         ])
     }
 
-    nonisolated private static func preview(_ text: String) -> String {
-        let normalized = text.replacingOccurrences(of: "\n", with: " ")
-        return normalized.count > 180 ? String(normalized.prefix(177)) + "…" : normalized
-    }
 }
 
 nonisolated private struct CalendarListResponse: Decodable {
