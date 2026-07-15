@@ -24,6 +24,8 @@ struct ElectragneApp: App {
 }
 struct SettingsView: View {
     @AppStorage(UserPreferences.preferredNameKey) private var preferredName = ""
+    @State private var fileSearchScopes: [FileSearchScope] = []
+    @State private var fileSearchError: String?
 
     var body: some View {
         Form {
@@ -31,9 +33,73 @@ struct SettingsView: View {
             Text("The pet calls you this when chatting. Leave empty to use your macOS account name.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Divider()
+
+            HStack {
+                Text("File search folders")
+                    .font(.headline)
+                Spacer()
+                Button("Add Folder…", action: addFileSearchFolder)
+            }
+            Text("Gemini can search names only inside folders you explicitly add here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if fileSearchScopes.isEmpty {
+                Text("No folders added")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(fileSearchScopes) { scope in
+                    HStack {
+                        Image(systemName: "folder")
+                        Text(scope.url.path)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Button {
+                            FileSearchScopeStore.shared.removeScope(id: scope.id)
+                            refreshFileSearchScopes()
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove \(scope.url.lastPathComponent)")
+                    }
+                }
+            }
+
+            if let fileSearchError {
+                Text(fileSearchError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
         .padding(20)
-        .frame(width: 360)
+        .frame(width: 460)
+        .onAppear(perform: refreshFileSearchScopes)
+    }
+
+    private func addFileSearchFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a Folder Electragne Can Search"
+        panel.prompt = "Allow Search"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try FileSearchScopeStore.shared.addFolder(url)
+            fileSearchError = nil
+            refreshFileSearchScopes()
+        } catch {
+            fileSearchError = "Could not remember that folder: \(error.localizedDescription)"
+        }
+    }
+
+    private func refreshFileSearchScopes() {
+        fileSearchScopes = FileSearchScopeStore.shared.scopes()
     }
 }
 
@@ -222,7 +288,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func openSettings() {
         if settingsWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 360, height: 140),
+                contentRect: NSRect(x: 0, y: 0, width: 460, height: 300),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false
@@ -280,4 +346,3 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
-

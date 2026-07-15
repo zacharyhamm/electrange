@@ -257,6 +257,11 @@ private struct ChatBubbleEntry: Equatable, Identifiable {
     var text: String
 }
 
+private struct PendingToolConfirmation: Equatable, Identifiable {
+    let id: UUID
+    let details: ToolConfirmationDetails
+}
+
 @Observable
 private final class ChatBubbleModel {
     var text = ""
@@ -268,6 +273,7 @@ private final class ChatBubbleModel {
     var availableChats: [ChatSummary] = []
     var currentChatID: UUID?
     var fontSize: CGFloat = UserPreferences.chatFontSize()
+    var pendingToolConfirmation: PendingToolConfirmation?
 
     var isStreaming: Bool { phase == .streaming }
 
@@ -291,7 +297,10 @@ final class ChatBubbleWindowController {
     private var onDismiss: (() -> Void)?
     private let ollamaClient: OllamaClient
     private let geminiClient: GeminiClient
+    private let reminderCreator: any ReminderCreating
+    private let desktopToolExecutor: any DesktopToolExecuting
     private var streamTask: Task<Void, Never>?
+    private var confirmationContinuation: CheckedContinuation<Bool, Never>?
     /// The active conversation; persisted after every exchange and reloaded
     /// across app launches. Never trimmed — the request-time cap for the
     /// local model happens in startStream.
@@ -313,10 +322,14 @@ final class ChatBubbleWindowController {
     init(
         ollamaClient: OllamaClient = OllamaClient(),
         geminiClient: GeminiClient = GeminiClient(),
+        reminderCreator: (any ReminderCreating)? = nil,
+        desktopToolExecutor: (any DesktopToolExecuting)? = nil,
         chatStore: ChatStore = ChatStore()
     ) {
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
+        self.reminderCreator = reminderCreator ?? AppleReminderService()
+        self.desktopToolExecutor = desktopToolExecutor ?? DesktopToolService()
         self.chatStore = chatStore
 
         // Resume the most recent chat across launches; start fresh otherwise.
@@ -345,7 +358,9 @@ final class ChatBubbleWindowController {
                 onDismiss: { [weak self] in self?.dismiss(notify: true) },
                 onSubmit: { [weak self] message in self?.startStream(userMessage: message) },
                 onNewChat: { [weak self] in self?.startNewChat() },
-                onSelectChat: { [weak self] id in self?.switchToChat(id: id) }
+                onSelectChat: { [weak self] id in self?.switchToChat(id: id) },
+                onConfirmTool: { [weak self] in self?.resolveToolConfirmation(approved: true) },
+                onCancelTool: { [weak self] in self?.resolveToolConfirmation(approved: false) }
             )
             refreshChatList()
             let panel = makePanel(rootView: bubbleView)
@@ -365,6 +380,7 @@ final class ChatBubbleWindowController {
         guard panel != nil else { return }
         let callback = notify ? onDismiss : nil
 
+        resolveToolConfirmation(approved: false)
         streamTask?.cancel()
         streamTask = nil
         removeEventMonitors()
@@ -396,6 +412,7 @@ final class ChatBubbleWindowController {
     }
 
     private func startStream(userMessage: String) {
+        resolveToolConfirmation(approved: false)
         streamTask?.cancel()
 
         model.text = ""
@@ -424,6 +441,10 @@ final class ChatBubbleWindowController {
                 try await client.streamChat(
                     history: messages,
                     onStatus: { status in model.status = status },
+                    onToolCall: { [weak self] call in
+                        guard let self else { return .error("The chat was closed.") }
+                        return await self.executeToolCall(call)
+                    },
                     onToken: { token in
                         streamed += token
                         model.appendToken(token)
@@ -444,6 +465,8 @@ final class ChatBubbleWindowController {
                 )
             } catch GeminiError.quotaExceeded {
                 model.phase = .failed("Gemini quota exceeded — try again later")
+            } catch GeminiError.toolRoundLimit {
+                model.phase = .failed("Gemini used too many tool steps — try a simpler request")
             } catch is URLError {
                 model.phase = .failed(useGemini ? "Gemini not reachable" : "Ollama not reachable")
             } catch {
@@ -468,6 +491,89 @@ final class ChatBubbleWindowController {
         }
     }
 
+    private func executeToolCall(_ call: ChatToolCall) async -> ChatToolResult {
+        if call.name == "create_reminder" {
+            let request: ReminderRequest
+            do {
+                request = try ReminderRequest(toolCall: call)
+            } catch {
+                return .error("A reminder title is required.")
+            }
+            let details = ToolConfirmationDetails(
+                title: "Create this reminder?",
+                primaryText: request.title,
+                details: [
+                    ("List", request.listName ?? "Default"),
+                    ("Due", request.due ?? "None"),
+                    ("Notes", request.notes ?? "None"),
+                ].filter { $0.1 != "None" },
+                actionLabel: "Create"
+            )
+            guard await requestConfirmation(details) else {
+                return Self.cancelledToolResult()
+            }
+            model.status = "Saving reminder…"
+            return await reminderCreator.createReminder(request)
+        }
+
+        let request: DesktopToolRequest
+        do {
+            request = try DesktopToolRequest(toolCall: call)
+        } catch DesktopToolError.unsupportedTool(let name) {
+            return .error("Unknown tool ‘\(name)’.")
+        } catch DesktopToolError.missingArgument(let name) {
+            return .error("The ‘\(name)’ argument is required.")
+        } catch DesktopToolError.invalidWebURL {
+            return .error("Only complete HTTP and HTTPS web addresses can be opened.")
+        } catch {
+            return .error("That tool request was invalid.")
+        }
+
+        if let details = desktopToolExecutor.confirmationDetails(for: request),
+           !(await requestConfirmation(details)) {
+            return Self.cancelledToolResult()
+        }
+        model.status = request.isFileSearch ? "Searching approved folders…" : "Opening…"
+        return await desktopToolExecutor.execute(request)
+    }
+
+    private func requestConfirmation(_ details: ToolConfirmationDetails) async -> Bool {
+        model.pendingToolConfirmation = PendingToolConfirmation(
+            id: UUID(),
+            details: details
+        )
+        model.status = "Confirm action…"
+        let approved = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled {
+                    model.pendingToolConfirmation = nil
+                    continuation.resume(returning: false)
+                } else {
+                    confirmationContinuation = continuation
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.resolveToolConfirmation(approved: false)
+            }
+        }
+        return approved && !Task.isCancelled
+    }
+
+    private func resolveToolConfirmation(approved: Bool) {
+        model.pendingToolConfirmation = nil
+        guard let continuation = confirmationContinuation else { return }
+        confirmationContinuation = nil
+        continuation.resume(returning: approved)
+    }
+
+    private static func cancelledToolResult() -> ChatToolResult {
+        ChatToolResult(response: [
+            "status": .string("cancelled"),
+            "message": .string("The owner cancelled this action."),
+        ])
+    }
+
     private func persistCurrentChat() {
         if currentChat.title.isEmpty,
            let firstUserTurn = history.first(where: { $0.role == "user" }) {
@@ -484,6 +590,7 @@ final class ChatBubbleWindowController {
     }
 
     private func startNewChat() {
+        resolveToolConfirmation(approved: false)
         streamTask?.cancel()
         streamTask = nil
         chatStore.save(currentChat)
@@ -495,6 +602,7 @@ final class ChatBubbleWindowController {
 
     private func switchToChat(id: UUID) {
         guard id != currentChat.id, let chat = chatStore.load(id: id) else { return }
+        resolveToolConfirmation(approved: false)
         streamTask?.cancel()
         streamTask = nil
         chatStore.save(currentChat)
@@ -656,6 +764,8 @@ private struct ChatBubbleView: View {
     let onSubmit: (String) -> Void
     let onNewChat: () -> Void
     let onSelectChat: (UUID) -> Void
+    let onConfirmTool: () -> Void
+    let onCancelTool: () -> Void
 
     @FocusState private var inputIsFocused: Bool
 
@@ -734,7 +844,11 @@ private struct ChatBubbleView: View {
                     Divider()
                     // A separate view so per-keystroke updates to model.text
                     // don't re-evaluate (and re-measure) the transcript.
-                    ChatTranscriptView(model: model)
+                    ChatTranscriptView(
+                        model: model,
+                        onConfirmTool: onConfirmTool,
+                        onCancelTool: onCancelTool
+                    )
                 }
             }
             .padding(.top, model.tailEdge == .top ? 19 : 12)
@@ -781,9 +895,12 @@ private struct ChatBubbleView: View {
 /// (which mutates model.text every keystroke) doesn't re-render the rows.
 private struct ChatTranscriptView: View {
     let model: ChatBubbleModel
+    let onConfirmTool: () -> Void
+    let onCancelTool: () -> Void
 
     private var showsStatusRow: Bool {
         guard model.isStreaming else { return false }
+        guard model.pendingToolConfirmation == nil else { return false }
         // Before the first token, or whenever a web search is in flight.
         if model.entries.last?.text.isEmpty == true { return true }
         return model.status.hasPrefix("Searching")
@@ -795,6 +912,10 @@ private struct ChatTranscriptView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(model.entries) { entry in
                         transcriptRow(for: entry)
+                    }
+
+                    if let confirmation = model.pendingToolConfirmation {
+                        toolConfirmationCard(confirmation)
                     }
 
                     if case .failed(let message) = model.phase {
@@ -825,10 +946,59 @@ private struct ChatTranscriptView: View {
             .onChange(of: model.phase) { _, _ in
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
+            .onChange(of: model.pendingToolConfirmation) { _, _ in
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
             .onAppear {
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
         }
+    }
+
+    private func toolConfirmationCard(
+        _ confirmation: PendingToolConfirmation
+    ) -> some View {
+        let details = confirmation.details
+        return VStack(alignment: .leading, spacing: 7) {
+            Label(details.title, systemImage: "checkmark.shield")
+                .font(.system(size: model.fontSize, weight: .semibold))
+
+            Text(details.primaryText)
+                .font(.system(size: model.fontSize, weight: .medium))
+                .textSelection(.enabled)
+
+            ForEach(Array(details.details.enumerated()), id: \.offset) { _, detail in
+                detailRow(label: detail.label, value: detail.value)
+            }
+
+            HStack {
+                Button("Cancel", action: onCancelTool)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button(details.actionLabel, action: onConfirmTool)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.secondary.opacity(0.35))
+        )
+    }
+
+    private func detailRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text("\(label):")
+                .foregroundStyle(.secondary)
+            Text(value)
+                .textSelection(.enabled)
+        }
+        .font(.system(size: model.fontSize))
     }
 
     @ViewBuilder

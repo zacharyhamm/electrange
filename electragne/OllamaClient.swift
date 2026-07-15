@@ -278,6 +278,9 @@ struct OllamaClient: ChatClient {
     func streamChat(
         history: [OllamaMessage],
         onStatus: (String) -> Void = { _ in },
+        onToolCall: (ChatToolCall) async -> ChatToolResult = { _ in
+            .error("This chat provider does not support that tool.")
+        },
         onToken: (String) -> Void
     ) async throws {
         var messages = history

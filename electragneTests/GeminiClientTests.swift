@@ -8,7 +8,9 @@ struct GeminiClientTests {
 
         let chunk = GeminiClient.decodeChunk(fromLine: line)
 
-        #expect(chunk == GeminiChunk(text: "Baa! Hello."))
+        #expect(chunk?.text == "Baa! Hello.")
+        #expect(chunk?.sources.isEmpty == true)
+        #expect(chunk?.toolCalls.isEmpty == true)
     }
 
     @Test func decodesGroundingSourcesFromSSEDataLine() {
@@ -49,7 +51,7 @@ struct GeminiClientTests {
         #expect(GeminiClient.decodeChunk(fromLine: #"{"candidates":[]}"#) == nil)
     }
 
-    @Test func requestBodyMapsRolesAndDeclaresSearchTool() throws {
+    @Test func requestBodyMapsRolesAndDeclaresSearchAndReminderTools() throws {
         let history = [
             OllamaMessage(role: "user", content: "What's your name?"),
             OllamaMessage(role: "assistant", content: "I'm a sheep!"),
@@ -74,8 +76,67 @@ struct GeminiClientTests {
         #expect(firstParts[0]["text"] as? String == "What's your name?")
 
         let tools = try #require(json["tools"] as? [[String: Any]])
-        #expect(tools.count == 1)
-        #expect(tools[0]["google_search"] != nil)
+        #expect(tools.count == 2)
+        #expect(tools[0]["googleSearch"] != nil)
+        let functions = try #require(tools[1]["functionDeclarations"] as? [[String: Any]])
+        #expect(functions.count == 5)
+        #expect(Set(functions.compactMap { $0["name"] as? String }) == [
+            "create_reminder", "open_app", "open_url", "find_files", "reveal_in_finder"
+        ])
+        let reminder = try #require(functions.first { $0["name"] as? String == "create_reminder" })
+        let parameters = try #require(reminder["parameters"] as? [String: Any])
+        #expect(parameters["required"] as? [String] == ["title"])
+
+        let toolConfig = try #require(json["toolConfig"] as? [String: Any])
+        #expect(toolConfig["includeServerSideToolInvocations"] as? Bool == true)
+    }
+
+    @Test func decodesFunctionCallAndPreservesOpaqueModelParts() throws {
+        let line = #"data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"create_reminder","id":"call-7","args":{"title":"Buy oats","due":"2026-07-15"}},"thoughtSignature":"opaque-signature"}]}}]}"#
+
+        let chunk = try #require(GeminiClient.decodeChunk(fromLine: line))
+
+        #expect(chunk.text.isEmpty)
+        #expect(chunk.toolCalls == [ChatToolCall(
+            id: "call-7",
+            name: "create_reminder",
+            arguments: [
+                "title": .string("Buy oats"),
+                "due": .string("2026-07-15"),
+            ]
+        )])
+        #expect(chunk.modelParts.first?.objectValue?["thoughtSignature"] == .string("opaque-signature"))
+    }
+
+    @Test func followUpBodyReturnsMatchingFunctionIDAndOpaqueParts() throws {
+        let modelPart: ChatToolValue = .object([
+            "functionCall": .object([
+                "name": .string("create_reminder"),
+                "id": .string("call-9"),
+                "args": .object(["title": .string("Call Mom")]),
+            ]),
+            "thoughtSignature": .string("keep-me"),
+        ])
+        let responsePart: ChatToolValue = .object([
+            "functionResponse": .object([
+                "name": .string("create_reminder"),
+                "id": .string("call-9"),
+                "response": .object(["status": .string("created")]),
+            ])
+        ])
+
+        let body = try GeminiClient.makeRequestBody(contents: [
+            GeminiContent(role: "user", parts: [.object(["text": .string("Remind me")])]),
+            GeminiContent(role: "model", parts: [modelPart]),
+            GeminiContent(role: "user", parts: [responsePart]),
+        ])
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let contents = try #require(json["contents"] as? [[String: Any]])
+        let modelParts = try #require(contents[1]["parts"] as? [[String: Any]])
+        #expect(modelParts[0]["thoughtSignature"] as? String == "keep-me")
+        let userParts = try #require(contents[2]["parts"] as? [[String: Any]])
+        let functionResponse = try #require(userParts[0]["functionResponse"] as? [String: Any])
+        #expect(functionResponse["id"] as? String == "call-9")
     }
 
     @Test func apiKeyComesFromEnvironmentFirstThenFile() throws {
