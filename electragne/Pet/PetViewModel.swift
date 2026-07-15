@@ -746,41 +746,20 @@ class PetViewModel {
     private func updateDockMovement() {
         guard petWindow != nil else { return }
         guard case .walkingOnDock = state else { return }
-        guard let dockInfo = cachedDockInfo else {
-            // Dock disappeared, fall down
-            startFalling()
-            return
-        }
-
-        let moveX = abs(scaledMoveX())
-        var newX = surface.frame.origin.x
-        let petSize = surface.frame.width
-
-        if isMovingRight {
-            newX += moveX
-        } else {
-            newX -= moveX
-        }
-
-        // Check dock boundaries
-        let atRightEdge = newX + petSize >= dockInfo.frame.maxX
-        let atLeftEdge = newX <= dockInfo.frame.minX
-
-        if atRightEdge || atLeftEdge {
-            // At edge of dock, trigger look_down
-            if atRightEdge {
-                newX = dockInfo.frame.maxX - petSize
-            } else {
-                newX = dockInfo.frame.minX
-            }
-            surface.setOrigin(NSPoint(x: newX, y: surface.frame.origin.y))
+        var snapshot = environment.snapshot(includeWindows: false)
+        // Preserve the detector result captured when the dock state began.
+        snapshot.dockInfo = cachedDockInfo
+        switch DockWalkPolicy.evaluate(.init(
+            env: snapshot, moveX: scaledMoveX(), isMovingRight: isMovingRight
+        )) {
+        case .move(let point):
+            surface.setOrigin(point)
+        case .lookDown(let point):
+            surface.setOrigin(point)
             startLookingDown()
-            return
+        case .fall:
+            startFalling()
         }
-
-        // Keep Y position on dock top
-        let newY = dockInfo.frame.maxY
-        surface.setOrigin(NSPoint(x: newX, y: newY))
     }
 
     private func handleDockAnimationComplete() {
