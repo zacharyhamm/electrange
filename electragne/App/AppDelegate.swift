@@ -56,6 +56,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
+    /// Hiding the pet orders its window out, leaving the app with no visible
+    /// windows (status-bar items don't count). SwiftUI's app lifecycle would
+    /// then quit the app; this is a menu-bar app, so it must stay alive.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
