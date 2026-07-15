@@ -959,30 +959,10 @@ class PetViewModel {
         guard case .walking = state else { return }  // Only handle for normal walking
 
         let currentName = animationManager.currentAnimation?.name ?? ""
-        var nextID = animationManager.selectNextAnimation()
-
-        // Special handling for walk - roll random behaviors
-        // Each behavior has independent chance, checked in sequence
-        if currentName == "walk" && nextID == AnimationID.walk.rawValue {
-            let roll = Int.random(in: 1...100)
-            if roll <= BehaviorConstants.pissChance {
-                // 1-2: piss (2%)
-                nextID = AnimationID.piss.rawValue
-            } else if roll <= BehaviorConstants.pissChance + BehaviorConstants.eatChance {
-                // 3-5: eat (3%)
-                nextID = AnimationID.eat.rawValue
-            } else if roll <= BehaviorConstants.pissChance + BehaviorConstants.eatChance + BehaviorConstants.runChance {
-                // 6-20: run (15%)
-                nextID = AnimationID.runBegin.rawValue
-            }
-        }
-
-        // Special handling for run
-        if currentName == "run" {
-            if Int.random(in: 1...100) <= BehaviorConstants.jumpWhileRunningChance {
-                nextID = AnimationID.jump.rawValue
-            }
-        }
+        let nextID = IdleBehaviorPolicy.evaluate(.init(
+            currentAnimationName: currentName,
+            proposedNextAnimationID: animationManager.selectNextAnimation()
+        )) { Int.random(in: 1...$0) }
 
         if let nextID = nextID {
             if nextID == AnimationID.jump.rawValue {

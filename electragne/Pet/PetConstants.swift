@@ -10,7 +10,7 @@ import Foundation
 // MARK: - Physics Constants
 
 /// Centralized physics constants
-enum PhysicsConstants {
+nonisolated enum PhysicsConstants {
     static let gravity: CGFloat = 0.8
     static let bounceDamping: CGFloat = 0.6
     static let maxBounces: Int = 3
@@ -41,7 +41,7 @@ enum PhysicsConstants {
 // MARK: - Behavior Constants
 
 /// Centralized behavior constants
-enum BehaviorConstants {
+nonisolated enum BehaviorConstants {
     static let idleTimeBeforeSleep: TimeInterval = 60.0
     static let idleCheckInterval: TimeInterval = 5.0
     static let childWindowFadeDelay: TimeInterval = 5.0
