@@ -88,10 +88,11 @@ final class CalendarReminderMonitor {
         let current = now()
         let dayStart = calendar.startOfDay(for: current)
         guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return }
-        pruneFired(to: dayStart..<dayEnd)
+        let fetchEnd = dayEnd.addingTimeInterval(Self.pollInterval)
+        pruneFired(to: dayStart..<fetchEnd)
 
         do {
-            let currentEvents = try await events.events(from: dayStart, to: dayEnd)
+            let currentEvents = try await events.events(from: dayStart, to: fetchEnd)
             let eligible = currentEvents.filter {
                 $0.isEligibleForReminder && ($0.start ?? .distantPast) > current
             }

@@ -16,8 +16,8 @@ final class ChatBubbleWindowController {
     private var panel: ChatBubblePanel?
     private var model = ChatBubbleModel()
     private var onDismiss: (() -> Void)?
-    private let ollamaClient: OllamaClient
-    private let geminiClient: GeminiClient
+    private let ollamaClient: any ChatClient
+    private let geminiClient: any ChatClient
     private let toolRouter: ChatToolRouter
     private var streamTask: Task<Void, Never>?
     private let confirmationBroker = ConfirmationBroker()
@@ -27,6 +27,7 @@ final class ChatBubbleWindowController {
     private let chatStore: ChatStore
     private var currentChat: StoredChat
     private var activeStreamID: UUID?
+    private var pendingCalendarEvents: [CalendarEventDetails] = []
 
     private var history: [ChatMessage] {
         get { currentChat.messages }
@@ -38,8 +39,8 @@ final class ChatBubbleWindowController {
     private var windowObservers: [NSObjectProtocol] = []
 
     init(
-        ollamaClient: OllamaClient = OllamaClient(),
-        geminiClient: GeminiClient = GeminiClient(),
+        ollamaClient: any ChatClient = OllamaClient(),
+        geminiClient: any ChatClient = GeminiClient(),
         toolRouter: ChatToolRouter,
         chatStore: ChatStore = ChatStore()
     ) {
@@ -97,8 +98,10 @@ final class ChatBubbleWindowController {
         let callback = notify ? onDismiss : nil
 
         resolveToolConfirmation(approved: false)
+        pendingCalendarEvents.removeAll()
         streamTask?.cancel()
         streamTask = nil
+        activeStreamID = nil
         removeEventMonitors()
         removeWindowObservers()
         panel?.orderOut(nil)
@@ -128,9 +131,14 @@ final class ChatBubbleWindowController {
     }
 
     func startCalendarEventConversation(_ event: CalendarEventDetails) {
+        pendingCalendarEvents.append(event)
+        startNextCalendarEventConversation()
+    }
+
+    private func startNextCalendarEventConversation() {
+        guard streamTask == nil, !pendingCalendarEvents.isEmpty else { return }
+        let event = pendingCalendarEvents.removeFirst()
         resolveToolConfirmation(approved: false)
-        streamTask?.cancel()
-        streamTask = nil
         activeStreamID = nil
         chatStore.save(currentChat)
         currentChat = StoredChat(title: event.summary)
@@ -138,10 +146,18 @@ final class ChatBubbleWindowController {
         model.entries = []
         model.phase = .idle
         refreshChatList()
-        startStream(userMessage: event.reminderPrompt, openURLAfterResponse: event.joinURL)
+        startStream(
+            userMessage: event.reminderPrompt,
+            toolsEnabled: false,
+            openURLAfterResponse: event.joinURL
+        )
     }
 
-    private func startStream(userMessage: String, openURLAfterResponse: URL? = nil) {
+    private func startStream(
+        userMessage: String,
+        toolsEnabled: Bool = true,
+        openURLAfterResponse: URL? = nil
+    ) {
         resolveToolConfirmation(approved: false)
         streamTask?.cancel()
 
@@ -169,7 +185,7 @@ final class ChatBubbleWindowController {
                     onStatus: { status in model.status = status },
                     onToolCall: { [weak self] call in
                         guard let self else { return .error("The chat was closed.") }
-                        guard openURLAfterResponse == nil else {
+                        guard toolsEnabled else {
                             return .error("Tools are disabled while summarizing a calendar event.")
                         }
                         return await self.executeToolCall(call)
@@ -217,6 +233,11 @@ final class ChatBubbleWindowController {
                     arguments: ["url": .string(url.absoluteString)]
                 ))
             }
+
+            guard self.activeStreamID == streamID else { return }
+            self.streamTask = nil
+            self.activeStreamID = nil
+            self.startNextCalendarEventConversation()
         }
     }
 
@@ -267,6 +288,7 @@ final class ChatBubbleWindowController {
 
     private func startNewChat() {
         resolveToolConfirmation(approved: false)
+        pendingCalendarEvents.removeAll()
         streamTask?.cancel()
         streamTask = nil
         activeStreamID = nil
@@ -281,8 +303,10 @@ final class ChatBubbleWindowController {
     private func switchToChat(id: UUID) {
         guard id != currentChat.id, let chat = chatStore.load(id: id) else { return }
         resolveToolConfirmation(approved: false)
+        pendingCalendarEvents.removeAll()
         streamTask?.cancel()
         streamTask = nil
+        activeStreamID = nil
         chatStore.save(currentChat)
         currentChat = chat
         model.phase = .idle

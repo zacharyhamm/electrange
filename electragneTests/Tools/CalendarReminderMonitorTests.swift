@@ -71,6 +71,51 @@ struct CalendarReminderMonitorTests {
         #expect(scheduler.entries.isEmpty)
     }
 
+    @Test func fetchesFarEnoughPastMidnightToScheduleTheLeadTimeReminder() async {
+        let now = utcCalendar.date(from: DateComponents(
+            year: 2026, month: 7, day: 15, hour: 23, minute: 55
+        ))!
+        let start = utcCalendar.date(from: DateComponents(
+            year: 2026, month: 7, day: 16, hour: 0, minute: 5
+        ))!
+        let upcoming = event(start: start)
+        let provider = ReminderEventProvider(snapshot: [upcoming], current: upcoming)
+        let scheduler = ReminderScheduler()
+        let monitor = CalendarReminderMonitor(
+            events: provider, scheduler: scheduler,
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            now: { now }, calendar: utcCalendar
+        )
+
+        await monitor.refresh()
+
+        #expect(provider.requests == [utcCalendar.startOfDay(for: now)..<start.addingTimeInterval(600)])
+        #expect(scheduler.entries.map(\.date) == [start.addingTimeInterval(-180)])
+    }
+
+    @Test func retainsNextDayDeduplicationBeforeMidnight() async {
+        let now = utcCalendar.date(from: DateComponents(
+            year: 2026, month: 7, day: 15, hour: 23, minute: 58
+        ))!
+        let start = utcCalendar.date(from: DateComponents(
+            year: 2026, month: 7, day: 16
+        ))!
+        let upcoming = event(start: start)
+        let provider = ReminderEventProvider(snapshot: [upcoming], current: upcoming)
+        let monitor = CalendarReminderMonitor(
+            events: provider, scheduler: ReminderScheduler(),
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            now: { now }, calendar: utcCalendar
+        )
+        var delivered = 0
+        monitor.onReminder = { _ in delivered += 1 }
+
+        await monitor.refresh()
+        await monitor.refresh()
+
+        #expect(delivered == 1)
+    }
+
     @Test func extractsMeetingLinksAndFormatsAttendees() {
         let zoom = URL(string: "https://acme.zoom.us/j/123")!
         let details = event(
@@ -132,13 +177,17 @@ struct CalendarReminderMonitorTests {
 private final class ReminderEventProvider: CalendarEventProviding {
     var snapshot: [CalendarEventDetails]
     var current: CalendarEventDetails?
+    var requests: [Range<Date>] = []
 
     init(snapshot: [CalendarEventDetails], current: CalendarEventDetails?) {
         self.snapshot = snapshot
         self.current = current
     }
 
-    func events(from start: Date, to end: Date) async throws -> [CalendarEventDetails] { snapshot }
+    func events(from start: Date, to end: Date) async throws -> [CalendarEventDetails] {
+        requests.append(start..<end)
+        return snapshot
+    }
     func event(id: String) async throws -> CalendarEventDetails? { current }
 }
 
