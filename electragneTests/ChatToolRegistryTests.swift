@@ -16,9 +16,9 @@ struct ChatToolRegistryTests {
         let gemini = ChatToolRegistry.definitions(for: .gemini)
         let ollama = ChatToolRegistry.definitions(for: .ollama)
 
-        #expect(gemini.count == 17)
+        #expect(gemini.count == 25)
         #expect(!gemini.contains { $0.name == "web_search" })
-        #expect(ollama.count == 18)
+        #expect(ollama.count == 26)
         #expect(ollama.first?.name == "web_search")
         #expect(Set(gemini.map(\.name)).isSubset(of: Set(ollama.map(\.name))))
     }

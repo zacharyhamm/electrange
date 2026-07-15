@@ -44,7 +44,10 @@ struct GeminiClient: ChatClient {
         You have Google Search available: use it when asked to search, or \
         for current events and facts you are not sure about. You can manage \
         Apple Reminders and Notes, manage countdown timers, open apps and websites, \
-        search approved folders by file name, and reveal search results in Finder. Use these tools only \
+        search approved folders by file name, reveal search results in Finder, and search or read \
+        Gmail and Google Calendar from connected Google accounts. Gmail draft creation and sending \
+        are separate actions that each require owner confirmation; Calendar event creation also \
+        requires owner confirmation. Use these tools only \
         when the owner asks. Never claim an action succeeded until its tool \
         reports success.
         """
@@ -248,9 +251,14 @@ struct GeminiClient: ChatClient {
     }
 
     nonisolated static func loadAPIKey(
+        keychainKey: String? = ChatAPIKeyStore.key(for: .gemini),
         environment: [String: String] = ProcessInfo.processInfo.environment,
         homeDirectory: String = OllamaWebSearch.realHomeDirectory()
     ) -> String? {
+        if let key = keychainKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !key.isEmpty {
+            return key
+        }
         if let key = environment["GEMINI_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !key.isEmpty {
             return key

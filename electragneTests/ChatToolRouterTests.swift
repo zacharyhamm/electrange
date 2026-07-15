@@ -9,21 +9,28 @@ struct ChatToolRouterTests {
         let notes = MockNotesExecutor()
         let desktop = MockDesktopExecutor()
         let timers = MockTimerExecutor()
-        let router = makeRouter(reminders, notes, desktop, timers)
+        let gmail = MockGmailExecutor()
+        let calendar = MockCalendarExecutor()
+        let router = makeRouter(reminders, notes, desktop, timers, gmail, calendar)
         var statuses: [String] = []
 
         _ = await router.execute(call("list_reminders"), confirm: { _ in true }, onStatus: { statuses.append($0) })
         _ = await router.execute(call("list_notes"), confirm: { _ in true }, onStatus: { statuses.append($0) })
         _ = await router.execute(call("find_files", ["query": .string("song")]), confirm: { _ in true }, onStatus: { statuses.append($0) })
         _ = await router.execute(call("list_timers"), confirm: { _ in true }, onStatus: { statuses.append($0) })
+        _ = await router.execute(call("list_google_accounts"), confirm: { _ in true }, onStatus: { statuses.append($0) })
+        _ = await router.execute(call("list_google_calendars"), confirm: { _ in true }, onStatus: { statuses.append($0) })
 
         #expect(reminders.executed.count == 1)
         #expect(notes.executed.count == 1)
         #expect(desktop.executed.count == 1)
         #expect(timers.executed.count == 1)
+        #expect(gmail.executed.count == 1)
+        #expect(calendar.executed.count == 1)
         #expect(statuses == [
             "Reading reminders…", "Reading Notes…",
-            "Searching approved folders…", "Reading timers…",
+            "Searching approved folders…", "Reading timers…", "Reading Google accounts…",
+            "Reading Google Calendar…",
         ])
     }
 
@@ -66,13 +73,17 @@ struct ChatToolRouterTests {
         _ reminders: MockReminderExecutor,
         _ notes: MockNotesExecutor,
         _ desktop: MockDesktopExecutor,
-        _ timers: MockTimerExecutor
+        _ timers: MockTimerExecutor,
+        _ gmail: MockGmailExecutor? = nil,
+        _ calendar: MockCalendarExecutor? = nil
     ) -> ChatToolRouter {
         ChatToolRouter(
             reminderExecutor: reminders,
             notesExecutor: notes,
             desktopExecutor: desktop,
-            timerExecutor: timers
+            timerExecutor: timers,
+            gmailExecutor: gmail ?? MockGmailExecutor(),
+            calendarExecutor: calendar ?? MockCalendarExecutor()
         )
     }
 
@@ -124,6 +135,36 @@ private final class MockTimerExecutor: TimerToolExecuting {
     func confirmationDetails(for request: TimerToolRequest) -> ToolConfirmationDetails? { confirmation }
     func execute(_ request: TimerToolRequest) async -> ChatToolResult {
         executed.append(request)
+        return ChatToolResult(response: ["status": .string("ok")])
+    }
+}
+
+@MainActor
+private final class MockGmailExecutor: GmailToolExecuting {
+    var executed: [GmailPreparedRequest] = []
+    var confirmation: ToolConfirmationDetails?
+    func prepare(_ request: GmailToolRequest) async throws -> GmailPreparedRequest {
+        GmailPreparedRequest(request: request, account: nil, confirmation: confirmation)
+    }
+    func execute(_ prepared: GmailPreparedRequest) async -> ChatToolResult {
+        executed.append(prepared)
+        return ChatToolResult(response: ["status": .string("ok")])
+    }
+}
+
+@MainActor
+private final class MockCalendarExecutor: CalendarToolExecuting {
+    var executed: [CalendarPreparedRequest] = []
+    var confirmation: ToolConfirmationDetails?
+    func prepare(_ request: CalendarToolRequest) async throws -> CalendarPreparedRequest {
+        CalendarPreparedRequest(
+            request: request,
+            account: GoogleAccount(id: "a1", email: "one@example.com", displayName: nil),
+            confirmation: confirmation
+        )
+    }
+    func execute(_ prepared: CalendarPreparedRequest) async -> ChatToolResult {
+        executed.append(prepared)
         return ChatToolResult(response: ["status": .string("ok")])
     }
 }

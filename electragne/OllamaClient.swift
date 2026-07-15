@@ -65,9 +65,14 @@ nonisolated struct OllamaWebSearch {
     /// The env var works for terminal launches; the key file works when the
     /// app is launched from Finder (GUI apps don't inherit shell env).
     nonisolated static func loadAPIKey(
+        keychainKey: String? = ChatAPIKeyStore.key(for: .ollama),
         environment: [String: String] = ProcessInfo.processInfo.environment,
         homeDirectory: String = realHomeDirectory()
     ) -> String? {
+        if let key = keychainKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !key.isEmpty {
+            return key
+        }
         if let key = environment["OLLAMA_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !key.isEmpty {
             return key
@@ -136,7 +141,10 @@ struct OllamaClient: ChatClient {
         and bullet lists using "-"; avoid headings, tables, and code blocks. \
         You can manage Apple Reminders and Notes, manage countdown timers, open \
         apps and websites, search approved folders by file name, reveal search \
-        results in Finder, and search the web. Use web_search when asked to search, or for \
+        results in Finder, use Gmail and Google Calendar from connected Google accounts, and search the web. \
+        Creating a Calendar event requires owner confirmation. \
+        Gmail draft creation and sending are separate actions that each require owner confirmation. \
+        Use web_search when asked to search, or for \
         current events and facts you are not sure about. When you answer \
         from web search results, always share links to the sources you used \
         (markdown [title](url) links are fine). Use timer tools only when the \

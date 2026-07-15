@@ -11,6 +11,8 @@ nonisolated enum ChatToolFamily: Equatable, Sendable {
     case notes
     case desktop
     case timers
+    case gmail
+    case calendar
 }
 
 nonisolated enum ChatToolParameterType: String, Equatable, Sendable {
@@ -193,6 +195,87 @@ nonisolated enum ChatToolRegistry {
                 "timerID": property(.string, "Opaque timer ID returned by create_timer or list_timers.")
             ], required: ["timerID"], initialStatus: "Confirm timer…",
             executionStatus: "Updating timers…"
+        ),
+        definition(
+            "list_google_accounts", family: .gmail,
+            description: "List Google accounts connected to Electragne and obtain their opaque account IDs.",
+            initialStatus: "Reading Google accounts…", executionStatus: "Reading Google accounts…"
+        ),
+        definition(
+            "search_gmail", family: .gmail,
+            description: "Search Gmail using Gmail search syntax. Returns message IDs for read_gmail_message.",
+            properties: [
+                "query": property(.string, "Gmail search query, such as from:alex newer_than:7d."),
+                "accountID": property(.string, "Optional opaque Google account ID. Omit to use the default account."),
+                "limit": property(.number, "Optional result limit from 1 to 25."),
+            ], required: ["query"], initialStatus: "Searching Gmail…",
+            executionStatus: "Searching Gmail…"
+        ),
+        definition(
+            "read_gmail_message", family: .gmail,
+            description: "Read one Gmail message identified by search_gmail.",
+            properties: [
+                "messageID": property(.string, "Opaque Gmail message ID returned by search_gmail."),
+                "accountID": property(.string, "Optional opaque Google account ID. Omit to use the default account."),
+            ], required: ["messageID"], initialStatus: "Reading Gmail…",
+            executionStatus: "Reading Gmail…"
+        ),
+        definition(
+            "create_gmail_draft", family: .gmail,
+            description: "Create a Gmail draft after confirmation. Use comma-separated addresses for multiple recipients.",
+            properties: [
+                "to": property(.string, "Required recipient email address or comma-separated addresses."),
+                "cc": property(.string, "Optional CC email address or comma-separated addresses."),
+                "bcc": property(.string, "Optional BCC email address or comma-separated addresses."),
+                "subject": property(.string, "Required email subject."),
+                "body": property(.string, "Required plaintext email body."),
+                "accountID": property(.string, "Optional opaque Google account ID. Omit to use the default account."),
+            ], required: ["to", "subject", "body"], initialStatus: "Confirm Gmail draft…",
+            executionStatus: "Creating Gmail draft…"
+        ),
+        definition(
+            "send_gmail_draft", family: .gmail,
+            description: "Send an existing Gmail draft after a separate confirmation.",
+            properties: [
+                "draftID": property(.string, "Opaque draft ID returned by create_gmail_draft."),
+                "accountID": property(.string, "Optional opaque Google account ID. Omit to use the default account."),
+            ], required: ["draftID"], initialStatus: "Confirm Gmail send…",
+            executionStatus: "Sending Gmail draft…"
+        ),
+        definition(
+            "list_google_calendars", family: .calendar,
+            description: "List calendars for a connected Google account and obtain calendar IDs.",
+            properties: [
+                "accountID": property(.string, "Optional opaque Google account ID. Omit to use the default account."),
+            ], initialStatus: "Reading Google Calendar…",
+            executionStatus: "Reading Google Calendar…"
+        ),
+        definition(
+            "list_calendar_events", family: .calendar,
+            description: "List or search Google Calendar events. Defaults to the primary calendar and the next 30 days.",
+            properties: [
+                "calendarID": property(.string, "Optional calendar ID from list_google_calendars. Omit for primary."),
+                "query": property(.string, "Optional free-text event search query."),
+                "timeMin": property(.string, "Optional inclusive lower bound as an RFC 3339 timestamp with UTC offset."),
+                "timeMax": property(.string, "Optional exclusive upper bound as an RFC 3339 timestamp with UTC offset."),
+                "accountID": property(.string, "Optional opaque Google account ID. Omit to use the default account."),
+                "limit": property(.number, "Optional result limit from 1 to 50."),
+            ], initialStatus: "Reading Google Calendar…",
+            executionStatus: "Reading Google Calendar…"
+        ),
+        definition(
+            "create_calendar_event", family: .calendar,
+            description: "Create a Google Calendar event after confirmation. Use RFC 3339 timestamps for timed events or YYYY-MM-DD dates for all-day events.",
+            properties: [
+                "summary": property(.string, "Required event title."),
+                "start": property(.string, "Start as RFC 3339 with UTC offset, or YYYY-MM-DD for an all-day event."),
+                "end": property(.string, "Exclusive end using the same format as start. For a one-day all-day event, use the following date."),
+                "description": property(.string, "Optional event description."),
+                "location": property(.string, "Optional event location."),
+                "calendarID": property(.string, "Optional calendar ID from list_google_calendars. Omit for primary."),
+                "accountID": property(.string, "Optional opaque Google account ID. Omit to use the default account."),
+            ], required: ["summary", "start", "end"], initialStatus: "Confirm Calendar event…",
+            executionStatus: "Creating Calendar event…"
         ),
     ]
 

@@ -384,6 +384,8 @@ final class ChatBubbleWindowController {
         notesToolExecutor: (any NotesToolExecuting)? = nil,
         desktopToolExecutor: (any DesktopToolExecuting)? = nil,
         timerToolExecutor: (any TimerToolExecuting)? = nil,
+        gmailToolExecutor: (any GmailToolExecuting)? = nil,
+        calendarToolExecutor: (any CalendarToolExecuting)? = nil,
         chatStore: ChatStore = ChatStore()
     ) {
         self.ollamaClient = ollamaClient
@@ -392,7 +394,9 @@ final class ChatBubbleWindowController {
             reminderExecutor: reminderToolExecutor ?? AppleReminderService(),
             notesExecutor: notesToolExecutor ?? AppleNotesService(),
             desktopExecutor: desktopToolExecutor ?? DesktopToolService(),
-            timerExecutor: timerToolExecutor ?? TimerToolService()
+            timerExecutor: timerToolExecutor ?? TimerToolService(),
+            gmailExecutor: gmailToolExecutor,
+            calendarExecutor: calendarToolExecutor
         )
         self.chatStore = chatStore
 
@@ -521,11 +525,11 @@ final class ChatBubbleWindowController {
                 // URLSession reports Task cancellation as URLError.cancelled.
             } catch OllamaError.missingAPIKey {
                 model.phase = .failed(
-                    "Web search needs an ollama.com API key — set OLLAMA_API_KEY or put it in ~/.ollama/api_key"
+                    "Web search needs an ollama.com API key — add it in Electragne Settings"
                 )
             } catch GeminiError.missingAPIKey {
                 model.phase = .failed(
-                    "Gemini needs an API key — put it in ~/.gemini.api.key"
+                    "Gemini needs an API key — add it in Electragne Settings"
                 )
             } catch GeminiError.quotaExceeded {
                 model.phase = .failed("Gemini quota exceeded — try again later")

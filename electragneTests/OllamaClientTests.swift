@@ -114,7 +114,7 @@ struct OllamaClientTests {
             try JSONSerialization.jsonObject(with: body) as? [String: Any]
         )
         let tools = try #require(json["tools"] as? [[String: Any]])
-        #expect(tools.count == 18)
+        #expect(tools.count == 26)
         let function = try #require(tools[0]["function"] as? [String: Any])
         #expect(function["name"] as? String == "web_search")
         let parameters = try #require(function["parameters"] as? [String: Any])
@@ -183,6 +183,7 @@ struct OllamaClientTests {
     @Test func apiKeyComesFromEnvironmentFirstThenFile() throws {
         #expect(
             OllamaWebSearch.loadAPIKey(
+                keychainKey: nil,
                 environment: ["OLLAMA_API_KEY": " key-from-env\n"],
                 homeDirectory: "/nonexistent"
             ) == "key-from-env"
@@ -201,7 +202,14 @@ struct OllamaClientTests {
         )
         defer { try? FileManager.default.removeItem(at: home) }
 
-        #expect(OllamaWebSearch.loadAPIKey(environment: [:], homeDirectory: home.path) == "key-from-file")
-        #expect(OllamaWebSearch.loadAPIKey(environment: [:], homeDirectory: "/nonexistent") == nil)
+        #expect(OllamaWebSearch.loadAPIKey(keychainKey: nil, environment: [:], homeDirectory: home.path) == "key-from-file")
+        #expect(OllamaWebSearch.loadAPIKey(keychainKey: nil, environment: [:], homeDirectory: "/nonexistent") == nil)
+        #expect(
+            OllamaWebSearch.loadAPIKey(
+                keychainKey: " key-from-keychain ",
+                environment: ["OLLAMA_API_KEY": "key-from-env"],
+                homeDirectory: home.path
+            ) == "key-from-keychain"
+        )
     }
 }

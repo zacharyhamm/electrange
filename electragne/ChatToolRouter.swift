@@ -6,17 +6,23 @@ final class ChatToolRouter {
     private let notesExecutor: any NotesToolExecuting
     private let desktopExecutor: any DesktopToolExecuting
     private let timerExecutor: any TimerToolExecuting
+    private let gmailExecutor: any GmailToolExecuting
+    private let calendarExecutor: any CalendarToolExecuting
 
     init(
         reminderExecutor: any ReminderToolExecuting,
         notesExecutor: any NotesToolExecuting,
         desktopExecutor: any DesktopToolExecuting,
-        timerExecutor: any TimerToolExecuting
+        timerExecutor: any TimerToolExecuting,
+        gmailExecutor: (any GmailToolExecuting)? = nil,
+        calendarExecutor: (any CalendarToolExecuting)? = nil
     ) {
         self.reminderExecutor = reminderExecutor
         self.notesExecutor = notesExecutor
         self.desktopExecutor = desktopExecutor
         self.timerExecutor = timerExecutor
+        self.gmailExecutor = gmailExecutor ?? GmailToolService()
+        self.calendarExecutor = calendarExecutor ?? CalendarToolService()
     }
 
     func execute(
@@ -38,6 +44,10 @@ final class ChatToolRouter {
             return await executeDesktop(call, definition: definition, confirm: confirm, onStatus: onStatus)
         case .timers:
             return await executeTimer(call, definition: definition, confirm: confirm, onStatus: onStatus)
+        case .gmail:
+            return await executeGmail(call, definition: definition, confirm: confirm, onStatus: onStatus)
+        case .calendar:
+            return await executeCalendar(call, definition: definition, confirm: confirm, onStatus: onStatus)
         case .webSearch:
             return .error("Unknown tool ‘\(call.name)’.")
         }
@@ -135,6 +145,62 @@ final class ChatToolRouter {
         }
         onStatus(definition.executionStatus)
         return await timerExecutor.execute(request)
+    }
+
+    private func executeGmail(
+        _ call: ChatToolCall,
+        definition: ChatToolDefinition,
+        confirm: (ToolConfirmationDetails) async -> Bool,
+        onStatus: (String) -> Void
+    ) async -> ChatToolResult {
+        let request: GmailToolRequest
+        do {
+            request = try GmailToolRequest(toolCall: call)
+        } catch let error as GmailToolError {
+            return .error(error.localizedDescription)
+        } catch {
+            return .error("That Gmail request was invalid.")
+        }
+
+        let prepared: GmailPreparedRequest
+        do {
+            prepared = try await gmailExecutor.prepare(request)
+        } catch {
+            return .error(error.localizedDescription)
+        }
+        guard await approve(prepared.confirmation, using: confirm) else {
+            return Self.cancelledResult
+        }
+        onStatus(definition.executionStatus)
+        return await gmailExecutor.execute(prepared)
+    }
+
+    private func executeCalendar(
+        _ call: ChatToolCall,
+        definition: ChatToolDefinition,
+        confirm: (ToolConfirmationDetails) async -> Bool,
+        onStatus: (String) -> Void
+    ) async -> ChatToolResult {
+        let request: CalendarToolRequest
+        do {
+            request = try CalendarToolRequest(toolCall: call)
+        } catch let error as CalendarToolError {
+            return .error(error.localizedDescription)
+        } catch {
+            return .error("That Google Calendar request was invalid.")
+        }
+
+        let prepared: CalendarPreparedRequest
+        do {
+            prepared = try await calendarExecutor.prepare(request)
+        } catch {
+            return .error(error.localizedDescription)
+        }
+        guard await approve(prepared.confirmation, using: confirm) else {
+            return Self.cancelledResult
+        }
+        onStatus(definition.executionStatus)
+        return await calendarExecutor.execute(prepared)
     }
 
     private func approve(
