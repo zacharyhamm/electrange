@@ -15,7 +15,7 @@ independently landable).
 | A1 | `AppModel` direct calls replacing `petShould*` notifications | **Done** |
 | A2 | Single window-wiring path, `ClickDragClassifier`, shared `AnimationPlayback` | **Done** |
 | A3 | Environment seams for the pet core | **Done** |
-| A4 | Pure per-state movement policies + characterization tests | Pending |
+| A4 | Pure per-state movement policies + characterization tests | **Done** |
 | A5 | Behavior controllers + declarative timers | Pending |
 | B1 | Chat transport seam + config + first streaming tests | Pending |
 | B2 | Neutral `ChatMessage` + shared `ChatProviderEngine` | Pending |

@@ -841,78 +841,9 @@ class PetViewModel {
         return screens[index]
     }
 
-    /// A display the pet can walk onto across the given screen's left or right
-    /// edge. The adjacent screen must touch that edge, be open at the pet's
-    /// height, and have a ground that's reachable: at/below the pet's feet, or
-    /// a jumpable ledge above them.
-    private func walkableScreen(beyond screen: ScreenInfo, movingRight: Bool, footY: CGFloat) -> ScreenInfo? {
-        let screens = environment.snapshot(includeWindows: false).screens
-        guard let screenIndex = screens.firstIndex(of: screen),
-              let index = ScreenGeometry.walkableScreen(
-                beyond: screenIndex, movingRight: movingRight, footY: footY,
-                maxStepUp: PhysicsConstants.maxScreenStepUp, in: screens.map(\.frame)) else {
-            return nil
-        }
-        return screens[index]
-    }
-
     private func windowFrame(id: CGWindowID) -> CGRect? {
         environment.snapshot(includeWindows: true).windowSurfaces
             .first(where: { $0.id == id })?.frame
-    }
-
-    // MARK: - Ground Level Calculation
-
-    /// What the pet would land on at the end of a fall
-    private enum GroundSurface {
-        case ground
-        case dock
-        case window(CGWindowID)
-    }
-
-    /// Ground level beneath the pet: the dock top when the pet is over the
-    /// dock on its screen, otherwise the bottom edge of the screen under it.
-    /// With includeWindows, app window tops below the pet count too, and the
-    /// highest one (the first the pet would encounter falling) wins.
-    private func groundInfo(at x: CGFloat, petWidth: CGFloat, below y: CGFloat,
-                            includeWindows: Bool = false) -> (level: CGFloat, surface: GroundSurface) {
-        let screen = screenContaining(x: x + petWidth / 2, below: y) ?? currentScreen
-
-        guard let screen else { return (0, .ground) }
-
-        // Refresh dock info for the screen the pet is over
-        let snapshot = environment.snapshot(includeWindows: includeWindows)
-        cachedDockInfo = snapshot.dockInfo
-
-        var level = screen.frame.minY
-        var surface = GroundSurface.ground
-
-        // For bottom dock, check if pet is above the dock
-        if let dockInfo = cachedDockInfo, dockInfo.position == .bottom,
-           dockInfo.containsX(x, petWidth: petWidth) {
-            level = dockInfo.frame.maxY
-            surface = .dock
-        }
-
-        if includeWindows {
-            let topLimit = screen.visibleFrame.maxY
-            for candidate in snapshot.windowSurfaces {
-                let frame = candidate.frame
-                // Must be the highest surface so far, below the pet
-                guard frame.maxY > level, frame.maxY <= y else { continue }
-                // Pet must horizontally overlap the window top
-                guard x + petWidth > frame.minX, x < frame.maxX else { continue }
-                // Pet must fit between the window top and the top of the screen
-                guard frame.maxY + petWidth <= topLimit else { continue }
-                // And the top must be wide enough to stand on
-                guard frame.width >= petWidth else { continue }
-
-                level = frame.maxY
-                surface = .window(candidate.id)
-            }
-        }
-
-        return (level, surface)
     }
 
     // MARK: - Animation Playback
@@ -1138,8 +1069,10 @@ class PetViewModel {
         guard petWindow != nil else { return }
         guard case .falling(let velocity, let bounceCount) = state else { return }
 
+        let snapshot = environment.snapshot(includeWindows: landOnWindowsWhileFalling)
+        cachedDockInfo = snapshot.dockInfo
         let action = FallPolicy.evaluate(.init(
-            env: environment.snapshot(includeWindows: landOnWindowsWhileFalling),
+            env: snapshot,
             velocity: velocity,
             bounceCount: bounceCount,
             tickScale: PhysicsConstants.tickScale,
