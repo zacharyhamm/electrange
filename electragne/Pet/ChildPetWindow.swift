@@ -105,10 +105,6 @@ class ChildPetWindow: NSWindow {
     // MARK: - Public Pause/Resume (called by PetViewModel)
 
     func pause() {
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in self?.pause() }
-            return
-        }
         guard !isPaused, !isClosing, !hasBeenClosed else { return }
         isPaused = true
         animationTimer?.invalidate()
@@ -119,10 +115,6 @@ class ChildPetWindow: NSWindow {
     }
 
     func resume() {
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in self?.resume() }
-            return
-        }
         guard isPaused, !isClosing, !hasBeenClosed else { return }
         isPaused = false
         orderFront(nil)  // Show window

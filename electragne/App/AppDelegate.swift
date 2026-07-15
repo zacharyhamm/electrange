@@ -12,6 +12,8 @@ import UserNotifications
 
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem?
+    /// Set by ElectragneApp when the pet window appears.
+    var appModel: AppModel?
     weak var petWindow: NSWindow?
     private var toggleVisibilityMenuItem: NSMenuItem?
     private var geminiToggleMenuItem: NSMenuItem?
@@ -141,7 +143,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
         // The chat text field can only take keystrokes if the app is active.
         NSApp.activate(ignoringOtherApps: true)
-        NotificationCenter.default.post(name: .petShouldSummonChat, object: nil)
+        appModel?.petViewModel.summonToChat()
     }
 
     @objc func toggleVisibility() {
@@ -152,11 +154,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         if isPetVisible {
             window.orderFront(nil)
             toggleVisibilityMenuItem?.title = "Hide Pet"
-            NotificationCenter.default.post(name: .petShouldResume, object: nil)
+            appModel?.petViewModel.resume()
         } else {
             window.orderOut(nil)
             toggleVisibilityMenuItem?.title = "Show Pet"
-            NotificationCenter.default.post(name: .petShouldPause, object: nil)
+            appModel?.petViewModel.pause()
         }
     }
 

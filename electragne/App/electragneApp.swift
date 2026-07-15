@@ -10,12 +10,14 @@ import SwiftUI
 @main
 struct ElectragneApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @State private var appModel = AppModel()
 
     var body: some Scene {
         // Window (not WindowGroup) so File > New Window can't spawn a second
         // pet view fighting over the same NSWindow
         Window("Electragne", id: "pet") {
-            ContentView()
+            ContentView(appModel: appModel)
+                .onAppear { appDelegate.appModel = appModel }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)

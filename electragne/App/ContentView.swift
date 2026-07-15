@@ -8,13 +8,15 @@
 import SwiftUI
 
 struct ContentView: View {
+    let appModel: AppModel
+
     var body: some View {
-        ElectragneView()
+        ElectragneView(viewModel: appModel.petViewModel)
     }
 }
 
 struct ElectragneView: View {
-    @State private var viewModel = PetViewModel()
+    let viewModel: PetViewModel
     @State private var chatBubbleController = ChatBubbleWindowController()
     @State private var pressStartMouseLocation: NSPoint?
     @AppStorage(PetSizeConstants.storageKey) private var petSize: Double = PetSizeConstants.defaultSize
@@ -151,5 +153,5 @@ private struct WindowAccessor: NSViewRepresentable {
 }
 
 #Preview {
-    ContentView()
+    ContentView(appModel: AppModel())
 }

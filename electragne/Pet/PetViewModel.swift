@@ -93,24 +93,6 @@ class PetViewModel {
     private func setupNotificationObservers() {
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handlePauseNotification),
-            name: .petShouldPause,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleResumeNotification),
-            name: .petShouldResume,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleSummonChatNotification),
-            name: .petShouldSummonChat,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
             selector: #selector(handleScreenParametersChange),
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
@@ -133,18 +115,6 @@ class PetViewModel {
             stopAllTimers()
             startFalling()
         }
-    }
-
-    @objc private func handleSummonChatNotification() {
-        summonToChat()
-    }
-
-    @objc private func handlePauseNotification() {
-        pause()
-    }
-
-    @objc private func handleResumeNotification() {
-        resume()
     }
 
     deinit {
@@ -1186,7 +1156,7 @@ class PetViewModel {
 
     // MARK: - Pause/Resume
 
-    private func pause() {
+    func pause() {
         guard !isPaused else { return }
         isPaused = true
 
@@ -1205,7 +1175,7 @@ class PetViewModel {
         pauseChildWindows()
     }
 
-    private func resume() {
+    func resume() {
         guard isPaused else { return }
         isPaused = false
 
