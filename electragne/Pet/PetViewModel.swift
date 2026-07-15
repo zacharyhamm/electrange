@@ -449,18 +449,6 @@ class PetViewModel {
     /// for the pet below the top of the screen, its top is above the pet's
     /// head (something to actually climb), and its side reaches down to the
     /// pet. Rolls the climb chance per crossing.
-    private func findClimbOpportunity(on screen: ScreenInfo, currentX: CGFloat, newX: CGFloat,
-                                      footY: CGFloat, petSize: CGFloat) -> (WindowSurface, CGPoint)? {
-        let snapshot = environment.snapshot(includeWindows: true)
-        let action = ClimbPolicy.evaluate(.init(
-            env: snapshot,
-            mode: .find(screen: screen, currentX: currentX, newX: newX,
-                        footY: footY, isMovingRight: isMovingRight)
-        )) { Int.random(in: 1...$0) }
-        guard case .begin(let candidate, let point) = action else { return nil }
-        return (candidate, point)
-    }
-
     func startClimbingWindow(_ surface: WindowSurface) {
         stopMovementTimer()
         stopIdleTimer()
@@ -1203,102 +1191,33 @@ class PetViewModel {
         guard petWindow != nil else { return }
         guard case .walking = state else { return }  // Only for ground walking
         guard let screen = currentScreen else { return }
-
-        let petSize = surface.frame.width
-        let currentX = surface.frame.origin.x
-        let footY = surface.frame.origin.y
-
-        let moveX = abs(scaledMoveX())  // Use absolute value
-
-        var newX = currentX
-
-        if isMovingRight {
-            newX += moveX
-        } else {
-            newX -= moveX
-        }
-
-        // Refresh dock info for the screen the pet is on
-        cachedDockInfo = environment.snapshot(includeWindows: false).dockInfo
-
-        // Check for dock collision (pet is on ground level)
-        if let dockInfo = cachedDockInfo, dockInfo.position == .bottom {
-            let petRight = newX + petSize
-            let petLeft = newX
-            let dockLeft = dockInfo.frame.minX
-            let dockRight = dockInfo.frame.maxX
-
-            // Pet is on ground (not on dock) - check if hitting dock edge
-            if footY < dockInfo.frame.maxY {
-                // Moving right and about to hit dock's left edge
-                if isMovingRight && currentX + petSize <= dockLeft && petRight >= dockLeft {
-                    newX = dockLeft - petSize  // Stop at dock edge
-                    surface.setOrigin(NSPoint(x: newX, y: footY))
-                    startJumpingToDock()
-                    return
-                }
-
-                // Moving left and about to hit dock's right edge
-                if !isMovingRight && currentX >= dockRight && petLeft <= dockRight {
-                    newX = dockRight  // Stop at dock edge
-                    surface.setOrigin(NSPoint(x: newX, y: footY))
-                    startJumpingToDock()
-                    return
-                }
-            }
-        }
-
-        // Check for a window side the pet feels like climbing
-        if let (candidate, point) = findClimbOpportunity(on: screen, currentX: currentX, newX: newX,
-                                            footY: footY, petSize: petSize) {
+        let snapshot = environment.snapshot(includeWindows: true)
+        guard let screenIndex = snapshot.screens.firstIndex(of: screen) else { return }
+        cachedDockInfo = snapshot.dockInfo
+        let action = WalkPolicy.evaluate(.init(
+            env: snapshot, screenIndex: screenIndex, moveX: scaledMoveX(),
+            isMovingRight: isMovingRight
+        )) { Int.random(in: 1...$0) }
+        switch action {
+        case .move(let point), .crossSeam(let point, _):
+            surface.setOrigin(point)
+        case .turnAround(let point):
+            surface.setOrigin(point)
+            isMovingRight.toggle()
+        case .beginClimb(let candidate, let point):
             surface.setOrigin(point)
             startClimbingWindow(candidate)
-            return
-        }
-
-        // Screen edge: cross onto an adjacent display, or turn around
-        let seamRight = screen.frame.maxX
-        let seamLeft = screen.frame.minX
-
-        if isMovingRight && newX + petSize > seamRight {
-            if let next = walkableScreen(beyond: screen, movingRight: true, footY: footY) {
-                if next.frame.minY > footY + 1 {
-                    // The next display's ground is a ledge above us - hop up
-                    surface.setOrigin(NSPoint(x: min(newX, seamRight - petSize), y: footY))
-                    startJumpingToLedge(targetX: seamRight + petSize * 0.5, targetY: next.frame.minY)
-                    return
-                }
-                // Same level or lower: keep walking across the seam
-            } else {
-                newX = seamRight - petSize
-                isMovingRight = false
-            }
-        } else if !isMovingRight && newX < seamLeft {
-            if let next = walkableScreen(beyond: screen, movingRight: false, footY: footY) {
-                if next.frame.minY > footY + 1 {
-                    surface.setOrigin(NSPoint(x: max(newX, seamLeft), y: footY))
-                    startJumpingToLedge(targetX: seamLeft - petSize * 1.5, targetY: next.frame.minY)
-                    return
-                }
-            } else {
-                newX = seamLeft
-                isMovingRight = true
-            }
-        }
-
-        // Keep on the ground under the pet's midpoint; once it crosses a seam
-        // above a lower display, the ground drops away and the pet falls
-        if let support = screenContaining(x: newX + petSize / 2, below: footY) {
-            if footY > support.frame.minY + 1 {
-                surface.setOrigin(NSPoint(x: newX, y: footY))
-                stopMovementTimer()
-                stopIdleTimer()
-                startFalling()
-                return
-            }
-            surface.setOrigin(NSPoint(x: newX, y: support.frame.minY))
-        } else {
-            surface.setOrigin(NSPoint(x: newX, y: footY))
+        case .beginLedgeJump(let point, let targetX, let targetY):
+            surface.setOrigin(point)
+            startJumpingToLedge(targetX: targetX, targetY: targetY)
+        case .fallOffEdge(let point):
+            surface.setOrigin(point)
+            stopMovementTimer()
+            stopIdleTimer()
+            startFalling()
+        case .beginDockApproach(let point):
+            surface.setOrigin(point)
+            startJumpingToDock()
         }
     }
 
