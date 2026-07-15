@@ -129,6 +129,41 @@ nonisolated struct CalendarPreparedRequest: Sendable {
     let confirmation: ToolConfirmationDetails?
 }
 
+nonisolated struct CalendarEventDetails: Equatable, Sendable {
+    nonisolated struct Attendee: Equatable, Sendable {
+        let name: String?
+        let email: String
+        let responseStatus: String?
+        let isSelf: Bool
+    }
+
+    let id: String
+    let summary: String
+    let start: Date?
+    let end: Date?
+    let isAllDay: Bool
+    let description: String?
+    let location: String?
+    let status: String?
+    let attendees: [Attendee]
+    let calendarURL: URL?
+    let hangoutURL: URL?
+    let conferenceURLs: [URL]
+
+    var isEligibleForReminder: Bool {
+        !isAllDay
+            && start != nil
+            && status != "cancelled"
+            && !attendees.contains { $0.isSelf && $0.responseStatus == "declined" }
+    }
+}
+
+@MainActor
+protocol CalendarEventProviding {
+    func events(from start: Date, to end: Date) async throws -> [CalendarEventDetails]
+    func event(id: String) async throws -> CalendarEventDetails?
+}
+
 @MainActor
 protocol CalendarToolExecuting {
     func prepare(_ request: CalendarToolRequest) async throws -> CalendarPreparedRequest
@@ -136,7 +171,7 @@ protocol CalendarToolExecuting {
 }
 
 @MainActor
-final class CalendarToolService: CalendarToolExecuting {
+final class CalendarToolService: CalendarToolExecuting, CalendarEventProviding {
     private let accounts: any GoogleTokenProviding
     private let transport: any GoogleAPITransporting
 
@@ -197,6 +232,43 @@ final class CalendarToolService: CalendarToolExecuting {
             }
         } catch {
             return .error(error.localizedDescription)
+        }
+    }
+
+    func events(from start: Date, to end: Date) async throws -> [CalendarEventDetails] {
+        let account = try accounts.resolveAccount(id: nil)
+        let formatter = ISO8601DateFormatter()
+        let data = try await transport.data(
+            accountID: account.id, method: "GET",
+            path: "calendar/v3/calendars/primary/events",
+            query: [
+                URLQueryItem(name: "singleEvents", value: "true"),
+                URLQueryItem(name: "orderBy", value: "startTime"),
+                URLQueryItem(name: "maxResults", value: "250"),
+                URLQueryItem(name: "timeMin", value: formatter.string(from: start)),
+                URLQueryItem(name: "timeMax", value: formatter.string(from: end)),
+            ],
+            body: nil
+        )
+        let response = try GoogleToolSupport.decode(
+            CalendarEventsResponse.self, from: data, orThrow: CalendarToolError.invalidResponse
+        )
+        return (response.items ?? []).map(Self.eventDetails)
+    }
+
+    func event(id: String) async throws -> CalendarEventDetails? {
+        let account = try accounts.resolveAccount(id: nil)
+        do {
+            let data = try await transport.data(
+                accountID: account.id, method: "GET",
+                path: "calendar/v3/calendars/primary/events/\(id)",
+                query: [], body: nil
+            )
+            return Self.eventDetails(try GoogleToolSupport.decode(
+                CalendarEvent.self, from: data, orThrow: CalendarToolError.invalidResponse
+            ))
+        } catch GoogleAPIError.api(let status, _) where status == 404 || status == 410 {
+            return nil
         }
     }
 
@@ -306,6 +378,32 @@ final class CalendarToolService: CalendarToolExecuting {
         ])
     }
 
+    nonisolated private static func eventDetails(_ event: CalendarEvent) -> CalendarEventDetails {
+        CalendarEventDetails(
+            id: event.id,
+            summary: event.summary ?? "(No title)",
+            start: event.start?.dateTime.flatMap(CalendarToolRequest.timestamp),
+            end: event.end?.dateTime.flatMap(CalendarToolRequest.timestamp),
+            isAllDay: event.start?.date != nil,
+            description: event.description,
+            location: event.location,
+            status: event.status,
+            attendees: (event.attendees ?? []).map {
+                .init(
+                    name: $0.displayName,
+                    email: $0.email,
+                    responseStatus: $0.responseStatus,
+                    isSelf: $0.selfAttendee ?? false
+                )
+            },
+            calendarURL: event.htmlLink.flatMap(URL.init(string:)),
+            hangoutURL: event.hangoutLink.flatMap(URL.init(string:)),
+            conferenceURLs: (event.conferenceData?.entryPoints ?? [])
+                .filter { $0.entryPointType == "video" }
+                .compactMap { URL(string: $0.uri) }
+        )
+    }
+
 }
 
 nonisolated private struct CalendarListResponse: Decodable {
@@ -336,8 +434,32 @@ nonisolated private struct CalendarEvent: Decodable {
     let location: String?
     let status: String?
     let htmlLink: String?
+    let hangoutLink: String?
     let start: EventTime?
     let end: EventTime?
+    let attendees: [Attendee]?
+    let conferenceData: ConferenceData?
+
+    struct Attendee: Decodable {
+        let displayName: String?
+        let email: String
+        let responseStatus: String?
+        let selfAttendee: Bool?
+
+        private enum CodingKeys: String, CodingKey {
+            case displayName, email, responseStatus
+            case selfAttendee = "self"
+        }
+    }
+
+    struct ConferenceData: Decodable {
+        let entryPoints: [EntryPoint]?
+    }
+
+    struct EntryPoint: Decodable {
+        let entryPointType: String?
+        let uri: String
+    }
 }
 
 nonisolated private struct CalendarEventCreate: Encodable {

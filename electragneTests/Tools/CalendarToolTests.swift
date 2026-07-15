@@ -111,6 +111,18 @@ struct CalendarToolServiceTests {
         let start = try #require(json["start"] as? [String: Any])
         #expect(start["dateTime"] as? String == "2026-07-16T12:00:00-05:00")
         #expect(start["date"] == nil)
+
+        let reminderEvents = try await service.events(
+            from: Date(timeIntervalSince1970: 1_768_000_000),
+            to: Date(timeIntervalSince1970: 1_768_086_400)
+        )
+        let reminder = try #require(reminderEvents.first)
+        #expect(reminder.attendees.first?.isSelf == true)
+        #expect(reminder.attendees.first?.responseStatus == "accepted")
+        #expect(reminder.conferenceURLs.first?.host == "meet.google.com")
+
+        let revalidated = try await service.event(id: "event-3")
+        #expect(revalidated?.id == "event-3")
     }
 }
 
@@ -150,6 +162,10 @@ private final class CalendarMockTransport: GoogleAPITransporting {
             return Data(#"{"id":"event-1","summary":"Lunch","status":"confirmed","htmlLink":"https://calendar.google.com/event","start":{"dateTime":"2026-07-16T12:00:00-05:00"},"end":{"dateTime":"2026-07-16T13:00:00-05:00"}}"#.utf8)
         case ("GET", "calendar/v3/calendars/work@example.com/events"):
             return Data(#"{"items":[{"id":"event-2","summary":"Planning","status":"confirmed","start":{"dateTime":"2026-08-01T09:00:00-05:00"},"end":{"dateTime":"2026-08-01T10:00:00-05:00"}}]}"#.utf8)
+        case ("GET", "calendar/v3/calendars/primary/events"):
+            return Data(#"{"items":[{"id":"event-3","summary":"Standup","status":"confirmed","attendees":[{"email":"me@example.com","self":true,"responseStatus":"accepted"}],"conferenceData":{"entryPoints":[{"entryPointType":"video","uri":"https://meet.google.com/abc-defg-hij"}]},"start":{"dateTime":"2026-01-09T09:00:00Z"},"end":{"dateTime":"2026-01-09T09:30:00Z"}}]}"#.utf8)
+        case ("GET", "calendar/v3/calendars/primary/events/event-3"):
+            return Data(#"{"id":"event-3","summary":"Standup","status":"confirmed","start":{"dateTime":"2026-01-09T09:00:00Z"},"end":{"dateTime":"2026-01-09T09:30:00Z"}}"#.utf8)
         default:
             throw CalendarToolError.invalidResponse
         }

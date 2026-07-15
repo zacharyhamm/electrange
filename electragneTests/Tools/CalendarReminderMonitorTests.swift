@@ -1,0 +1,170 @@
+import Foundation
+import Testing
+@testable import electragne
+
+@MainActor
+struct CalendarReminderMonitorTests {
+    @Test func reconcilesReschedulesAndRevalidatesBeforeDelivery() async {
+        let now = Date(timeIntervalSince1970: 1_768_000_000)
+        let original = event(start: now.addingTimeInterval(3_600))
+        let moved = event(start: now.addingTimeInterval(7_200))
+        let provider = ReminderEventProvider(snapshot: [original], current: original)
+        let scheduler = ReminderScheduler()
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let monitor = CalendarReminderMonitor(
+            events: provider, scheduler: scheduler, defaults: defaults,
+            now: { now }, calendar: utcCalendar
+        )
+        var delivered: [CalendarEventDetails] = []
+        monitor.onReminder = { delivered.append($0) }
+
+        await monitor.refresh()
+        #expect(scheduler.entries.count == 1)
+        #expect(scheduler.entries[0].date == original.start?.addingTimeInterval(-180))
+
+        provider.snapshot = [moved]
+        provider.current = moved
+        await monitor.refresh()
+        #expect(scheduler.entries[0].token.cancelled)
+        #expect(scheduler.entries.count == 2)
+        #expect(scheduler.entries[1].date == moved.start?.addingTimeInterval(-180))
+
+        scheduler.fire(1)
+        await Task.yield()
+        await Task.yield()
+        #expect(delivered == [moved])
+
+        provider.snapshot = [original]
+        provider.current = nil
+        let deletionScheduler = ReminderScheduler()
+        let deletionMonitor = CalendarReminderMonitor(
+            events: provider, scheduler: deletionScheduler,
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            now: { now }, calendar: utcCalendar
+        )
+        var deletedDelivered = false
+        deletionMonitor.onReminder = { _ in deletedDelivered = true }
+        await deletionMonitor.refresh()
+        deletionScheduler.fire(0)
+        await Task.yield()
+        await Task.yield()
+        #expect(!deletedDelivered)
+    }
+
+    @Test func notifiesImmediatelyAndDeduplicatesAnEventInsideLeadTime() async {
+        let now = Date(timeIntervalSince1970: 1_768_000_000)
+        let upcoming = event(start: now.addingTimeInterval(60))
+        let provider = ReminderEventProvider(snapshot: [upcoming], current: upcoming)
+        let scheduler = ReminderScheduler()
+        let monitor = CalendarReminderMonitor(
+            events: provider, scheduler: scheduler,
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            now: { now }, calendar: utcCalendar
+        )
+        var delivered = 0
+        monitor.onReminder = { _ in delivered += 1 }
+
+        await monitor.refresh()
+        await monitor.refresh()
+
+        #expect(delivered == 1)
+        #expect(scheduler.entries.isEmpty)
+    }
+
+    @Test func extractsMeetingLinksAndFormatsAttendees() {
+        let zoom = URL(string: "https://acme.zoom.us/j/123")!
+        let details = event(
+            start: Date(timeIntervalSince1970: 1_768_003_600),
+            description: "Agenda: https://example.com/doc",
+            location: zoom.absoluteString,
+            attendees: [.init(name: "Ada", email: "ada@example.com", responseStatus: "accepted", isSelf: false)]
+        )
+
+        #expect(details.joinURL == zoom)
+        #expect(details.reminderLinks.contains(zoom))
+        #expect(details.reminderPrompt.contains("Ada <ada@example.com> (accepted)"))
+        #expect(details.reminderPrompt.contains("https://example.com/doc"))
+    }
+
+    @Test func eligibilityRejectsDeclinedCancelledAndAllDayEvents() {
+        let start = Date(timeIntervalSince1970: 1_768_003_600)
+        let declined = CalendarEventDetails.Attendee(
+            name: nil, email: "me@example.com", responseStatus: "declined", isSelf: true
+        )
+        let base = event(start: start)
+        #expect(base.isEligibleForReminder)
+        #expect(!event(start: start, attendees: [declined]).isEligibleForReminder)
+        #expect(!CalendarEventDetails(
+            id: base.id, summary: base.summary, start: start, end: base.end,
+            isAllDay: false, description: nil, location: nil, status: "cancelled",
+            attendees: [], calendarURL: nil, hangoutURL: nil, conferenceURLs: []
+        ).isEligibleForReminder)
+        #expect(!CalendarEventDetails(
+            id: base.id, summary: base.summary, start: nil, end: nil,
+            isAllDay: true, description: nil, location: nil, status: "confirmed",
+            attendees: [], calendarURL: nil, hangoutURL: nil, conferenceURLs: []
+        ).isEligibleForReminder)
+    }
+
+    private var utcCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+
+    private func event(
+        start: Date,
+        description: String? = nil,
+        location: String? = nil,
+        attendees: [CalendarEventDetails.Attendee] = []
+    ) -> CalendarEventDetails {
+        CalendarEventDetails(
+            id: "event-1", summary: "Planning", start: start,
+            end: start.addingTimeInterval(3_600), isAllDay: false,
+            description: description, location: location, status: "confirmed",
+            attendees: attendees, calendarURL: nil, hangoutURL: nil,
+            conferenceURLs: []
+        )
+    }
+}
+
+@MainActor
+private final class ReminderEventProvider: CalendarEventProviding {
+    var snapshot: [CalendarEventDetails]
+    var current: CalendarEventDetails?
+
+    init(snapshot: [CalendarEventDetails], current: CalendarEventDetails?) {
+        self.snapshot = snapshot
+        self.current = current
+    }
+
+    func events(from start: Date, to end: Date) async throws -> [CalendarEventDetails] { snapshot }
+    func event(id: String) async throws -> CalendarEventDetails? { current }
+}
+
+@MainActor
+private final class ReminderScheduler: CalendarReminderScheduling {
+    struct Entry {
+        let date: Date
+        let token: Token
+        let action: @MainActor () -> Void
+    }
+
+    final class Token: CalendarReminderTimer {
+        var cancelled = false
+        func cancel() { cancelled = true }
+    }
+
+    var entries: [Entry] = []
+
+    func schedule(at date: Date, action: @escaping @MainActor () -> Void) -> any CalendarReminderTimer {
+        let token = Token()
+        entries.append(Entry(date: date, token: token, action: action))
+        return token
+    }
+
+    func fire(_ index: Int) {
+        let entry = entries[index]
+        if !entry.token.cancelled { entry.action() }
+    }
+}

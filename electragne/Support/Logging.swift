@@ -21,4 +21,5 @@ enum Log {
     static let lifecycle = Logger(subsystem: subsystem, category: "lifecycle")
     /// Movement / dock / physics tracing.
     static let physics = Logger(subsystem: subsystem, category: "physics")
+    static let calendar = Logger(subsystem: subsystem, category: "calendar")
 }

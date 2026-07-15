@@ -13,7 +13,13 @@ import UserNotifications
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem?
     /// Set by ElectragneApp when the pet window appears.
-    var appModel: AppModel?
+    var appModel: AppModel? {
+        didSet {
+            appModel?.startCalendarMonitoring { [weak self] event in
+                self?.presentCalendarReminder(event)
+            }
+        }
+    }
     /// The pet window, as reported by ContentView's WindowAccessor — the
     /// single mechanism that identifies it.
     private var petWindow: NSWindow? { appModel?.petViewModel.petWindow }
@@ -158,6 +164,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // The chat text field can only take keystrokes if the app is active.
         NSApp.activate(ignoringOtherApps: true)
         appModel?.petViewModel.summonToChat()
+    }
+
+    private func presentCalendarReminder(_ event: CalendarEventDetails) {
+        summonPetToChat()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let appModel, let window = self.petWindow,
+                  appModel.petViewModel.state.isChatting else { return }
+            appModel.chatBubbleController.present(
+                anchoredTo: window,
+                onDismiss: { appModel.petViewModel.dismissChat() }
+            )
+            appModel.chatBubbleController.startCalendarEventConversation(event)
+        }
     }
 
     @objc func toggleVisibility() {

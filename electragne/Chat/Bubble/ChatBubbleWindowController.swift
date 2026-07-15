@@ -127,7 +127,21 @@ final class ChatBubbleWindowController {
         panel.setFrameOrigin(placement.origin)
     }
 
-    private func startStream(userMessage: String) {
+    func startCalendarEventConversation(_ event: CalendarEventDetails) {
+        resolveToolConfirmation(approved: false)
+        streamTask?.cancel()
+        streamTask = nil
+        activeStreamID = nil
+        chatStore.save(currentChat)
+        currentChat = StoredChat(title: event.summary)
+        model.text = ""
+        model.entries = []
+        model.phase = .idle
+        refreshChatList()
+        startStream(userMessage: event.reminderPrompt, openURLAfterResponse: event.joinURL)
+    }
+
+    private func startStream(userMessage: String, openURLAfterResponse: URL? = nil) {
         resolveToolConfirmation(approved: false)
         streamTask?.cancel()
 
@@ -155,6 +169,9 @@ final class ChatBubbleWindowController {
                     onStatus: { status in model.status = status },
                     onToolCall: { [weak self] call in
                         guard let self else { return .error("The chat was closed.") }
+                        guard openURLAfterResponse == nil else {
+                            return .error("Tools are disabled while summarizing a calendar event.")
+                        }
                         return await self.executeToolCall(call)
                     },
                     onToken: { token in
@@ -178,7 +195,7 @@ final class ChatBubbleWindowController {
             // Record the exchange, unless a newer stream has taken over the
             // history bookkeeping since.
             guard let self, self.activeStreamID == streamID else { return }
-            if streamed.isEmpty {
+            if streamed.isEmpty, openURLAfterResponse == nil {
                 // Nothing came back (error or cancelled early); drop the
                 // question so a retry doesn't duplicate it, and the empty
                 // answer placeholder from the transcript.
@@ -187,8 +204,18 @@ final class ChatBubbleWindowController {
                     model.entries.removeLast()
                 }
             } else {
-                self.history.append(ChatMessage(role: "assistant", content: streamed))
+                if !streamed.isEmpty {
+                    self.history.append(ChatMessage(role: "assistant", content: streamed))
+                }
                 self.persistCurrentChat()
+            }
+
+            if let url = openURLAfterResponse {
+                _ = await self.executeToolCall(ChatToolCall(
+                    id: UUID().uuidString,
+                    name: "open_url",
+                    arguments: ["url": .string(url.absoluteString)]
+                ))
             }
         }
     }

@@ -11,14 +11,17 @@ struct ContentView: View {
     let appModel: AppModel
 
     var body: some View {
-        ElectragneView(viewModel: appModel.petViewModel)
+        ElectragneView(
+            viewModel: appModel.petViewModel,
+            chatBubbleController: appModel.chatBubbleController
+        )
             .onAppear { appModel.start() }
     }
 }
 
 struct ElectragneView: View {
     let viewModel: PetViewModel
-    @State private var chatBubbleController = ChatBubbleWindowController(toolRouter: ChatToolRouter())
+    let chatBubbleController: ChatBubbleWindowController
     @State private var pressStartMouseLocation: NSPoint?
     @AppStorage(PetSizeConstants.storageKey) private var petSize: Double = PetSizeConstants.defaultSize
 
