@@ -14,7 +14,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     var statusItem: NSStatusItem?
     /// Set by ElectragneApp when the pet window appears.
     var appModel: AppModel?
-    weak var petWindow: NSWindow?
+    /// The pet window, as reported by ContentView's WindowAccessor — the
+    /// single mechanism that identifies it.
+    private var petWindow: NSWindow? { appModel?.petViewModel.petWindow }
     private var toggleVisibilityMenuItem: NSMenuItem?
     private var geminiToggleMenuItem: NSMenuItem?
     private var isPetVisible = true
@@ -38,7 +40,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // Delay window configuration to ensure SwiftUI has finished its initial layout pass
         // Using asyncAfter to give SwiftUI time to complete layout
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.configureWindow()
+            self.configureWindowWhenAvailable()
+        }
+    }
+
+    /// The pet window is reported by ContentView's WindowAccessor during the
+    /// first layout pass; retry briefly in case that hasn't happened yet.
+    private func configureWindowWhenAvailable(attempts: Int = 20) {
+        if petWindow != nil {
+            configureWindow()
+        } else if attempts > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.configureWindowWhenAvailable(attempts: attempts - 1)
+            }
         }
     }
 
@@ -50,14 +64,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
 
     private func configureWindow() {
-        // Find the pet window (the main content window, not the status-bar
-        // item's window or other system windows)
-        guard let window = NSApplication.shared.windows.first(where: { window in
-            window.contentView != nil
-                && !(window is NSPanel)
-                && !window.className.contains("StatusBar")
-        }) else { return }
-        self.petWindow = window
+        guard let window = petWindow else { return }
 
         // Remove ALL window decorations
         window.styleMask = [.borderless]

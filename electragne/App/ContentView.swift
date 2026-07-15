@@ -12,6 +12,7 @@ struct ContentView: View {
 
     var body: some View {
         ElectragneView(viewModel: appModel.petViewModel)
+            .onAppear { appModel.start() }
     }
 }
 
@@ -20,9 +21,6 @@ struct ElectragneView: View {
     @State private var chatBubbleController = ChatBubbleWindowController()
     @State private var pressStartMouseLocation: NSPoint?
     @AppStorage(PetSizeConstants.storageKey) private var petSize: Double = PetSizeConstants.defaultSize
-
-    /// Screen-space mouse travel below which a press counts as a click.
-    private static let dragActivationDistance: CGFloat = 3
 
     var body: some View {
         ZStack {
@@ -49,10 +47,8 @@ struct ElectragneView: View {
             syncChatBubble()
         })
         .gesture(
-            // Click-vs-drag is decided from NSEvent.mouseLocation (screen
-            // space), not gesture-local coordinates: while the pet walks, the
-            // window moves under a stationary cursor, which reads as pointer
-            // movement in window space and would defeat a TapGesture.
+            // The click-vs-drag decision lives in ClickDragClassifier; see
+            // its header for why this uses screen-space NSEvent.mouseLocation.
             DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { _ in
                     let mouseLocation = NSEvent.mouseLocation
@@ -62,8 +58,7 @@ struct ElectragneView: View {
 
                     if !viewModel.state.isDragging {
                         guard let start = pressStartMouseLocation,
-                              hypot(mouseLocation.x - start.x, mouseLocation.y - start.y)
-                                  >= Self.dragActivationDistance,
+                              ClickDragClassifier.isDrag(from: start, to: mouseLocation),
                               viewModel.state.canInteract,
                               let window = viewModel.petWindow else { return }
                         // Calculate offset from mouse to window origin
@@ -84,9 +79,8 @@ struct ElectragneView: View {
                         return
                     }
 
-                    let end = NSEvent.mouseLocation
                     guard let start = pressStartMouseLocation,
-                          hypot(end.x - start.x, end.y - start.y) < Self.dragActivationDistance
+                          !ClickDragClassifier.isDrag(from: start, to: NSEvent.mouseLocation)
                     else { return }
 
                     if viewModel.state.isChatting {
@@ -98,16 +92,6 @@ struct ElectragneView: View {
         )
         .onChange(of: viewModel.state) { _, _ in
             syncChatBubble()
-        }
-        .onAppear {
-            viewModel.loadAnimations()
-
-            // Defer window positioning to after the layout pass completes
-            // to avoid "layoutSubtreeIfNeeded called during layout" warning
-            DispatchQueue.main.async {
-                viewModel.positionWindowForFall()
-                viewModel.startFalling()
-            }
         }
         .onDisappear {
             chatBubbleController.dismiss(notify: false)
