@@ -355,45 +355,13 @@ class PetViewModel {
     private func updateBasicJumpMovement() {
         guard petWindow != nil,
               let screen = currentScreen else { return }
-
-        // Use the animation's built-in movement values (like desktopPet)
-        // The jump animation has startY=-15 (up) to endY=+15 (down) which creates the arc
-        let moveX = abs(scaledMoveX())
-        let moveY = scaledMoveY()
-
-        let petSize = surface.frame.width
-        var newX = surface.frame.origin.x
-        var newY = surface.frame.origin.y
-
-        // Apply horizontal movement based on direction
-        if isMovingRight {
-            newX += moveX
-        } else {
-            newX -= moveX
-        }
-
-        // Apply vertical movement from animation (creates the arc)
-        // Multiply by scale factor to make the jump more impressive
-        let jumpScale: CGFloat = 2.0
-        newY -= moveY * jumpScale  // Subtract because screen Y is inverted (negative moveY = up)
-
-        // Clamp to screen bounds, extended across the seam when an adjacent
-        // display continues at the same level or lower
-        var minX = screen.frame.minX
-        var maxX = screen.frame.maxX - petSize
-        if let next = walkableScreen(beyond: screen, movingRight: isMovingRight, footY: screen.frame.minY),
-           next.frame.minY <= screen.frame.minY + 1 {
-            if isMovingRight {
-                maxX = next.frame.maxX - petSize
-            } else {
-                minX = next.frame.minX
-            }
-        }
-        newX = max(minX, min(newX, maxX))
-        newY = max(screen.frame.minY, newY)  // Don't go below ground
-
-        // Update window position
-        surface.setOrigin(NSPoint(x: newX, y: newY))
+        let snapshot = environment.snapshot(includeWindows: false)
+        guard let screenIndex = snapshot.screens.firstIndex(of: screen) else { return }
+        applyJumpAction(JumpPolicy.evaluate(.init(
+            env: snapshot,
+            motion: .animation(moveX: scaledMoveX(), moveY: scaledMoveY(),
+                               isMovingRight: isMovingRight, screenIndex: screenIndex)
+        )))
     }
 
     func endJumping() {
@@ -462,15 +430,20 @@ class PetViewModel {
         guard petWindow != nil else { return }
         guard case .jumpingToLedge = state else { return }
 
-        guard let next = activeJump?.advance() else {
-            let target = activeJump?.target ?? surface.frame.origin
-            activeJump = nil
+        guard let activeJump else { return }
+        let action = JumpPolicy.evaluate(.init(
+            env: environment.snapshot(includeWindows: false), motion: .ballistic(activeJump)
+        ))
+        switch action {
+        case .move(let point, let jump):
+            self.activeJump = jump
+            surface.setOrigin(point)
+        case .complete(let target):
+            self.activeJump = nil
             movement.stop()
             surface.setOrigin(target)
             startWalking()
-            return
         }
-        surface.setOrigin(next)
     }
 
     // MARK: - Window Climbing
@@ -715,12 +688,17 @@ class PetViewModel {
         guard petWindow != nil else { return }
         guard case .jumpingToDock = state else { return }
 
-        guard let next = activeJump?.advance() else {
-            activeJump = nil
+        guard let activeJump else { return }
+        switch JumpPolicy.evaluate(.init(
+            env: environment.snapshot(includeWindows: false), motion: .ballistic(activeJump)
+        )) {
+        case .move(let point, let jump):
+            self.activeJump = jump
+            surface.setOrigin(point)
+        case .complete:
+            self.activeJump = nil
             landOnDock()
-            return
         }
-        surface.setOrigin(next)
     }
 
     private func landOnDock() {
@@ -911,11 +889,21 @@ class PetViewModel {
         guard petWindow != nil else { return }
         guard case .jumpingOffDock = state else { return }
 
-        guard let next = activeJump?.advance() else {
+        guard let activeJump else { return }
+        switch JumpPolicy.evaluate(.init(
+            env: environment.snapshot(includeWindows: false), motion: .ballistic(activeJump)
+        )) {
+        case .move(let point, let jump):
+            self.activeJump = jump
+            surface.setOrigin(point)
+        case .complete:
             finishJumpOffDock()
-            return
         }
-        surface.setOrigin(next)
+    }
+
+    private func applyJumpAction(_ action: JumpPolicy.Action) {
+        guard case .move(let point, _) = action else { return }
+        surface.setOrigin(point)
     }
 
     private func finishJumpOffDock() {

@@ -15,7 +15,7 @@
 
 import CoreGraphics
 
-struct BallisticJump {
+struct BallisticJump: Equatable {
     enum Arc: Equatable {
         /// Symmetric parabola peaking at the midpoint (dock + ledge jumps).
         case parabolic(height: CGFloat)
