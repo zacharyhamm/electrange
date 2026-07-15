@@ -31,7 +31,7 @@ class ChildPetWindow: NSWindow {
 
     init?(animations: [String: PetAnimation], spriteRenderer: SpriteRenderer?,
           spawn: ChildSpawn, parentPosition: NSPoint, parentSize: CGFloat, isMovingRight: Bool,
-          screen: NSScreen) {
+          screen: ScreenInfo) {
         self.petAnimations = animations
         self.spriteRenderer = spriteRenderer
         self.childSize = parentSize

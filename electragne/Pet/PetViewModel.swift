@@ -23,8 +23,8 @@ class PetViewModel {
     // MARK: - Managers
 
     let animationManager = AnimationManager()
-    private let dockDetector = DockDetector.shared
-    private let windowDetector = WindowDetector.shared
+    private let environment: PetEnvironmentSensing
+    private let surface: PetSurfaceMoving
 
     // MARK: - Dock State
 
@@ -81,12 +81,18 @@ class PetViewModel {
     // MARK: - Window Reference
 
     weak var petWindow: NSWindow? {
-        didSet { depth.petWindow = petWindow }
+        didSet {
+            depth.petWindow = petWindow
+            (surface as? WindowSurfaceAdapter)?.window = petWindow
+        }
     }
 
     // MARK: - Initialization
 
-    init() {
+    init(environment: PetEnvironmentSensing? = nil, surface: PetSurfaceMoving? = nil) {
+        let liveSurface = surface ?? WindowSurfaceAdapter()
+        self.surface = liveSurface
+        self.environment = environment ?? LiveEnvironment(surface: liveSurface)
         setupNotificationObservers()
     }
 
@@ -102,8 +108,9 @@ class PetViewModel {
     /// If a display is unplugged or rearranged out from under the pet,
     /// drop it back in from the top of a remaining screen.
     @objc private func handleScreenParametersChange() {
-        guard let window = petWindow else { return }
-        guard !NSScreen.screens.contains(where: { $0.frame.intersects(window.frame) }) else { return }
+        guard petWindow != nil else { return }
+        let snapshot = environment.snapshot(includeWindows: false)
+        guard !snapshot.screens.contains(where: { $0.frame.intersects(surface.frame) }) else { return }
 
         positionWindowForFall()
         if isPaused {
@@ -249,12 +256,12 @@ class PetViewModel {
     /// the primary screen first if needed (global-hotkey entry point).
     func summonToChat() {
         guard !isPaused,
-              let window = petWindow,
-              let screen = NSScreen.screens.first else { return }
+              petWindow != nil,
+              let screen = environment.snapshot(includeWindows: false).screens.first else { return }
 
         guard Self.shouldRelocateForSummon(
             state: state,
-            petFrame: window.frame,
+            petFrame: surface.frame,
             mainScreenFrame: screen.frame
         ) else {
             if !state.isChatting {
@@ -268,11 +275,11 @@ class PetViewModel {
         landOnWindowsWhileFalling = false
 
         let origin = Self.summonOrigin(
-            petSize: window.frame.width,
+            petSize: surface.frame.width,
             screenFrame: screen.frame,
             visibleFrame: screen.visibleFrame
         )
-        window.setFrameOrigin(origin)
+        surface.setOrigin(origin)
 
         if state.isChatting {
             // Bubble is already open and follows the window move; the pet now
@@ -296,30 +303,30 @@ class PetViewModel {
             startWalking()
 
         case .dock:
-            guard let window = petWindow, let screen = currentScreen else {
+            guard petWindow != nil, currentScreen != nil else {
                 startFalling()
                 return
             }
-            cachedDockInfo = dockDetector.getDockInfo(for: screen)
+            cachedDockInfo = environment.snapshot(includeWindows: false).dockInfo
             guard let dockInfo = cachedDockInfo,
                   dockInfo.position == .bottom,
-                  dockInfo.containsX(window.frame.origin.x, petWidth: window.frame.width) else {
+                  dockInfo.containsX(surface.frame.origin.x, petWidth: surface.frame.width) else {
                 startFalling()
                 return
             }
-            window.setFrameOrigin(NSPoint(x: window.frame.origin.x, y: dockInfo.frame.maxY))
+            surface.setOrigin(NSPoint(x: surface.frame.origin.x, y: dockInfo.frame.maxY))
             startWalkingOnDock()
 
         case .window:
-            guard let window = petWindow,
+            guard petWindow != nil,
                   let id = climbWindowID,
-                  let hostFrame = windowDetector.frame(ofWindow: id) else {
+                  let hostFrame = windowFrame(id: id) else {
                 startFalling()
                 return
             }
-            let clampedX = min(max(window.frame.origin.x, hostFrame.minX),
-                               hostFrame.maxX - window.frame.width)
-            window.setFrameOrigin(NSPoint(x: clampedX, y: hostFrame.maxY))
+            let clampedX = min(max(surface.frame.origin.x, hostFrame.minX),
+                               hostFrame.maxX - surface.frame.width)
+            surface.setOrigin(NSPoint(x: clampedX, y: hostFrame.maxY))
             startWalkingOnWindow()
         }
     }
@@ -346,7 +353,7 @@ class PetViewModel {
     }
 
     private func updateBasicJumpMovement() {
-        guard let window = petWindow,
+        guard petWindow != nil,
               let screen = currentScreen else { return }
 
         // Use the animation's built-in movement values (like desktopPet)
@@ -354,9 +361,9 @@ class PetViewModel {
         let moveX = abs(scaledMoveX())
         let moveY = scaledMoveY()
 
-        let petSize = window.frame.width
-        var newX = window.frame.origin.x
-        var newY = window.frame.origin.y
+        let petSize = surface.frame.width
+        var newX = surface.frame.origin.x
+        var newY = surface.frame.origin.y
 
         // Apply horizontal movement based on direction
         if isMovingRight {
@@ -386,11 +393,11 @@ class PetViewModel {
         newY = max(screen.frame.minY, newY)  // Don't go below ground
 
         // Update window position
-        window.setFrameOrigin(NSPoint(x: newX, y: newY))
+        surface.setOrigin(NSPoint(x: newX, y: newY))
     }
 
     func endJumping() {
-        guard let window = petWindow else {
+        guard petWindow != nil else {
             state = .walking
             return
         }
@@ -402,19 +409,19 @@ class PetViewModel {
         // the pet may legitimately end up at ground level within the dock's
         // x-range, as before)
         let landingScreen = screenContaining(
-            x: window.frame.midX,
-            below: window.frame.origin.y
+            x: surface.frame.midX,
+            below: surface.frame.origin.y
         ) ?? currentScreen
-        let ground = landingScreen?.frame.minY ?? window.frame.origin.y
+        let ground = landingScreen?.frame.minY ?? surface.frame.origin.y
 
         // If the jump carried the pet across a seam onto a lower display,
         // let it fall the rest of the way
-        if window.frame.origin.y > ground + 4 {
+        if surface.frame.origin.y > ground + 4 {
             startFalling()
             return
         }
 
-        window.setFrameOrigin(NSPoint(x: window.frame.origin.x, y: ground))
+        surface.setOrigin(NSPoint(x: surface.frame.origin.x, y: ground))
 
         // Resume walking state and start movement timer
         state = .walking
@@ -424,7 +431,7 @@ class PetViewModel {
     // MARK: - Ledge Jump (onto a higher adjacent display)
 
     func startJumpingToLedge(targetX: CGFloat, targetY: CGFloat) {
-        guard let window = petWindow else {
+        guard petWindow != nil else {
             startWalking()
             return
         }
@@ -435,7 +442,7 @@ class PetViewModel {
 
         // Linear X, parabolic arc for Y (same shape as the dock jump).
         activeJump = BallisticJump(
-            start: window.frame.origin,
+            start: surface.frame.origin,
             target: CGPoint(x: targetX, y: targetY),
             arc: .parabolic(height: 30),
             step: 0.05 * PhysicsConstants.tickScale,
@@ -452,18 +459,18 @@ class PetViewModel {
     }
 
     private func updateLedgeJumpMovement() {
-        guard let window = petWindow else { return }
+        guard petWindow != nil else { return }
         guard case .jumpingToLedge = state else { return }
 
         guard let next = activeJump?.advance() else {
-            let target = activeJump?.target ?? window.frame.origin
+            let target = activeJump?.target ?? surface.frame.origin
             activeJump = nil
             movement.stop()
-            window.setFrameOrigin(target)
+            surface.setOrigin(target)
             startWalking()
             return
         }
-        window.setFrameOrigin(next)
+        surface.setOrigin(next)
     }
 
     // MARK: - Window Climbing
@@ -479,12 +486,12 @@ class PetViewModel {
     /// for the pet below the top of the screen, its top is above the pet's
     /// head (something to actually climb), and its side reaches down to the
     /// pet. Rolls the climb chance per crossing.
-    private func findClimbOpportunity(on screen: NSScreen, currentX: CGFloat, newX: CGFloat,
+    private func findClimbOpportunity(on screen: ScreenInfo, currentX: CGFloat, newX: CGFloat,
                                       footY: CGFloat, petSize: CGFloat) -> ClimbOpportunity? {
         let topLimit = screen.visibleFrame.maxY
 
-        for surface in windowDetector.windows(on: screen) {
-            let frame = surface.frame
+        for candidate in environment.snapshot(includeWindows: true).windowSurfaces {
+            let frame = candidate.frame
 
             // The pet must fit between the window top and the top of the screen
             guard frame.maxY + petSize <= topLimit else { continue }
@@ -499,13 +506,13 @@ class PetViewModel {
                 // Just crossed the window's left edge this tick
                 if currentX + petSize <= frame.minX && newX + petSize >= frame.minX,
                    Int.random(in: 1...100) <= BehaviorConstants.climbChance {
-                    return ClimbOpportunity(surface: surface, startX: frame.minX - petSize)
+                    return ClimbOpportunity(surface: candidate, startX: frame.minX - petSize)
                 }
             } else {
                 // Just crossed the window's right edge this tick
                 if currentX >= frame.maxX && newX <= frame.maxX,
                    Int.random(in: 1...100) <= BehaviorConstants.climbChance {
-                    return ClimbOpportunity(surface: surface, startX: frame.maxX)
+                    return ClimbOpportunity(surface: candidate, startX: frame.maxX)
                 }
             }
         }
@@ -535,17 +542,17 @@ class PetViewModel {
     }
 
     private func updateClimbMovement() {
-        guard let window = petWindow else { return }
+        guard petWindow != nil else { return }
         guard case .climbingWindow = state else { return }
         guard let id = climbWindowID,
-              let frame = windowDetector.frame(ofWindow: id),
+              let frame = windowFrame(id: id),
               let screen = currentScreen else {
             // The window went away mid-climb
             abortClimb()
             return
         }
 
-        let petSize = window.frame.width
+        let petSize = surface.frame.width
 
         // If the window moved up so the pet no longer fits on top, let go
         if frame.maxY + petSize > screen.visibleFrame.maxY {
@@ -560,30 +567,30 @@ class PetViewModel {
         case .ascending:
             // Climb at the animation's own vertical speed
             let climbSpeed = abs(scaledMoveY())
-            let newY = window.frame.origin.y + climbSpeed
+            let newY = surface.frame.origin.y + climbSpeed
 
             if newY >= frame.maxY {
                 // Reached the top: crawl over the edge
                 climbPhase = .toppingOut
-                window.setFrameOrigin(NSPoint(x: wallX, y: frame.maxY))
+                surface.setOrigin(NSPoint(x: wallX, y: frame.maxY))
                 animationManager.playAnimationOnce(AnimationID.verticalWalkOver.rawValue) { [weak self] in
                     self?.finishToppingOut()
                 }
             } else {
-                window.setFrameOrigin(NSPoint(x: wallX, y: newY))
+                surface.setOrigin(NSPoint(x: wallX, y: newY))
             }
 
         case .toppingOut:
             // Slide from the wall onto the window top while crawling over
             let targetX = climbingOnLeftSide ? frame.minX : frame.maxX - petSize
-            var newX = window.frame.origin.x
+            var newX = surface.frame.origin.x
             let step: CGFloat = 1.5 * PhysicsConstants.tickScale
             if abs(targetX - newX) <= step {
                 newX = targetX
             } else {
                 newX += targetX > newX ? step : -step
             }
-            window.setFrameOrigin(NSPoint(x: newX, y: frame.maxY))
+            surface.setOrigin(NSPoint(x: newX, y: frame.maxY))
         }
     }
 
@@ -613,10 +620,10 @@ class PetViewModel {
     }
 
     private func updateWindowTopMovement() {
-        guard let window = petWindow else { return }
+        guard petWindow != nil else { return }
         guard case .walkingOnWindow = state else { return }
         guard let id = climbWindowID,
-              let frame = windowDetector.frame(ofWindow: id),
+              let frame = windowFrame(id: id),
               let screen = currentScreen else {
             // The window disappeared from under the pet
             stopMovementTimer()
@@ -625,7 +632,7 @@ class PetViewModel {
             return
         }
 
-        let petSize = window.frame.width
+        let petSize = surface.frame.width
 
         // If the window moved up under the menu bar, hop down
         if frame.maxY + petSize > screen.visibleFrame.maxY {
@@ -635,7 +642,7 @@ class PetViewModel {
         }
 
         let moveX = abs(scaledMoveX())
-        var newX = window.frame.origin.x
+        var newX = surface.frame.origin.x
 
         if isMovingRight {
             newX += moveX
@@ -650,13 +657,13 @@ class PetViewModel {
         if atRightEdge || atLeftEdge {
             // At edge of the window, trigger look_down
             newX = atRightEdge ? frame.maxX - petSize : frame.minX
-            window.setFrameOrigin(NSPoint(x: newX, y: frame.maxY))
+            surface.setOrigin(NSPoint(x: newX, y: frame.maxY))
             startLookingDown()
             return
         }
 
         // Ride the window top (it may be moving)
-        window.setFrameOrigin(NSPoint(x: newX, y: frame.maxY))
+        surface.setOrigin(NSPoint(x: newX, y: frame.maxY))
     }
 
     // MARK: - Dock State Transitions
@@ -667,7 +674,7 @@ class PetViewModel {
     private var activeJump: BallisticJump?
 
     func startJumpingToDock() {
-        guard let window = petWindow,
+        guard petWindow != nil,
               let dockInfo = cachedDockInfo else {
             startWalking()
             return
@@ -678,7 +685,7 @@ class PetViewModel {
         state = .jumpingToDock
 
         // Target X: move onto the dock a bit
-        let petSize = window.frame.width
+        let petSize = surface.frame.width
         let targetX: CGFloat
         if isMovingRight {
             targetX = dockInfo.frame.minX + petSize  // Land just inside left edge
@@ -688,7 +695,7 @@ class PetViewModel {
 
         // Linear X, parabolic arc up onto the dock top.
         activeJump = BallisticJump(
-            start: window.frame.origin,
+            start: surface.frame.origin,
             target: CGPoint(x: targetX, y: dockInfo.frame.maxY),
             arc: .parabolic(height: 30),
             step: 0.05 * PhysicsConstants.tickScale,
@@ -705,7 +712,7 @@ class PetViewModel {
     }
 
     private func updateDockJumpMovement() {
-        guard let window = petWindow else { return }
+        guard petWindow != nil else { return }
         guard case .jumpingToDock = state else { return }
 
         guard let next = activeJump?.advance() else {
@@ -713,11 +720,11 @@ class PetViewModel {
             landOnDock()
             return
         }
-        window.setFrameOrigin(next)
+        surface.setOrigin(next)
     }
 
     private func landOnDock() {
-        guard let window = petWindow,
+        guard petWindow != nil,
               let dockInfo = cachedDockInfo else {
             startWalking()
             return
@@ -726,8 +733,8 @@ class PetViewModel {
         movement.stop()
 
         // Ensure pet is exactly on dock top and within dock bounds
-        var finalX = window.frame.origin.x
-        let petSize = window.frame.width
+        var finalX = surface.frame.origin.x
+        let petSize = surface.frame.width
 
         // Clamp X to dock bounds
         if finalX < dockInfo.frame.minX {
@@ -738,7 +745,7 @@ class PetViewModel {
         }
 
         let finalY = dockInfo.frame.maxY
-        window.setFrameOrigin(NSPoint(x: finalX, y: finalY))
+        surface.setOrigin(NSPoint(x: finalX, y: finalY))
 
         startWalkingOnDock()
     }
@@ -759,7 +766,7 @@ class PetViewModel {
     }
 
     private func updateDockMovement() {
-        guard let window = petWindow else { return }
+        guard petWindow != nil else { return }
         guard case .walkingOnDock = state else { return }
         guard let dockInfo = cachedDockInfo else {
             // Dock disappeared, fall down
@@ -768,8 +775,8 @@ class PetViewModel {
         }
 
         let moveX = abs(scaledMoveX())
-        var newX = window.frame.origin.x
-        let petSize = window.frame.width
+        var newX = surface.frame.origin.x
+        let petSize = surface.frame.width
 
         if isMovingRight {
             newX += moveX
@@ -788,14 +795,14 @@ class PetViewModel {
             } else {
                 newX = dockInfo.frame.minX
             }
-            window.setFrameOrigin(NSPoint(x: newX, y: window.frame.origin.y))
+            surface.setOrigin(NSPoint(x: newX, y: surface.frame.origin.y))
             startLookingDown()
             return
         }
 
         // Keep Y position on dock top
         let newY = dockInfo.frame.maxY
-        window.setFrameOrigin(NSPoint(x: newX, y: newY))
+        surface.setOrigin(NSPoint(x: newX, y: newY))
     }
 
     private func handleDockAnimationComplete() {
@@ -823,7 +830,7 @@ class PetViewModel {
 
         // Peering over a window edge?
         if let id = climbWindowID {
-            guard let frame = windowDetector.frame(ofWindow: id) else {
+            guard let frame = windowFrame(id: id) else {
                 startFalling()
                 return
             }
@@ -860,7 +867,7 @@ class PetViewModel {
     /// Jump down to the ground from the edge of a platform (the dock or an
     /// app window's top), arcing away from the platform in the facing direction.
     func startJumpingDown(fromPlatform platformFrame: NSRect) {
-        guard let window = petWindow,
+        guard petWindow != nil,
               let screen = currentScreen else {
             startWalking()
             return
@@ -870,7 +877,7 @@ class PetViewModel {
         state = .jumpingOffDock
 
         // Target X: jump away from platform edge
-        let petSize = window.frame.width
+        let petSize = surface.frame.width
         let jumpDistance: CGFloat = 50  // How far to jump horizontally
         let targetX: CGFloat
         if isMovingRight {
@@ -884,7 +891,7 @@ class PetViewModel {
         // Quick rise then a long descent to ground; clamped so it never dips
         // below the ground while arcing.
         activeJump = BallisticJump(
-            start: window.frame.origin,
+            start: surface.frame.origin,
             target: CGPoint(x: targetX, y: screen.frame.minY),
             arc: .piecewise(height: 20, peak: 0.2),
             step: 0.033 * PhysicsConstants.tickScale,
@@ -901,25 +908,25 @@ class PetViewModel {
     }
 
     private func updateJumpOffMovement() {
-        guard let window = petWindow else { return }
+        guard petWindow != nil else { return }
         guard case .jumpingOffDock = state else { return }
 
         guard let next = activeJump?.advance() else {
             finishJumpOffDock()
             return
         }
-        window.setFrameOrigin(next)
+        surface.setOrigin(next)
     }
 
     private func finishJumpOffDock() {
-        guard let window = petWindow else { return }
+        guard petWindow != nil else { return }
 
         movement.stop()
 
         // Ensure pet is on the ground (the jump's target Y).
-        let groundY = activeJump?.target.y ?? window.frame.origin.y
+        let groundY = activeJump?.target.y ?? surface.frame.origin.y
         activeJump = nil
-        window.setFrameOrigin(NSPoint(x: window.frame.origin.x, y: groundY))
+        surface.setOrigin(NSPoint(x: surface.frame.origin.x, y: groundY))
 
         // Play landing animation then resume walking
         animationManager.playAnimationOnce(AnimationID.jumpDown3.rawValue) { [weak self] in
@@ -933,23 +940,22 @@ class PetViewModel {
     /// The screen the pet is currently on (by window midpoint). Falls back to
     /// horizontal containment for positions above/below any screen (e.g. while
     /// falling in from the top), then to the window's own screen.
-    private var currentScreen: NSScreen? {
-        guard let window = petWindow else { return NSScreen.main }
-        let mid = NSPoint(x: window.frame.midX, y: window.frame.midY)
-        if let screen = NSScreen.screens.first(where: { NSPointInRect(mid, $0.frame) }) {
-            return screen
-        }
+    private var currentScreen: ScreenInfo? {
+        let snapshot = environment.snapshot(includeWindows: false)
+        guard petWindow != nil else { return snapshot.screens.first }
+        let mid = NSPoint(x: snapshot.petFrame.midX, y: snapshot.petFrame.midY)
+        if let screen = snapshot.screens.first(where: { $0.frame.contains(mid) }) { return screen }
         if let screen = screenContaining(x: mid.x, below: .greatestFiniteMagnitude) {
             return screen
         }
-        return window.screen ?? NSScreen.main
+        return snapshot.screens.first
     }
 
     /// The screen spanning the given x whose bottom edge is at or below y.
     /// With displays stacked beyond a seam, prefers the highest ground that's
     /// still beneath the pet.
-    private func screenContaining(x: CGFloat, below y: CGFloat) -> NSScreen? {
-        let screens = NSScreen.screens
+    private func screenContaining(x: CGFloat, below y: CGFloat) -> ScreenInfo? {
+        let screens = environment.snapshot(includeWindows: false).screens
         guard let index = ScreenGeometry.screenContaining(x: x, below: y, in: screens.map(\.frame)) else {
             return nil
         }
@@ -960,8 +966,8 @@ class PetViewModel {
     /// edge. The adjacent screen must touch that edge, be open at the pet's
     /// height, and have a ground that's reachable: at/below the pet's feet, or
     /// a jumpable ledge above them.
-    private func walkableScreen(beyond screen: NSScreen, movingRight: Bool, footY: CGFloat) -> NSScreen? {
-        let screens = NSScreen.screens
+    private func walkableScreen(beyond screen: ScreenInfo, movingRight: Bool, footY: CGFloat) -> ScreenInfo? {
+        let screens = environment.snapshot(includeWindows: false).screens
         guard let screenIndex = screens.firstIndex(of: screen),
               let index = ScreenGeometry.walkableScreen(
                 beyond: screenIndex, movingRight: movingRight, footY: footY,
@@ -969,6 +975,11 @@ class PetViewModel {
             return nil
         }
         return screens[index]
+    }
+
+    private func windowFrame(id: CGWindowID) -> CGRect? {
+        environment.snapshot(includeWindows: true).windowSurfaces
+            .first(where: { $0.id == id })?.frame
     }
 
     // MARK: - Ground Level Calculation
@@ -991,7 +1002,8 @@ class PetViewModel {
         guard let screen else { return (0, .ground) }
 
         // Refresh dock info for the screen the pet is over
-        cachedDockInfo = dockDetector.getDockInfo(for: screen)
+        let snapshot = environment.snapshot(includeWindows: includeWindows)
+        cachedDockInfo = snapshot.dockInfo
 
         var level = screen.frame.minY
         var surface = GroundSurface.ground
@@ -1005,7 +1017,7 @@ class PetViewModel {
 
         if includeWindows {
             let topLimit = screen.visibleFrame.maxY
-            for candidate in windowDetector.windows(on: screen) {
+            for candidate in snapshot.windowSurfaces {
                 let frame = candidate.frame
                 // Must be the highest surface so far, below the pet
                 guard frame.maxY > level, frame.maxY <= y else { continue }
@@ -1264,7 +1276,7 @@ class PetViewModel {
     // MARK: - Physics Updates
 
     private func updatePhysics() {
-        guard let window = petWindow else { return }
+        guard petWindow != nil else { return }
         guard case .falling(var velocity, var bounceCount) = state else { return }
 
         // Scale both the acceleration and the position step by tickScale so the
@@ -1273,13 +1285,13 @@ class PetViewModel {
         // independent of the tick rate), so the bounce thresholds below compare
         // against it unscaled.
         velocity += PhysicsConstants.gravity * PhysicsConstants.tickScale
-        var newY = window.frame.origin.y - velocity * PhysicsConstants.tickScale
+        var newY = surface.frame.origin.y - velocity * PhysicsConstants.tickScale
 
         // Calculate ground level (may be a window top, dock top, or screen bottom)
-        let (ground, surface) = groundInfo(
-            at: window.frame.origin.x,
-            petWidth: window.frame.width,
-            below: window.frame.origin.y,
+        let (ground, groundSurface) = groundInfo(
+            at: surface.frame.origin.x,
+            petWidth: surface.frame.width,
+            below: surface.frame.origin.y,
             includeWindows: landOnWindowsWhileFalling
         )
 
@@ -1294,7 +1306,7 @@ class PetViewModel {
                 physics.stop()
 
                 // Start appropriate walking based on where we landed
-                switch surface {
+                switch groundSurface {
                 case .dock:
                     startWalkingOnDock()
                 case .window(let id):
@@ -1308,17 +1320,17 @@ class PetViewModel {
         }
 
         state = .falling(velocity: velocity, bounceCount: bounceCount)
-        window.setFrameOrigin(NSPoint(x: window.frame.origin.x, y: newY))
+        surface.setOrigin(NSPoint(x: surface.frame.origin.x, y: newY))
     }
 
     private func updateMovement() {
-        guard let window = petWindow else { return }
+        guard petWindow != nil else { return }
         guard case .walking = state else { return }  // Only for ground walking
         guard let screen = currentScreen else { return }
 
-        let petSize = window.frame.width
-        let currentX = window.frame.origin.x
-        let footY = window.frame.origin.y
+        let petSize = surface.frame.width
+        let currentX = surface.frame.origin.x
+        let footY = surface.frame.origin.y
 
         let moveX = abs(scaledMoveX())  // Use absolute value
 
@@ -1331,7 +1343,7 @@ class PetViewModel {
         }
 
         // Refresh dock info for the screen the pet is on
-        cachedDockInfo = dockDetector.getDockInfo(for: screen)
+        cachedDockInfo = environment.snapshot(includeWindows: false).dockInfo
 
         // Check for dock collision (pet is on ground level)
         if let dockInfo = cachedDockInfo, dockInfo.position == .bottom {
@@ -1345,7 +1357,7 @@ class PetViewModel {
                 // Moving right and about to hit dock's left edge
                 if isMovingRight && currentX + petSize <= dockLeft && petRight >= dockLeft {
                     newX = dockLeft - petSize  // Stop at dock edge
-                    window.setFrameOrigin(NSPoint(x: newX, y: footY))
+                    surface.setOrigin(NSPoint(x: newX, y: footY))
                     startJumpingToDock()
                     return
                 }
@@ -1353,7 +1365,7 @@ class PetViewModel {
                 // Moving left and about to hit dock's right edge
                 if !isMovingRight && currentX >= dockRight && petLeft <= dockRight {
                     newX = dockRight  // Stop at dock edge
-                    window.setFrameOrigin(NSPoint(x: newX, y: footY))
+                    surface.setOrigin(NSPoint(x: newX, y: footY))
                     startJumpingToDock()
                     return
                 }
@@ -1363,7 +1375,7 @@ class PetViewModel {
         // Check for a window side the pet feels like climbing
         if let climb = findClimbOpportunity(on: screen, currentX: currentX, newX: newX,
                                             footY: footY, petSize: petSize) {
-            window.setFrameOrigin(NSPoint(x: climb.startX, y: footY))
+            surface.setOrigin(NSPoint(x: climb.startX, y: footY))
             startClimbingWindow(climb.surface)
             return
         }
@@ -1376,7 +1388,7 @@ class PetViewModel {
             if let next = walkableScreen(beyond: screen, movingRight: true, footY: footY) {
                 if next.frame.minY > footY + 1 {
                     // The next display's ground is a ledge above us - hop up
-                    window.setFrameOrigin(NSPoint(x: min(newX, seamRight - petSize), y: footY))
+                    surface.setOrigin(NSPoint(x: min(newX, seamRight - petSize), y: footY))
                     startJumpingToLedge(targetX: seamRight + petSize * 0.5, targetY: next.frame.minY)
                     return
                 }
@@ -1388,7 +1400,7 @@ class PetViewModel {
         } else if !isMovingRight && newX < seamLeft {
             if let next = walkableScreen(beyond: screen, movingRight: false, footY: footY) {
                 if next.frame.minY > footY + 1 {
-                    window.setFrameOrigin(NSPoint(x: max(newX, seamLeft), y: footY))
+                    surface.setOrigin(NSPoint(x: max(newX, seamLeft), y: footY))
                     startJumpingToLedge(targetX: seamLeft - petSize * 1.5, targetY: next.frame.minY)
                     return
                 }
@@ -1402,15 +1414,15 @@ class PetViewModel {
         // above a lower display, the ground drops away and the pet falls
         if let support = screenContaining(x: newX + petSize / 2, below: footY) {
             if footY > support.frame.minY + 1 {
-                window.setFrameOrigin(NSPoint(x: newX, y: footY))
+                surface.setOrigin(NSPoint(x: newX, y: footY))
                 stopMovementTimer()
                 stopIdleTimer()
                 startFalling()
                 return
             }
-            window.setFrameOrigin(NSPoint(x: newX, y: support.frame.minY))
+            surface.setOrigin(NSPoint(x: newX, y: support.frame.minY))
         } else {
-            window.setFrameOrigin(NSPoint(x: newX, y: footY))
+            surface.setOrigin(NSPoint(x: newX, y: footY))
         }
     }
 
@@ -1432,10 +1444,10 @@ class PetViewModel {
     // MARK: - Child Windows
 
     private func spawnChildWindow(spawn: ChildSpawn) {
-        guard let window = petWindow, let screen = currentScreen else { return }
+        guard petWindow != nil, let screen = currentScreen else { return }
 
-        let parentPosition = window.frame.origin
-        let parentSize = window.frame.width
+        let parentPosition = surface.frame.origin
+        let parentSize = surface.frame.width
 
         guard let childWindow = ChildPetWindow(
             animations: animationManager.animations,
@@ -1470,25 +1482,25 @@ class PetViewModel {
     // MARK: - Window Management
 
     func positionWindowForFall() {
-        guard let window = petWindow,
-              let screen = NSScreen.screens.randomElement() ?? NSScreen.main else { return }
+        guard petWindow != nil,
+              let screen = environment.snapshot(includeWindows: false).screens.randomElement() else { return }
 
-        let petSize = window.frame.width
+        let petSize = surface.frame.width
         let minX = screen.visibleFrame.minX
         // max() keeps the range valid if the pet is wider than the visible screen
         let maxX = max(minX, screen.visibleFrame.maxX - petSize)
         let startX = CGFloat.random(in: minX...maxX)
         let startY = screen.frame.maxY
 
-        window.setFrameOrigin(NSPoint(x: startX, y: startY))
+        surface.setOrigin(NSPoint(x: startX, y: startY))
     }
 
     func updateWindowPosition(to mouseLocation: NSPoint) {
-        guard let window = petWindow else { return }
+        guard petWindow != nil else { return }
         guard case .dragging(let offset) = state else { return }
 
         let newX = mouseLocation.x - offset.x
         let newY = mouseLocation.y - offset.y
-        window.setFrameOrigin(NSPoint(x: newX, y: newY))
+        surface.setOrigin(NSPoint(x: newX, y: newY))
     }
 }

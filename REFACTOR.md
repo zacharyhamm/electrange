@@ -14,7 +14,7 @@ independently landable).
 | C3 | Gmail parser/MIME tests, `GoogleToolSupport` + `ToolCallArguments` dedup | **Done** |
 | A1 | `AppModel` direct calls replacing `petShould*` notifications | **Done** |
 | A2 | Single window-wiring path, `ClickDragClassifier`, shared `AnimationPlayback` | **Done** |
-| A3 | Environment seams for the pet core | Pending |
+| A3 | Environment seams for the pet core | **Done** |
 | A4 | Pure per-state movement policies + characterization tests | Pending |
 | A5 | Behavior controllers + declarative timers | Pending |
 | B1 | Chat transport seam + config + first streaming tests | Pending |

@@ -9,7 +9,7 @@
 
 import Foundation
 
-final class TimerDriver {
+final class TimerDriver: TickScheduling {
     private var timer: Timer?
 
     /// (Re)start the repeating timer. Any previously running timer is invalidated.

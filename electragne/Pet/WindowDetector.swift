@@ -11,7 +11,7 @@ import CoreGraphics
 // MARK: - Window Surface
 
 /// A normal app window the pet could climb and walk on
-struct WindowSurface {
+nonisolated struct WindowSurface: Equatable {
     let id: CGWindowID
     let frame: NSRect
 }

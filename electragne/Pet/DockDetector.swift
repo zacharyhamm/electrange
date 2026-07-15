@@ -10,7 +10,7 @@ import CoreGraphics
 
 // MARK: - Dock Position
 
-enum DockPosition {
+nonisolated enum DockPosition: Equatable {
     case bottom
     case left
     case right
@@ -18,7 +18,7 @@ enum DockPosition {
 
 // MARK: - Dock Info
 
-struct DockInfo {
+nonisolated struct DockInfo: Equatable {
     let position: DockPosition
     let frame: NSRect
 
