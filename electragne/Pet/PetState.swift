@@ -113,3 +113,14 @@ nonisolated enum PetState: Equatable {
         }
     }
 }
+
+/// Chat is a presentation state rather than a resumable pet behavior. Hiding
+/// the pet closes the bubble, so resume from the stable surface underneath it.
+nonisolated func normalizedForPause(_ state: PetState) -> PetState {
+    guard case .chatting(let restingPlace) = state else { return state }
+    switch restingPlace {
+    case .ground: return .walking
+    case .dock: return .walkingOnDock
+    case .window: return .walkingOnWindow
+    }
+}

@@ -962,16 +962,9 @@ class PetViewModel {
         guard !isPaused else { return }
         isPaused = true
 
-        // Hiding the pet also closes chat. Save the corresponding resting
-        // state so showing it again resumes normal behavior without briefly
-        // reopening the bubble.
-        if case .chatting(let restingPlace) = state {
-            switch restingPlace {
-            case .ground: state = .walking
-            case .dock: state = .walkingOnDock
-            case .window: state = .walkingOnWindow
-            }
-        }
+        // Hiding the pet also closes chat. Resume the stable surface behavior
+        // beneath the presentation-only chatting state.
+        state = normalizedForPause(state)
         stateBeforePause = state
         stopAllTimers()
         pauseChildWindows()
