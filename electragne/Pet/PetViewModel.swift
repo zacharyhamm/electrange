@@ -23,12 +23,12 @@ class PetViewModel {
     // MARK: - Managers
 
     let animationManager = AnimationManager()
-    private let environment: PetEnvironmentSensing
-    private let surface: PetSurfaceMoving
+    let environment: PetEnvironmentSensing
+    let surface: PetSurfaceMoving
 
     // MARK: - Dock State
 
-    private var cachedDockInfo: DockInfo?
+    var cachedDockInfo: DockInfo?
 
     // MARK: - Window Climbing State
 
@@ -36,7 +36,7 @@ class PetViewModel {
     private let depth = WindowDepthController()
 
     /// The app window the pet is climbing or standing on
-    private var climbWindowID: CGWindowID? {
+    var climbWindowID: CGWindowID? {
         didSet {
             guard oldValue != climbWindowID else { return }
             if let id = climbWindowID {
@@ -48,13 +48,13 @@ class PetViewModel {
     }
     /// Whether the pet is climbing the window's left side (it climbs the left
     /// side when moving right, the right side when moving left)
-    private var climbingOnLeftSide = true
+    var climbingOnLeftSide = true
 
-    private var climbPhase: ClimbPolicy.Phase = .ascending
+    var climbPhase: ClimbPolicy.Phase = .ascending
 
     /// Whether the current fall may land on window tops. Set when the pet is
     /// dropped from a drag; ordinary falls go all the way to the ground.
-    private var landOnWindowsWhileFalling = false
+    var landOnWindowsWhileFalling = false
 
     // MARK: - Child Windows
 
@@ -68,6 +68,8 @@ class PetViewModel {
     // The animation timer is non-repeating and self-rescheduling (it re-arms
     // itself with the next frame's interval), so it stays a raw Timer.
     private var animationTimer: Timer?
+
+    private var currentBehavior: PetBehavior?
 
     // MARK: - Pause State
 
@@ -89,7 +91,47 @@ class PetViewModel {
         let liveSurface = surface ?? WindowSurfaceAdapter()
         self.surface = liveSurface
         self.environment = environment ?? LiveEnvironment(surface: liveSurface)
+        self.currentBehavior = nil
         setupNotificationObservers()
+    }
+
+    private var context: PetContext {
+        PetContext(
+            surface: surface,
+            environment: environment,
+            animator: animationManager,
+            transition: { [weak self] state in self?.enter(state) },
+            updateState: { [weak self] state in self?.state = state },
+            coordinator: self
+        )
+    }
+
+    /// The only state-to-controller mapping in the pet core.
+    private func behavior(for state: PetState) -> PetBehavior {
+        switch state {
+        case .falling: FallingBehavior()
+        case .walking: WalkingBehavior()
+        case .walkingOnDock: DockWalkBehavior()
+        case .sleeping: SleepingBehavior()
+        case .dragging: DraggingBehavior()
+        case .jumping: BasicJumpBehavior()
+        case .jumpingToDock: BallisticJumpBehavior(destination: .dock)
+        case .jumpingToLedge: BallisticJumpBehavior(destination: .ledge)
+        case .climbingWindow: ClimbBehavior()
+        case .walkingOnWindow: WindowTopBehavior()
+        case .lookingDown: LookingDownBehavior()
+        case .jumpingOffDock: BallisticJumpBehavior(destination: .ground)
+        case .chatting(let restingPlace): ChattingBehavior(restingPlace: restingPlace)
+        }
+    }
+
+    func enter(_ state: PetState) {
+        stopAllTimers()
+        self.state = state
+        let next = behavior(for: state)
+        currentBehavior = next
+        next.begin(context)
+        applyTimers(next.timerNeeds)
     }
 
     private func setupNotificationObservers() {
@@ -151,48 +193,29 @@ class PetViewModel {
     func startFalling() {
         climbWindowID = nil
         landOnWindowsWhileFalling = false
-        state = .falling(velocity: 0, bounceCount: 0)
-        playFallAnimation()
-        startPhysicsTimer()
+        enter(.falling(velocity: 0, bounceCount: 0))
     }
 
     func startWalking() {
-        climbWindowID = nil
-        state = .walking
-        playAnimationWithTransitions(AnimationID.walk)
-        recordInteraction()
-        startDynamicAnimationTimer()
-        startIdleTimer()
-        startMovementTimer()
+        enter(.walking)
     }
 
     func startDragging(mouseOffset: NSPoint) {
-        stopAllTimers()
-        climbWindowID = nil
-        state = .dragging(mouseOffset: mouseOffset)
-        animationManager.playAnimation(AnimationID.drag.rawValue)
-        startDynamicAnimationTimer()
-        recordInteraction()
+        enter(.dragging(mouseOffset: mouseOffset))
     }
 
     func endDragging() {
         guard state.isDragging else { return }
-        state = .falling(velocity: 0, bounceCount: 0)
         // A dropped pet may land on the first window top it falls onto
         landOnWindowsWhileFalling = true
         recordInteraction()
-        playFallAnimation()
-        startPhysicsTimer()
+        enter(.falling(velocity: 0, bounceCount: 0))
     }
 
     func startSleeping() {
         guard case .walking = state else { return }
 
-        stopMovementTimer()
-        state = .sleeping(phase: 0)
-        stopIdleTimer()
-        startDynamicAnimationTimer()
-        playSleepSequence(remaining: AnimationID.sleepSequence)
+        enter(.sleeping(phase: 0))
     }
 
     func wakeUp() {
@@ -206,14 +229,7 @@ class PetViewModel {
     func beginChat() {
         guard let restingPlace = state.chatRestingPlace else { return }
 
-        stopAllTimers()
-        state = .chatting(restingPlace: restingPlace)
-        recordInteraction()
-
-        animationManager.playAnimationOnce(AnimationID.rotate1a.rawValue) { [weak self] in
-            self?.freezeFrontFacingFrame()
-        }
-        startDynamicAnimationTimer()
+        enter(.chatting(restingPlace: restingPlace))
     }
 
     /// Closes chat and returns the pet to motion on the surface it was using.
@@ -287,7 +303,7 @@ class PetViewModel {
         beginChat()
     }
 
-    private func freezeFrontFacingFrame() {
+    func freezeFrontFacingFrame() {
         guard state.isChatting else { return }
         animationTimer?.invalidate()
         animationTimer = nil
@@ -333,41 +349,14 @@ class PetViewModel {
         // a window and screen to move within.
         guard petWindow != nil, currentScreen != nil else { return }
 
-        stopMovementTimer()
-        stopIdleTimer()
-        state = .jumping
-
-        // Start animation timer to advance sprite frames
-        startDynamicAnimationTimer()
-
-        // Start jump physics timer
-        startBasicJumpTimer()
-    }
-
-    private func startBasicJumpTimer() {
-        movement.start { [weak self] in self?.updateBasicJumpMovement() }
-    }
-
-    private func updateBasicJumpMovement() {
-        guard petWindow != nil,
-              let screen = currentScreen else { return }
-        let snapshot = environment.snapshot(includeWindows: false)
-        guard let screenIndex = snapshot.screens.firstIndex(of: screen) else { return }
-        applyJumpAction(JumpPolicy.evaluate(.init(
-            env: snapshot,
-            motion: .animation(moveX: scaledMoveX(), moveY: scaledMoveY(),
-                               isMovingRight: isMovingRight, screenIndex: screenIndex)
-        )))
+        enter(.jumping)
     }
 
     func endJumping() {
         guard petWindow != nil else {
-            state = .walking
+            startWalking()
             return
         }
-
-        // Stop jump timer
-        movement.stop()
 
         // Land at the ground of the screen under the pet (not the dock top:
         // the pet may legitimately end up at ground level within the dock's
@@ -387,9 +376,7 @@ class PetViewModel {
 
         surface.setOrigin(NSPoint(x: surface.frame.origin.x, y: ground))
 
-        // Resume walking state and start movement timer
-        state = .walking
-        startMovementTimer()
+        startWalking()
     }
 
     // MARK: - Ledge Jump (onto a higher adjacent display)
@@ -400,10 +387,6 @@ class PetViewModel {
             return
         }
 
-        stopMovementTimer()
-        stopIdleTimer()
-        state = .jumpingToLedge
-
         // Linear X, parabolic arc for Y (same shape as the dock jump).
         activeJump = BallisticJump(
             start: surface.frame.origin,
@@ -413,33 +396,7 @@ class PetViewModel {
             clampToTargetY: false
         )
 
-        animationManager.playAnimation(AnimationID.jump.rawValue)
-        startDynamicAnimationTimer()
-        startLedgeJumpTimer()
-    }
-
-    private func startLedgeJumpTimer() {
-        movement.start { [weak self] in self?.updateLedgeJumpMovement() }
-    }
-
-    private func updateLedgeJumpMovement() {
-        guard petWindow != nil else { return }
-        guard case .jumpingToLedge = state else { return }
-
-        guard let activeJump else { return }
-        let action = JumpPolicy.evaluate(.init(
-            env: environment.snapshot(includeWindows: false), motion: .ballistic(activeJump)
-        ))
-        switch action {
-        case .move(let point, let jump):
-            self.activeJump = jump
-            surface.setOrigin(point)
-        case .complete(let target):
-            self.activeJump = nil
-            movement.stop()
-            surface.setOrigin(target)
-            startWalking()
-        }
+        enter(.jumpingToLedge)
     }
 
     // MARK: - Window Climbing
@@ -450,105 +407,23 @@ class PetViewModel {
     /// head (something to actually climb), and its side reaches down to the
     /// pet. Rolls the climb chance per crossing.
     func startClimbingWindow(_ surface: WindowSurface) {
-        stopMovementTimer()
-        stopIdleTimer()
-
         climbWindowID = surface.id
         climbingOnLeftSide = isMovingRight
         climbPhase = .ascending
-        state = .climbingWindow
-        recordInteraction()
-
-        // The climbing sprites are drawn vertically; the existing
-        // direction flip mirrors them onto the correct side
-        animationManager.playAnimation(AnimationID.verticalWalkUp.rawValue)
-        startDynamicAnimationTimer()
-        startClimbTimer()
+        enter(.climbingWindow)
     }
 
-    private func startClimbTimer() {
-        movement.start { [weak self] in self?.updateClimbMovement() }
-    }
-
-    private func updateClimbMovement() {
-        guard petWindow != nil else { return }
-        guard case .climbingWindow = state else { return }
-        guard let id = climbWindowID, let screen = currentScreen else {
-            abortClimb()
-            return
-        }
-        let action = ClimbPolicy.evaluate(.init(
-            env: environment.snapshot(includeWindows: true),
-            mode: .climb(windowID: id, screen: screen, onLeftSide: climbingOnLeftSide,
-                         phase: climbPhase, moveY: scaledMoveY(),
-                         tickScale: PhysicsConstants.tickScale)
-        )) { Int.random(in: 1...$0) }
-        switch action {
-        case .move(let point):
-            surface.setOrigin(point)
-        case .beginTopOut(let point):
-            climbPhase = .toppingOut
-            surface.setOrigin(point)
-            animationManager.playAnimationOnce(AnimationID.verticalWalkOver.rawValue) { [weak self] in
-                self?.finishToppingOut()
-            }
-        case .abort:
-            abortClimb()
-        case .none, .begin:
-            break
-        }
-    }
-
-    private func finishToppingOut() {
+    func finishToppingOut() {
         guard case .climbingWindow = state else { return }
         startWalkingOnWindow()
     }
 
-    private func abortClimb() {
-        movement.stop()
+    func abortClimb() {
         startFalling()
     }
 
     func startWalkingOnWindow() {
-        state = .walkingOnWindow
-        // Note: top_walk2 (39) looks right but is the upside-down
-        // hanging-from-the-screen-top sprite; on a window we walk normally
-        animationManager.playAnimation(AnimationID.walk.rawValue)
-        recordInteraction()
-        startDynamicAnimationTimer()
-        startIdleTimer()
-        startWindowTopMovementTimer()
-    }
-
-    private func startWindowTopMovementTimer() {
-        movement.start { [weak self] in self?.updateWindowTopMovement() }
-    }
-
-    private func updateWindowTopMovement() {
-        guard petWindow != nil else { return }
-        guard case .walkingOnWindow = state else { return }
-        guard let id = climbWindowID, let screen = currentScreen else { return }
-        let action = WindowTopPolicy.evaluate(.init(
-            env: environment.snapshot(includeWindows: true),
-            windowID: id,
-            screen: screen,
-            moveX: scaledMoveX(),
-            isMovingRight: isMovingRight
-        ))
-        switch action {
-        case .move(let point):
-            surface.setOrigin(point)
-        case .lookDown(let point):
-            surface.setOrigin(point)
-            startLookingDown()
-        case .jumpDown(let frame):
-            stopIdleTimer()
-            startJumpingDown(fromPlatform: frame)
-        case .fall:
-            stopMovementTimer()
-            stopIdleTimer()
-            startFalling()
-        }
+        enter(.walkingOnWindow)
     }
 
     // MARK: - Dock State Transitions
@@ -556,7 +431,7 @@ class PetViewModel {
     /// The in-flight progress-driven jump arc (dock / ledge / jump-off). The
     /// animation-driven basic jump does not use this. Preserved across pause
     /// so a paused-mid-jump pet resumes from its saved progress.
-    private var activeJump: BallisticJump?
+    var activeJump: BallisticJump?
 
     func startJumpingToDock() {
         guard petWindow != nil,
@@ -564,10 +439,6 @@ class PetViewModel {
             startWalking()
             return
         }
-
-        stopMovementTimer()
-        stopIdleTimer()
-        state = .jumpingToDock
 
         // Target X: move onto the dock a bit
         let petSize = surface.frame.width
@@ -587,40 +458,15 @@ class PetViewModel {
             clampToTargetY: false
         )
 
-        animationManager.playAnimation(AnimationID.jump.rawValue)
-        startDynamicAnimationTimer()
-        startDockJumpTimer()
+        enter(.jumpingToDock)
     }
 
-    private func startDockJumpTimer() {
-        movement.start { [weak self] in self?.updateDockJumpMovement() }
-    }
-
-    private func updateDockJumpMovement() {
-        guard petWindow != nil else { return }
-        guard case .jumpingToDock = state else { return }
-
-        guard let activeJump else { return }
-        switch JumpPolicy.evaluate(.init(
-            env: environment.snapshot(includeWindows: false), motion: .ballistic(activeJump)
-        )) {
-        case .move(let point, let jump):
-            self.activeJump = jump
-            surface.setOrigin(point)
-        case .complete:
-            self.activeJump = nil
-            landOnDock()
-        }
-    }
-
-    private func landOnDock() {
+    func landOnDock() {
         guard petWindow != nil,
               let dockInfo = cachedDockInfo else {
             startWalking()
             return
         }
-
-        movement.stop()
 
         // Ensure pet is exactly on dock top and within dock bounds
         var finalX = surface.frame.origin.x
@@ -641,40 +487,10 @@ class PetViewModel {
     }
 
     func startWalkingOnDock() {
-        state = .walkingOnDock
-        animationManager.playAnimationOnce(AnimationID.walkTask2.rawValue) { [weak self] in
-            self?.handleDockAnimationComplete()
-        }
-        recordInteraction()
-        startDynamicAnimationTimer()
-        startIdleTimer()
-        startDockMovementTimer()
+        enter(.walkingOnDock)
     }
 
-    private func startDockMovementTimer() {
-        movement.start { [weak self] in self?.updateDockMovement() }
-    }
-
-    private func updateDockMovement() {
-        guard petWindow != nil else { return }
-        guard case .walkingOnDock = state else { return }
-        var snapshot = environment.snapshot(includeWindows: false)
-        // Preserve the detector result captured when the dock state began.
-        snapshot.dockInfo = cachedDockInfo
-        switch DockWalkPolicy.evaluate(.init(
-            env: snapshot, moveX: scaledMoveX(), isMovingRight: isMovingRight
-        )) {
-        case .move(let point):
-            surface.setOrigin(point)
-        case .lookDown(let point):
-            surface.setOrigin(point)
-            startLookingDown()
-        case .fall:
-            startFalling()
-        }
-    }
-
-    private func handleDockAnimationComplete() {
+    func handleDockAnimationComplete() {
         guard case .walkingOnDock = state else { return }
 
         // Continue walking on dock
@@ -684,16 +500,10 @@ class PetViewModel {
     }
 
     func startLookingDown() {
-        stopMovementTimer()
-        stopIdleTimer()
-        state = .lookingDown
-        animationManager.playAnimationOnce(AnimationID.lookDown.rawValue) { [weak self] in
-            self?.handleLookDownComplete()
-        }
-        startDynamicAnimationTimer()
+        enter(.lookingDown)
     }
 
-    private func handleLookDownComplete() {
+    func handleLookDownComplete() {
         // Roll to decide: turn around or jump off
         let roll = Int.random(in: 1...100)
 
@@ -743,8 +553,6 @@ class PetViewModel {
         }
 
         climbWindowID = nil
-        state = .jumpingOffDock
-
         // Target X: jump away from platform edge
         let petSize = surface.frame.width
         let jumpDistance: CGFloat = 50  // How far to jump horizontally
@@ -767,51 +575,16 @@ class PetViewModel {
             clampToTargetY: true
         )
 
-        animationManager.playAnimation(AnimationID.jumpDown.rawValue)
-        startDynamicAnimationTimer()
-        startJumpOffMovementTimer()
+        enter(.jumpingOffDock)
     }
 
-    private func startJumpOffMovementTimer() {
-        movement.start { [weak self] in self?.updateJumpOffMovement() }
-    }
-
-    private func updateJumpOffMovement() {
+    func finishJumpDown(at target: CGPoint) {
         guard petWindow != nil else { return }
-        guard case .jumpingOffDock = state else { return }
-
-        guard let activeJump else { return }
-        switch JumpPolicy.evaluate(.init(
-            env: environment.snapshot(includeWindows: false), motion: .ballistic(activeJump)
-        )) {
-        case .move(let point, let jump):
-            self.activeJump = jump
-            surface.setOrigin(point)
-        case .complete:
-            finishJumpOffDock()
-        }
-    }
-
-    private func applyJumpAction(_ action: JumpPolicy.Action) {
-        guard case .move(let point, _) = action else { return }
-        surface.setOrigin(point)
-    }
-
-    private func finishJumpOffDock() {
-        guard petWindow != nil else { return }
-
-        movement.stop()
-
-        // Ensure pet is on the ground (the jump's target Y).
-        let groundY = activeJump?.target.y ?? surface.frame.origin.y
-        activeJump = nil
-        surface.setOrigin(NSPoint(x: surface.frame.origin.x, y: groundY))
-
+        surface.setOrigin(target)
         // Play landing animation then resume walking
         animationManager.playAnimationOnce(AnimationID.jumpDown3.rawValue) { [weak self] in
             self?.startWalking()
         }
-        startDynamicAnimationTimer()
     }
 
     // MARK: - Screen Helpers
@@ -819,7 +592,7 @@ class PetViewModel {
     /// The screen the pet is currently on (by window midpoint). Falls back to
     /// horizontal containment for positions above/below any screen (e.g. while
     /// falling in from the top), then to the window's own screen.
-    private var currentScreen: ScreenInfo? {
+    var currentScreen: ScreenInfo? {
         let snapshot = environment.snapshot(includeWindows: false)
         guard petWindow != nil else { return snapshot.screens.first }
         let mid = NSPoint(x: snapshot.petFrame.midX, y: snapshot.petFrame.midY)
@@ -841,16 +614,15 @@ class PetViewModel {
         return screens[index]
     }
 
-    private func windowFrame(id: CGWindowID) -> CGRect? {
+    func windowFrame(id: CGWindowID) -> CGRect? {
         environment.snapshot(includeWindows: true).windowSurfaces
             .first(where: { $0.id == id })?.frame
     }
 
     // MARK: - Animation Playback
 
-    private func playFallAnimation() {
+    func playFallAnimation() {
         animationManager.playAnimation(AnimationID.fall.rawValue)
-        startDynamicAnimationTimer()
     }
 
     func playLandingAnimation(hard: Bool) {
@@ -864,7 +636,7 @@ class PetViewModel {
         }
     }
 
-    private func playSleepSequence(remaining: [AnimationID]) {
+    func playSleepSequence(remaining: [AnimationID]) {
         guard case .sleeping = state else { return }
 
         if let first = remaining.first {
@@ -928,24 +700,28 @@ class PetViewModel {
         animationTimer = newTimer
     }
 
-    private func startPhysicsTimer() {
-        physics.start { [weak self] in self?.updatePhysics() }
-    }
-
-    private func startMovementTimer() {
-        movement.start { [weak self] in self?.updateMovement() }
-    }
-
-    private func stopMovementTimer() {
-        movement.stop()
-    }
-
-    private func startIdleTimer() {
-        idle.start(interval: BehaviorConstants.idleCheckInterval) { [weak self] in self?.checkIdle() }
-    }
-
-    private func stopIdleTimer() {
-        idle.stop()
+    private func applyTimers(_ needs: TimerNeeds) {
+        if needs.contains(.movement) {
+            movement.start { [weak self] in
+                guard let self, let behavior = self.currentBehavior else { return }
+                behavior.tick(self.context)
+            }
+        }
+        if needs.contains(.physics) {
+            physics.start { [weak self] in
+                guard let self, let behavior = self.currentBehavior else { return }
+                behavior.tick(self.context)
+            }
+        }
+        if needs.contains(.animation) {
+            startDynamicAnimationTimer()
+        }
+        if needs.contains(.idle) {
+            idle.start(interval: BehaviorConstants.idleCheckInterval) { [weak self] in
+                guard let self, let behavior = self.currentBehavior else { return }
+                behavior.idleFired(self.context)
+            }
+        }
     }
 
     func stopAllTimers() {
@@ -974,55 +750,15 @@ class PetViewModel {
         guard isPaused else { return }
         isPaused = false
 
-        // Restore timers based on saved state
         guard let savedState = stateBeforePause else {
             startWalking()
             resumeChildWindows()
             return
         }
-
-        switch savedState {
-        case .falling:
-            startPhysicsTimer()
-            startDynamicAnimationTimer()
-        case .walking:
-            startDynamicAnimationTimer()
-            startIdleTimer()
-            startMovementTimer()
-        case .walkingOnDock:
-            startDynamicAnimationTimer()
-            startIdleTimer()
-            startDockMovementTimer()
-        case .sleeping:
-            startDynamicAnimationTimer()
-        case .dragging:
-            // Unlikely to pause while dragging, but handle it
-            startDynamicAnimationTimer()
-        case .jumping:
-            startDynamicAnimationTimer()
-            startMovementTimer()
-        case .jumpingToDock:
-            startDynamicAnimationTimer()
-            startDockJumpTimer()
-        case .jumpingToLedge:
-            startDynamicAnimationTimer()
-            startLedgeJumpTimer()
-        case .climbingWindow:
-            startDynamicAnimationTimer()
-            startClimbTimer()
-        case .walkingOnWindow:
-            startDynamicAnimationTimer()
-            startIdleTimer()
-            startWindowTopMovementTimer()
-        case .lookingDown:
-            startDynamicAnimationTimer()
-        case .jumpingOffDock:
-            startDynamicAnimationTimer()
-            startJumpOffMovementTimer()
-        case .chatting:
-            break
-        }
-
+        state = savedState
+        let resumed = behavior(for: savedState)
+        currentBehavior = resumed
+        applyTimers(resumed.timerNeeds)
         stateBeforePause = nil
         resumeChildWindows()
     }
@@ -1047,93 +783,13 @@ class PetViewModel {
 
     /// The animation's per-frame X movement, scaled to the current tick rate so
     /// the pet's wall-clock walking speed is independent of `frameInterval`.
-    private func scaledMoveX() -> CGFloat {
+    func scaledMoveX() -> CGFloat {
         animationManager.getCurrentMoveX() * PhysicsConstants.tickScale
     }
 
     /// The animation's per-frame Y movement, scaled to the current tick rate.
-    private func scaledMoveY() -> CGFloat {
+    func scaledMoveY() -> CGFloat {
         animationManager.getCurrentMoveY() * PhysicsConstants.tickScale
-    }
-
-    // MARK: - Physics Updates
-
-    private func updatePhysics() {
-        guard petWindow != nil else { return }
-        guard case .falling(let velocity, let bounceCount) = state else { return }
-
-        let snapshot = environment.snapshot(includeWindows: landOnWindowsWhileFalling)
-        cachedDockInfo = snapshot.dockInfo
-        let action = FallPolicy.evaluate(.init(
-            env: snapshot,
-            velocity: velocity,
-            bounceCount: bounceCount,
-            tickScale: PhysicsConstants.tickScale,
-            landOnWindows: landOnWindowsWhileFalling
-        ))
-
-        switch action {
-        case .move(let point, let velocity, let bounceCount, let landedHard):
-            if let landedHard { playLandingAnimation(hard: landedHard) }
-            state = .falling(velocity: velocity, bounceCount: bounceCount)
-            surface.setOrigin(point)
-        case .settle(let point, let groundSurface, let landedHard):
-            playLandingAnimation(hard: landedHard)
-            surface.setOrigin(point)
-            physics.stop()
-            switch groundSurface {
-            case .dock:
-                startWalkingOnDock()
-            case .window(let id):
-                climbWindowID = id
-                startWalkingOnWindow()
-            case .ground:
-                startWalking()
-            }
-        }
-    }
-
-    private func updateMovement() {
-        guard petWindow != nil else { return }
-        guard case .walking = state else { return }  // Only for ground walking
-        guard let screen = currentScreen else { return }
-        let snapshot = environment.snapshot(includeWindows: true)
-        guard let screenIndex = snapshot.screens.firstIndex(of: screen) else { return }
-        cachedDockInfo = snapshot.dockInfo
-        let action = WalkPolicy.evaluate(.init(
-            env: snapshot, screenIndex: screenIndex, moveX: scaledMoveX(),
-            isMovingRight: isMovingRight
-        )) { Int.random(in: 1...$0) }
-        switch action {
-        case .move(let point), .crossSeam(let point, _):
-            surface.setOrigin(point)
-        case .turnAround(let point):
-            surface.setOrigin(point)
-            isMovingRight.toggle()
-        case .beginClimb(let candidate, let point):
-            surface.setOrigin(point)
-            startClimbingWindow(candidate)
-        case .beginLedgeJump(let point, let targetX, let targetY):
-            surface.setOrigin(point)
-            startJumpingToLedge(targetX: targetX, targetY: targetY)
-        case .fallOffEdge(let point):
-            surface.setOrigin(point)
-            stopMovementTimer()
-            stopIdleTimer()
-            startFalling()
-        case .beginDockApproach(let point):
-            surface.setOrigin(point)
-            startJumpingToDock()
-        }
-    }
-
-    private func checkIdle() {
-        guard case .walking = state else { return }
-
-        let idleTime = Date().timeIntervalSince(lastInteractionTime)
-        if idleTime >= BehaviorConstants.idleTimeBeforeSleep {
-            startSleeping()
-        }
     }
 
     // MARK: - Interaction
