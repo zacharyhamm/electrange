@@ -1277,50 +1277,35 @@ class PetViewModel {
 
     private func updatePhysics() {
         guard petWindow != nil else { return }
-        guard case .falling(var velocity, var bounceCount) = state else { return }
+        guard case .falling(let velocity, let bounceCount) = state else { return }
 
-        // Scale both the acceleration and the position step by tickScale so the
-        // fall matches in wall-clock time at any tick rate. `velocity` stays in
-        // reference-rate units (on-screen speed = velocity / referenceInterval,
-        // independent of the tick rate), so the bounce thresholds below compare
-        // against it unscaled.
-        velocity += PhysicsConstants.gravity * PhysicsConstants.tickScale
-        var newY = surface.frame.origin.y - velocity * PhysicsConstants.tickScale
+        let action = FallPolicy.evaluate(.init(
+            env: environment.snapshot(includeWindows: landOnWindowsWhileFalling),
+            velocity: velocity,
+            bounceCount: bounceCount,
+            tickScale: PhysicsConstants.tickScale,
+            landOnWindows: landOnWindowsWhileFalling
+        ))
 
-        // Calculate ground level (may be a window top, dock top, or screen bottom)
-        let (ground, groundSurface) = groundInfo(
-            at: surface.frame.origin.x,
-            petWidth: surface.frame.width,
-            below: surface.frame.origin.y,
-            includeWindows: landOnWindowsWhileFalling
-        )
-
-        if newY <= ground {
-            newY = ground
-            playLandingAnimation(hard: abs(velocity) > PhysicsConstants.hardLandingThreshold)
-
-            velocity = -velocity * PhysicsConstants.bounceDamping
-            bounceCount += 1
-
-            if bounceCount > PhysicsConstants.maxBounces || abs(velocity) < PhysicsConstants.minBounceVelocity {
-                physics.stop()
-
-                // Start appropriate walking based on where we landed
-                switch groundSurface {
-                case .dock:
-                    startWalkingOnDock()
-                case .window(let id):
-                    climbWindowID = id
-                    startWalkingOnWindow()
-                case .ground:
-                    startWalking()
-                }
-                return
+        switch action {
+        case .move(let point, let velocity, let bounceCount, let landedHard):
+            if let landedHard { playLandingAnimation(hard: landedHard) }
+            state = .falling(velocity: velocity, bounceCount: bounceCount)
+            surface.setOrigin(point)
+        case .settle(let point, let groundSurface, let landedHard):
+            playLandingAnimation(hard: landedHard)
+            surface.setOrigin(point)
+            physics.stop()
+            switch groundSurface {
+            case .dock:
+                startWalkingOnDock()
+            case .window(let id):
+                climbWindowID = id
+                startWalkingOnWindow()
+            case .ground:
+                startWalking()
             }
         }
-
-        state = .falling(velocity: velocity, bounceCount: bounceCount)
-        surface.setOrigin(NSPoint(x: surface.frame.origin.x, y: newY))
     }
 
     private func updateMovement() {
