@@ -28,7 +28,7 @@ nonisolated enum WalkPolicy {
         let petSize = frame.width
         let currentX = frame.origin.x
         let footY = frame.origin.y
-        var newX = currentX + (input.isMovingRight ? abs(input.moveX) : -abs(input.moveX))
+        let newX = currentX + (input.isMovingRight ? abs(input.moveX) : -abs(input.moveX))
 
         if let dock = input.env.dockInfo, dock.position == .bottom, footY < dock.frame.maxY {
             if input.isMovingRight,

@@ -9,10 +9,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+ARCH="$(uname -m)"
+
 xcodebuild test \
     -project electragne.xcodeproj \
     -scheme electragne \
     -configuration Debug \
-    -destination 'platform=macOS' \
+    -destination "platform=macOS,arch=$ARCH" \
     -derivedDataPath build \
     CODE_SIGNING_ALLOWED=NO

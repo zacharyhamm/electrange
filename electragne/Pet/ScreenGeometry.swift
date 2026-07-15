@@ -9,7 +9,7 @@
 
 import CoreGraphics
 
-enum ScreenGeometry {
+nonisolated enum ScreenGeometry {
     /// Index of the screen frame spanning `x` whose bottom edge is at or below
     /// `y`, preferring the highest such ground (the surface a falling pet would
     /// meet first). Returns nil if no frame qualifies.
