@@ -14,13 +14,16 @@ import AppKit
 @Observable
 class AnimationManager {
     var animations: [String: PetAnimation] = [:]
-    var currentAnimation: PetAnimation?
-    var currentFrameIndex = 0
     var spriteSheet: NSImage?
     var tilesX = 16
     var tilesY = 11
     var shouldLoop = true
     var onAnimationComplete: (() -> Void)?
+
+    /// Frame sequencing/interpolation for the animation now playing.
+    private(set) var playback: AnimationPlayback?
+
+    var currentAnimation: PetAnimation? { playback?.animation }
 
     // Sprite rendering
     private(set) var spriteRenderer: SpriteRenderer?
@@ -38,10 +41,6 @@ class AnimationManager {
     var childSpawns: [String: [ChildSpawn]] = [:]  // Keyed by parent animation ID
     var onChildSpawn: ((ChildSpawn) -> Void)?  // Callback when a child should spawn
 
-    // Repeat tracking
-    private var repeatCountRemaining = 0
-    private var totalFramesPlayed = 0 // For interval interpolation
-    private var estimatedTotalFrames = 0 // Estimated total frames for this animation run
     private var spawnedChildrenForCurrentAnimation = false  // Track if we've spawned children
 
     func loadAnimations(from url: URL) {
@@ -76,14 +75,25 @@ class AnimationManager {
     }
 
     func playAnimation(_ animationID: String) {
+        startPlayback(animationID, loop: true, completion: nil)
+    }
+
+    func playAnimationOnce(_ animationID: String, completion: @escaping () -> Void) {
+        startPlayback(animationID, loop: false, completion: completion)
+    }
+
+    func playAnimationLooping(_ animationID: String) {
+        startPlayback(animationID, loop: true, completion: nil)
+    }
+
+    private func startPlayback(_ animationID: String, loop: Bool, completion: (() -> Void)?) {
         guard let animation = animations[animationID] else { return }
-        currentAnimation = animation
-        currentFrameIndex = 0
-        totalFramesPlayed = 0
-        shouldLoop = true  // Default to looping
-        onAnimationComplete = nil  // Clear any previous completion handler
-        repeatCountRemaining = animation.repeatCount.evaluate()
-        estimatedTotalFrames = calculateTotalFrames(animation: animation, repeatCount: repeatCountRemaining)
+        playback = AnimationPlayback(
+            animation: animation,
+            repeatCount: animation.repeatCount.evaluate()
+        )
+        shouldLoop = loop
+        onAnimationComplete = completion
         spawnedChildrenForCurrentAnimation = false
         triggerChildSpawns()
     }
@@ -100,11 +110,7 @@ class AnimationManager {
     }
 
     func getCurrentFrameNumber() -> Int? {
-        guard let animation = currentAnimation,
-              animation.frames.indices.contains(currentFrameIndex) else {
-            return nil
-        }
-        return animation.frames[currentFrameIndex]
+        playback?.currentFrameNumber
     }
 
     func getCurrentFrameImage() -> NSImage? {
@@ -125,36 +131,22 @@ class AnimationManager {
 
     // Returns the current interval (interpolated between start and end)
     func getCurrentInterval() -> TimeInterval {
-        guard let animation = currentAnimation else { return 0.1 }
-        let clampedProgress = getAnimationProgress()
-        return animation.startInterval + (animation.endInterval - animation.startInterval) * clampedProgress
+        playback?.currentInterval ?? 0.1
     }
 
     // Returns current offsetY (for future interpolation support)
     func getCurrentOffsetY() -> CGFloat {
-        return currentAnimation?.offsetY ?? 0
+        currentAnimation?.offsetY ?? 0
     }
 
     // Returns interpolated X movement per frame
     func getCurrentMoveX() -> CGFloat {
-        guard let animation = currentAnimation else { return 0 }
-        let progress = getAnimationProgress()
-        return animation.startMoveX + (animation.endMoveX - animation.startMoveX) * progress
+        playback?.currentMoveX ?? 0
     }
 
     // Returns interpolated Y movement per frame
     func getCurrentMoveY() -> CGFloat {
-        guard let animation = currentAnimation else { return 0 }
-        let progress = getAnimationProgress()
-        return animation.startMoveY + (animation.endMoveY - animation.startMoveY) * progress
-    }
-
-    // Calculate progress through animation (0.0 to 1.0)
-    private func getAnimationProgress() -> CGFloat {
-        if estimatedTotalFrames > 1 {
-            return min(1.0, max(0.0, CGFloat(totalFramesPlayed) / CGFloat(estimatedTotalFrames - 1)))
-        }
-        return 0
+        playback?.currentMoveY ?? 0
     }
 
     // Select next animation based on probabilities, returns animation ID or nil
@@ -185,66 +177,22 @@ class AnimationManager {
     }
 
     func advanceFrame() {
-        guard let animation = currentAnimation else { return }
-        let nextIndex = currentFrameIndex + 1
-        totalFramesPlayed += 1
-
-        if nextIndex >= animation.frames.count {
-            // Reached end of frame sequence
-            if repeatCountRemaining > 0 {
-                // Loop back to repeatFrom position
-                repeatCountRemaining -= 1
-                currentFrameIndex = min(max(0, animation.repeatFrom), animation.frames.count - 1)
-            } else if shouldLoop {
-                // Standard looping (restart from beginning)
-                currentFrameIndex = 0
-                totalFramesPlayed = 0
-                repeatCountRemaining = animation.repeatCount.evaluate()
-                estimatedTotalFrames = calculateTotalFrames(animation: animation, repeatCount: repeatCountRemaining)
+        guard var playback else { return }
+        switch playback.advance() {
+        case .advanced, .repeated:
+            self.playback = playback
+        case .finished:
+            if shouldLoop {
+                playback.restart(repeatCount: playback.animation.repeatCount.evaluate())
+                self.playback = playback
             } else {
-                // Animation complete - call handler
+                self.playback = playback
                 onAnimationComplete?()
             }
-        } else {
-            currentFrameIndex = nextIndex
         }
     }
 
-    func playAnimationOnce(_ animationID: String, completion: @escaping () -> Void) {
-        guard let animation = animations[animationID] else { return }
-        currentAnimation = animation
-        currentFrameIndex = 0
-        totalFramesPlayed = 0
-        shouldLoop = false
-        repeatCountRemaining = animation.repeatCount.evaluate()
-        estimatedTotalFrames = calculateTotalFrames(animation: animation, repeatCount: repeatCountRemaining)
-        onAnimationComplete = completion
-        spawnedChildrenForCurrentAnimation = false
-        triggerChildSpawns()
-    }
-
-    func playAnimationLooping(_ animationID: String) {
-        guard let animation = animations[animationID] else { return }
-        currentAnimation = animation
-        currentFrameIndex = 0
-        totalFramesPlayed = 0
-        shouldLoop = true
-        repeatCountRemaining = animation.repeatCount.evaluate()
-        estimatedTotalFrames = calculateTotalFrames(animation: animation, repeatCount: repeatCountRemaining)
-        onAnimationComplete = nil
-        spawnedChildrenForCurrentAnimation = false
-        triggerChildSpawns()
-    }
-
     func calculateTotalFrames(animation: PetAnimation, repeatCount: Int) -> Int {
-        // First pass through all frames
-        let firstPass = animation.frames.count
-        // Repeated section (from repeatFrom to end). max(0,...) guards against a
-        // repeatFrom past the frame count (empty/corrupt data) producing a
-        // negative section that would corrupt the frame total.
-        let repeatSection = max(0, animation.frames.count - animation.repeatFrom)
-        // Total = first pass + (repeatSection * repeatCount)
-        return firstPass + (repeatSection * repeatCount)
+        AnimationPlayback.totalFrames(animation: animation, repeatCount: repeatCount)
     }
-
 }

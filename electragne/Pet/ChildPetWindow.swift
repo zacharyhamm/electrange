@@ -15,12 +15,8 @@ class ChildPetWindow: NSWindow {
     private var animationTimer: Timer?
     private var childSize: CGFloat
 
-    // Animation state for interval interpolation
-    private var currentAnimation: PetAnimation?
-    private var currentFrameIndex = 0
-    private var totalFramesPlayed = 0
-    private var estimatedTotalFrames = 0
-    private var repeatCountRemaining = 0
+    /// Frame sequencing/interpolation shared with AnimationManager.
+    private var playback: AnimationPlayback?
 
     // Pause state
     private var isPaused = false
@@ -120,7 +116,7 @@ class ChildPetWindow: NSWindow {
         orderFront(nil)  // Show window
 
         // Resume animation if we have one
-        if currentAnimation != nil {
+        if playback != nil {
             scheduleNextFrame()
         }
     }
@@ -133,7 +129,7 @@ class ChildPetWindow: NSWindow {
         animationTimer = nil
         closeWorkItem?.cancel()
         closeWorkItem = nil
-        currentAnimation = nil
+        playback = nil
     }
 
     override func close() {
@@ -149,12 +145,10 @@ class ChildPetWindow: NSWindow {
             return
         }
 
-        // Initialize animation state
-        currentAnimation = animation
-        currentFrameIndex = 0
-        totalFramesPlayed = 0
-        repeatCountRemaining = animation.repeatCount.evaluate()
-        estimatedTotalFrames = calculateTotalFrames(animation: animation, repeatCount: repeatCountRemaining)
+        playback = AnimationPlayback(
+            animation: animation,
+            repeatCount: animation.repeatCount.evaluate()
+        )
 
         // Show first frame immediately
         updateFrame()
@@ -165,10 +159,9 @@ class ChildPetWindow: NSWindow {
     }
 
     private func scheduleNextFrame() {
-        guard currentAnimation != nil, !isClosing, !isPaused else { return }
+        guard let playback, !isClosing, !isPaused else { return }
 
-        let interval = getCurrentInterval()
-        animationTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+        animationTimer = Timer.scheduledTimer(withTimeInterval: playback.currentInterval, repeats: false) { [weak self] _ in
             guard let self = self else { return }
             guard !self.isClosing, !self.isPaused else { return }
             self.advanceFrame()
@@ -176,64 +169,32 @@ class ChildPetWindow: NSWindow {
     }
 
     private func advanceFrame() {
-        guard let animation = currentAnimation, !isClosing, !hasBeenClosed else { return }
+        guard var playback, !isClosing, !hasBeenClosed else { return }
 
-        currentFrameIndex += 1
-        totalFramesPlayed += 1
-
-        if currentFrameIndex >= animation.frames.count {
-            // End of sequence
-            if repeatCountRemaining > 0 {
-                repeatCountRemaining -= 1
-                currentFrameIndex = min(max(0, animation.repeatFrom), animation.frames.count - 1)
+        switch playback.advance() {
+        case .advanced, .repeated:
+            self.playback = playback
+            updateFrame()
+            scheduleNextFrame()
+        case .finished:
+            self.playback = playback
+            // Chain into the next animation, or close after a delay.
+            if let nextAnim = playback.animation.nextAnimations.first(where: { $0.only == "none" }) {
+                playAnimation(nextAnim.animationID)
             } else {
-                // Check for next animation
-                if let nextAnim = animation.nextAnimations.first(where: { $0.only == "none" }) {
-                    playAnimation(nextAnim.animationID)
-                    return
-                } else {
-                    // No next animation, close after a delay
-                    closeAfterDelay()
-                    return
-                }
+                closeAfterDelay()
             }
         }
-
-        updateFrame()
-        scheduleNextFrame()
     }
 
     private func updateFrame() {
         guard !isClosing, !hasBeenClosed,
-              let animation = currentAnimation,
-              animation.frames.indices.contains(currentFrameIndex),
+              let frameNumber = playback?.currentFrameNumber,
               let imgView = imageView else { return }
 
-        let frameNumber = animation.frames[currentFrameIndex]
         if let image = extractFrame(frameNumber: frameNumber) {
             imgView.image = image
         }
-    }
-
-    private func getCurrentInterval() -> TimeInterval {
-        guard let animation = currentAnimation else { return 0.1 }
-        let progress = getAnimationProgress()
-        return animation.startInterval + (animation.endInterval - animation.startInterval) * progress
-    }
-
-    private func getAnimationProgress() -> Double {
-        if estimatedTotalFrames > 1 {
-            return min(1.0, max(0.0, Double(totalFramesPlayed) / Double(estimatedTotalFrames - 1)))
-        }
-        return 0
-    }
-
-    private func calculateTotalFrames(animation: PetAnimation, repeatCount: Int) -> Int {
-        let firstPass = animation.frames.count
-        // max(0,...) guards against a repeatFrom past the frame count producing
-        // a negative section (mirrors AnimationManager.calculateTotalFrames).
-        let repeatSection = max(0, animation.frames.count - animation.repeatFrom)
-        return firstPass + (repeatSection * repeatCount)
     }
 
     private func extractFrame(frameNumber: Int) -> NSImage? {
@@ -249,7 +210,7 @@ class ChildPetWindow: NSWindow {
         // Stop all animations
         animationTimer?.invalidate()
         animationTimer = nil
-        currentAnimation = nil
+        playback = nil
 
         // Cancel any existing close work
         closeWorkItem?.cancel()
