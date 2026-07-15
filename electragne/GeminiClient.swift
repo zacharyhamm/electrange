@@ -43,8 +43,8 @@ struct GeminiClient: ChatClient {
         avoid headings, tables, code blocks, and display-math delimiters. \
         You have Google Search available: use it when asked to search, or \
         for current events and facts you are not sure about. You can manage \
-        Apple Reminders and Notes, open apps and websites, search approved \
-        folders by file name, and reveal search results in Finder. Use these tools only \
+        Apple Reminders and Notes, manage countdown timers, open apps and websites, \
+        search approved folders by file name, and reveal search results in Finder. Use these tools only \
         when the owner asks. Never claim an action succeeded until its tool \
         reports success.
         """
@@ -77,6 +77,20 @@ struct GeminiClient: ChatClient {
             let name: String
             let description: String
             let parameters: Parameters
+
+            init(_ definition: ChatToolDefinition) {
+                name = definition.name
+                description = definition.description
+                parameters = Parameters(
+                    properties: definition.properties.mapValues { parameter in
+                        Parameters.Property(
+                            type: parameter.type.rawValue.uppercased(),
+                            description: parameter.description
+                        )
+                    },
+                    required: definition.required
+                )
+            }
         }
 
         struct Tool: Encodable {
@@ -128,176 +142,8 @@ struct GeminiClient: ChatClient {
         let candidates: [Candidate]?
     }
 
-    private nonisolated static let createReminderDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "create_reminder",
-        description: "Create one reminder in Apple Reminders after the owner confirms it.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(
-            properties: [
-                "title": .init(type: "STRING", description: "Required reminder title."),
-                "notes": .init(type: "STRING", description: "Optional reminder notes."),
-                "listName": .init(
-                    type: "STRING",
-                    description: "Optional existing Apple Reminders list name. Omit for the default list."
-                ),
-                "due": .init(
-                    type: "STRING",
-                    description: "Optional due date as YYYY-MM-DD, or an RFC 3339 timestamp with UTC offset."
-                ),
-            ],
-            required: ["title"]
-        )
-    )
-
-    private nonisolated static let listRemindersDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "list_reminders",
-        description: "List or search Apple Reminders. Use this first to obtain an identifier before updating or deleting a reminder.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(properties: [
-            "query": .init(type: "STRING", description: "Optional words to match in title or notes."),
-            "listName": .init(type: "STRING", description: "Optional exact Reminders list name."),
-            "completion": .init(type: "STRING", description: "incomplete (default), completed, or all."),
-            "limit": .init(type: "NUMBER", description: "Optional result limit from 1 to 50."),
-        ], required: [])
-    )
-
-    private nonisolated static let updateReminderDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "update_reminder",
-        description: "Modify one reminder identified by list_reminders. The owner must confirm.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(properties: [
-            "identifier": .init(type: "STRING", description: "Identifier returned by list_reminders or create_reminder."),
-            "title": .init(type: "STRING", description: "Optional replacement title."),
-            "notes": .init(type: "STRING", description: "Optional replacement notes."),
-            "clearNotes": .init(type: "BOOLEAN", description: "Set true to remove existing notes."),
-            "listName": .init(type: "STRING", description: "Optional exact destination list name."),
-            "due": .init(type: "STRING", description: "Optional replacement due date as YYYY-MM-DD or RFC 3339 timestamp."),
-            "clearDue": .init(type: "BOOLEAN", description: "Set true to remove the due date and alarms."),
-            "completed": .init(type: "BOOLEAN", description: "Optional completion state."),
-        ], required: ["identifier"])
-    )
-
-    private nonisolated static let deleteReminderDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "delete_reminder",
-        description: "Permanently delete one reminder identified by list_reminders after confirmation.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(properties: [
-            "identifier": .init(type: "STRING", description: "Identifier returned by list_reminders.")
-        ], required: ["identifier"])
-    )
-
-    private nonisolated static let listNotesDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "list_notes",
-        description: "List recent Apple Notes titles and opaque IDs, optionally within one folder.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(properties: [
-            "folderName": .init(type: "STRING", description: "Optional exact Notes folder name."),
-            "limit": .init(type: "NUMBER", description: "Optional result limit from 1 to 50."),
-        ], required: [])
-    )
-
-    private nonisolated static let searchNotesDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "search_notes",
-        description: "Search Apple Notes titles and plaintext. Use before modifying or deleting a note to obtain its opaque ID.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(properties: [
-            "query": .init(type: "STRING", description: "Required text to find."),
-            "folderName": .init(type: "STRING", description: "Optional exact Notes folder name."),
-            "limit": .init(type: "NUMBER", description: "Optional result limit from 1 to 50."),
-        ], required: ["query"])
-    )
-
-    private nonisolated static let createNoteDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "create_note",
-        description: "Create an Apple Note after confirmation.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(properties: [
-            "title": .init(type: "STRING", description: "Required note title."),
-            "body": .init(type: "STRING", description: "Optional plaintext body."),
-            "folderName": .init(type: "STRING", description: "Optional exact existing Notes folder name; omit for default."),
-        ], required: ["title"])
-    )
-
-    private nonisolated static let updateNoteDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "update_note",
-        description: "Replace an Apple Note title and/or body after confirmation. Requires an opaque ID from list_notes or search_notes.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(properties: [
-            "noteID": .init(type: "STRING", description: "Opaque note ID returned by a Notes read tool."),
-            "title": .init(type: "STRING", description: "Optional replacement title."),
-            "body": .init(type: "STRING", description: "Optional replacement plaintext body."),
-        ], required: ["noteID"])
-    )
-
-    private nonisolated static let appendNoteDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "append_to_note",
-        description: "Append plaintext to an Apple Note after confirmation.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(properties: [
-            "noteID": .init(type: "STRING", description: "Opaque note ID returned by a Notes read tool."),
-            "text": .init(type: "STRING", description: "Text to append."),
-        ], required: ["noteID", "text"])
-    )
-
-    private nonisolated static let deleteNoteDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "delete_note",
-        description: "Permanently delete an Apple Note after confirmation.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(properties: [
-            "noteID": .init(type: "STRING", description: "Opaque note ID returned by a Notes read tool.")
-        ], required: ["noteID"])
-    )
-
-    private nonisolated static let openAppDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "open_app",
-        description: "Open an installed macOS application after the owner confirms.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(
-            properties: [
-                "name": .init(type: "STRING", description: "Application name or bundle identifier.")
-            ],
-            required: ["name"]
-        )
-    )
-
-    private nonisolated static let openURLDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "open_url",
-        description: "Open an HTTP or HTTPS website in the default browser after confirmation.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(
-            properties: [
-                "url": .init(type: "STRING", description: "Complete http:// or https:// URL.")
-            ],
-            required: ["url"]
-        )
-    )
-
-    private nonisolated static let findFilesDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "find_files",
-        description: "Search file and folder names within folders the owner approved in Electragne Settings.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(
-            properties: [
-                "query": .init(type: "STRING", description: "Words that must occur in the item name or relative path.")
-            ],
-            required: ["query"]
-        )
-    )
-
-    private nonisolated static let revealInFinderDeclaration = GenerateRequest.FunctionDeclaration(
-        name: "reveal_in_finder",
-        description: "Reveal one result from the latest find_files call in Finder after confirmation.",
-        parameters: GenerateRequest.FunctionDeclaration.Parameters(
-            properties: [
-                "fileID": .init(type: "STRING", description: "Opaque result ID returned by find_files.")
-            ],
-            required: ["fileID"]
-        )
-    )
-
-    private nonisolated static let functionDeclarations = [
-        createReminderDeclaration,
-        listRemindersDeclaration,
-        updateReminderDeclaration,
-        deleteReminderDeclaration,
-        listNotesDeclaration,
-        searchNotesDeclaration,
-        createNoteDeclaration,
-        updateNoteDeclaration,
-        appendNoteDeclaration,
-        deleteNoteDeclaration,
-        openAppDeclaration,
-        openURLDeclaration,
-        findFilesDeclaration,
-        revealInFinderDeclaration,
-    ]
+    private nonisolated static let functionDeclarations =
+        ChatToolRegistry.definitions(for: .gemini).map(GenerateRequest.FunctionDeclaration.init)
 
     nonisolated static func makeSystemPrompt(
         userName: String?,
@@ -483,14 +329,8 @@ struct GeminiClient: ChatClient {
             contents.append(GeminiContent(role: "model", parts: modelParts))
             var responseParts: [ChatToolValue] = []
             for call in toolCalls {
-                switch call.name {
-                case "list_reminders": onStatus("Reading reminders…")
-                case "list_notes", "search_notes": onStatus("Reading Notes…")
-                case "create_reminder", "update_reminder", "delete_reminder": onStatus("Confirm reminder…")
-                case "create_note", "update_note", "append_to_note", "delete_note": onStatus("Confirm Notes action…")
-                case "find_files": onStatus("Searching approved folders…")
-                default: onStatus("Confirm action…")
-                }
+                onStatus(ChatToolRegistry.definition(named: call.name)?.initialStatus
+                    ?? "Confirm action…")
                 let result = await onToolCall(call)
                 responseParts.append(.object([
                     "functionResponse": .object([

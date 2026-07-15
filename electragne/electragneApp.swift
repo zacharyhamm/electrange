@@ -7,6 +7,7 @@
 
 import Carbon.HIToolbox
 import SwiftUI
+import UserNotifications
 
 @main
 struct ElectragneApp: App {
@@ -103,7 +104,7 @@ struct SettingsView: View {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem?
     weak var petWindow: NSWindow?
     private var toggleVisibilityMenuItem: NSMenuItem?
@@ -113,6 +114,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+
         // Create menu bar item
         setupMenuBar()
 
@@ -129,6 +132,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.configureWindow()
         }
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 
     private func configureWindow() {

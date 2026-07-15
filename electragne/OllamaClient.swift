@@ -12,16 +12,10 @@ nonisolated struct OllamaChatChunk: Equatable {
     var toolCalls: [OllamaToolCall] = []
 }
 
-/// A tool invocation requested by the model. Only web_search exists, so the
-/// arguments are modeled concretely rather than as arbitrary JSON.
 nonisolated struct OllamaToolCall: Equatable, Codable {
     struct Function: Equatable, Codable {
-        struct Arguments: Equatable, Codable {
-            var query: String?
-        }
-
         var name: String
-        var arguments: Arguments
+        var arguments: [String: ChatToolValue]
     }
 
     var function: Function
@@ -140,10 +134,13 @@ struct OllamaClient: ChatClient {
         chat-sized — a sentence or two, or a brief list when that is clearer. \
         Markdown formatting is welcome: bold, italics, [title](url) links, \
         and bullet lists using "-"; avoid headings, tables, and code blocks. \
-        You have a web_search tool: use it when asked to search, or for \
+        You can manage Apple Reminders and Notes, manage countdown timers, open \
+        apps and websites, search approved folders by file name, reveal search \
+        results in Finder, and search the web. Use web_search when asked to search, or for \
         current events and facts you are not sure about. When you answer \
         from web search results, always share links to the sources you used \
-        (markdown [title](url) links are fine).
+        (markdown [title](url) links are fine). Use timer tools only when the \
+        owner asks, and never claim an action succeeded until the tool reports success.
         """
 
     /// The full system prompt, personalized with the owner's name when known.
@@ -202,6 +199,22 @@ struct OllamaClient: ChatClient {
 
             let type = "function"
             let function: Function
+
+            init(_ definition: ChatToolDefinition) {
+                function = Function(
+                    name: definition.name,
+                    description: definition.description,
+                    parameters: Function.Parameters(
+                        properties: definition.properties.mapValues { parameter in
+                            Function.Parameters.Property(
+                                type: parameter.type.rawValue,
+                                description: parameter.description
+                            )
+                        },
+                        required: definition.required
+                    )
+                )
+            }
         }
 
         let model: String
@@ -211,21 +224,6 @@ struct OllamaClient: ChatClient {
         let tools: [ToolDefinition]
     }
 
-    private nonisolated static let webSearchTool = ChatRequest.ToolDefinition(
-        function: ChatRequest.ToolDefinition.Function(
-            name: "web_search",
-            description: "Search the web and return the top results.",
-            parameters: ChatRequest.ToolDefinition.Function.Parameters(
-                properties: [
-                    "query": ChatRequest.ToolDefinition.Function.Parameters.Property(
-                        type: "string",
-                        description: "The search query"
-                    )
-                ],
-                required: ["query"]
-            )
-        )
-    )
 
     private nonisolated struct ChatResponseLine: Decodable {
         struct Message: Decodable {
@@ -253,7 +251,7 @@ struct OllamaClient: ChatClient {
                 + history,
             stream: true,
             options: ChatRequest.Options(numCtx: contextWindowTokens),
-            tools: [webSearchTool]
+            tools: ChatToolRegistry.definitions(for: .ollama).map(ChatRequest.ToolDefinition.init)
         )
         return try JSONEncoder().encode(request)
     }
@@ -319,20 +317,33 @@ struct OllamaClient: ChatClient {
                 OllamaMessage(role: "assistant", content: roundContent, toolCalls: toolCalls)
             )
             for call in toolCalls {
-                let query = call.function.arguments.query ?? ""
-                onStatus("Searching the web: \(query)")
                 let resultText: String
-                do {
-                    resultText = try await webSearch.resultsText(query: query)
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch OllamaError.missingAPIKey {
-                    throw OllamaError.missingAPIKey
-                } catch let error as URLError where error.code == .cancelled {
-                    throw CancellationError()
-                } catch {
-                    // Let the model explain the failure instead of aborting.
-                    resultText = "Web search failed: \(error.localizedDescription)"
+                if call.function.name == "web_search" {
+                    let query = call.function.arguments["query"]?.stringValue ?? ""
+                    onStatus("Searching the web: \(query)")
+                    do {
+                        resultText = try await webSearch.resultsText(query: query)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch OllamaError.missingAPIKey {
+                        throw OllamaError.missingAPIKey
+                    } catch let error as URLError where error.code == .cancelled {
+                        throw CancellationError()
+                    } catch {
+                        // Let the model explain the failure instead of aborting.
+                        resultText = "Web search failed: \(error.localizedDescription)"
+                    }
+                } else {
+                    onStatus(ChatToolRegistry.definition(named: call.function.name)?.initialStatus
+                        ?? "Confirm action…")
+                    let call = ChatToolCall(
+                        id: UUID().uuidString,
+                        name: call.function.name,
+                        arguments: call.function.arguments
+                    )
+                    let result = await onToolCall(call)
+                    let data = try JSONEncoder().encode(result.response)
+                    resultText = String(decoding: data, as: UTF8.self)
                 }
                 messages.append(
                     OllamaMessage(role: "tool", content: resultText, toolName: call.function.name)

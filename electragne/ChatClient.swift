@@ -60,6 +60,11 @@ nonisolated enum ChatToolValue: Equatable, Codable, Sendable {
         guard case .number(let value) = self else { return nil }
         return value
     }
+
+    var arrayValue: [ChatToolValue]? {
+        guard case .array(let value) = self else { return nil }
+        return value
+    }
 }
 
 nonisolated struct ChatToolCall: Equatable, Sendable {

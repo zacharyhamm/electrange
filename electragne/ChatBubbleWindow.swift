@@ -356,9 +356,7 @@ final class ChatBubbleWindowController {
     private var onDismiss: (() -> Void)?
     private let ollamaClient: OllamaClient
     private let geminiClient: GeminiClient
-    private let reminderToolExecutor: any ReminderToolExecuting
-    private let notesToolExecutor: any NotesToolExecuting
-    private let desktopToolExecutor: any DesktopToolExecuting
+    private let toolRouter: ChatToolRouter
     private var streamTask: Task<Void, Never>?
     private var confirmationContinuation: CheckedContinuation<Bool, Never>?
     /// The active conversation; persisted after every exchange and reloaded
@@ -385,13 +383,17 @@ final class ChatBubbleWindowController {
         reminderToolExecutor: (any ReminderToolExecuting)? = nil,
         notesToolExecutor: (any NotesToolExecuting)? = nil,
         desktopToolExecutor: (any DesktopToolExecuting)? = nil,
+        timerToolExecutor: (any TimerToolExecuting)? = nil,
         chatStore: ChatStore = ChatStore()
     ) {
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
-        self.reminderToolExecutor = reminderToolExecutor ?? AppleReminderService()
-        self.notesToolExecutor = notesToolExecutor ?? AppleNotesService()
-        self.desktopToolExecutor = desktopToolExecutor ?? DesktopToolService()
+        self.toolRouter = ChatToolRouter(
+            reminderExecutor: reminderToolExecutor ?? AppleReminderService(),
+            notesExecutor: notesToolExecutor ?? AppleNotesService(),
+            desktopExecutor: desktopToolExecutor ?? DesktopToolService(),
+            timerExecutor: timerToolExecutor ?? TimerToolService()
+        )
         self.chatStore = chatStore
 
         // Resume the most recent chat across launches; start fresh otherwise.
@@ -554,69 +556,14 @@ final class ChatBubbleWindowController {
     }
 
     private func executeToolCall(_ call: ChatToolCall) async -> ChatToolResult {
-        if ["create_reminder", "list_reminders", "update_reminder", "delete_reminder"].contains(call.name) {
-            let request: ReminderToolRequest
-            do {
-                request = try ReminderToolRequest(toolCall: call)
-            } catch ReminderRequestError.missingArgument(let name) {
-                return .error("The ‘\(name)’ argument is required.")
-            } catch ReminderRequestError.invalidCompletion {
-                return .error("Reminder completion must be incomplete, completed, or all.")
-            } catch ReminderRequestError.noChanges {
-                return .error("At least one reminder change is required.")
-            } catch {
-                return .error("That reminder request was invalid.")
-            }
-            if let details = reminderToolExecutor.confirmationDetails(for: request),
-               !(await requestConfirmation(details)) {
-                return Self.cancelledToolResult()
-            }
-            if case .list = request { model.status = "Reading reminders…" }
-            else { model.status = "Updating reminders…" }
-            return await reminderToolExecutor.execute(request)
-        }
-
-        if ["list_notes", "search_notes", "create_note", "update_note", "append_to_note", "delete_note"].contains(call.name) {
-            let request: NoteToolRequest
-            do {
-                request = try NoteToolRequest(toolCall: call)
-            } catch NoteToolError.missingArgument(let name) {
-                return .error("The ‘\(name)’ argument is required.")
-            } catch NoteToolError.noChanges {
-                return .error("At least one note change is required.")
-            } catch {
-                return .error("That Notes request was invalid.")
-            }
-            if let details = notesToolExecutor.confirmationDetails(for: request),
-               !(await requestConfirmation(details)) {
-                return Self.cancelledToolResult()
-            }
-            switch request {
-            case .list, .search: model.status = "Reading Notes…"
-            default: model.status = "Updating Notes…"
-            }
-            return await notesToolExecutor.execute(request)
-        }
-
-        let request: DesktopToolRequest
-        do {
-            request = try DesktopToolRequest(toolCall: call)
-        } catch DesktopToolError.unsupportedTool(let name) {
-            return .error("Unknown tool ‘\(name)’.")
-        } catch DesktopToolError.missingArgument(let name) {
-            return .error("The ‘\(name)’ argument is required.")
-        } catch DesktopToolError.invalidWebURL {
-            return .error("Only complete HTTP and HTTPS web addresses can be opened.")
-        } catch {
-            return .error("That tool request was invalid.")
-        }
-
-        if let details = desktopToolExecutor.confirmationDetails(for: request),
-           !(await requestConfirmation(details)) {
-            return Self.cancelledToolResult()
-        }
-        model.status = request.isFileSearch ? "Searching approved folders…" : "Opening…"
-        return await desktopToolExecutor.execute(request)
+        await toolRouter.execute(
+            call,
+            confirm: { [weak self] details in
+                guard let self else { return false }
+                return await self.requestConfirmation(details)
+            },
+            onStatus: { [weak self] status in self?.model.status = status }
+        )
     }
 
     private func requestConfirmation(_ details: ToolConfirmationDetails) async -> Bool {
@@ -647,13 +594,6 @@ final class ChatBubbleWindowController {
         guard let continuation = confirmationContinuation else { return }
         confirmationContinuation = nil
         continuation.resume(returning: approved)
-    }
-
-    private static func cancelledToolResult() -> ChatToolResult {
-        ChatToolResult(response: [
-            "status": .string("cancelled"),
-            "message": .string("The owner cancelled this action."),
-        ])
     }
 
     private func persistCurrentChat() {

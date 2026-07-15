@@ -26,7 +26,7 @@ struct OllamaClientTests {
 
         #expect(chunk?.toolCalls.count == 1)
         #expect(chunk?.toolCalls.first?.function.name == "web_search")
-        #expect(chunk?.toolCalls.first?.function.arguments.query == "weather today")
+        #expect(chunk?.toolCalls.first?.function.arguments["query"]?.stringValue == "weather today")
     }
 
     @Test func rejectsBlankAndMalformedLines() {
@@ -107,18 +107,20 @@ struct OllamaClientTests {
         #expect((messages[0]["content"] as? String)?.contains("Zachary Hamm") == true)
     }
 
-    @Test func requestBodyDeclaresWebSearchTool() throws {
+    @Test func requestBodyDeclaresWebSearchAndAllLocalTools() throws {
         let body = try OllamaClient.makeRequestBody(model: "gemma4:latest", history: [])
 
         let json = try #require(
             try JSONSerialization.jsonObject(with: body) as? [String: Any]
         )
         let tools = try #require(json["tools"] as? [[String: Any]])
-        #expect(tools.count == 1)
+        #expect(tools.count == 18)
         let function = try #require(tools[0]["function"] as? [String: Any])
         #expect(function["name"] as? String == "web_search")
         let parameters = try #require(function["parameters"] as? [String: Any])
         #expect(parameters["required"] as? [String] == ["query"])
+        let names = Set(tools.compactMap { ($0["function"] as? [String: Any])?["name"] as? String })
+        #expect(names == Set(ChatToolRegistry.definitions(for: .ollama).map(\.name)))
     }
 
     @Test func toolMessagesEncodeOllamaFieldNames() throws {
@@ -129,7 +131,7 @@ struct OllamaClientTests {
                 toolCalls: [OllamaToolCall(
                     function: OllamaToolCall.Function(
                         name: "web_search",
-                        arguments: OllamaToolCall.Function.Arguments(query: "news")
+                        arguments: ["query": .string("news")]
                     )
                 )]
             ),
