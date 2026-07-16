@@ -350,6 +350,15 @@ nonisolated enum ChatToolRegistry {
             executionStatus: "Searching Linear…"
         ),
         definition(
+            "search_linear_projects", family: .linear,
+            description: "Full-text search Linear projects by name and content. Returns project names, states, leads, and URLs.",
+            properties: [
+                "query": property(.string, "Required search query."),
+                "limit": property(.number, "Optional result limit from 1 to 50."),
+            ], required: ["query"], initialStatus: "Searching Linear…",
+            executionStatus: "Searching Linear…"
+        ),
+        definition(
             "list_my_linear_issues", family: .linear,
             description: "List the owner's open Linear issues (assigned to them, not completed or canceled), most recently updated first.",
             properties: [

@@ -14,6 +14,10 @@ struct LinearToolRequestTests {
             "query": .string(" login bug ")
         ])) == .search(query: "login bug", limit: 20))
 
+        #expect(try LinearToolRequest(toolCall: call("search_linear_projects", [
+            "query": .string("mobile app")
+        ])) == .searchProjects(query: "mobile app", limit: 20))
+
         #expect(try LinearToolRequest(toolCall: call("list_my_linear_issues", [
             "limit": .number(5)
         ])) == .myIssues(limit: 5))
@@ -47,6 +51,9 @@ struct LinearToolRequestTests {
             try LinearToolRequest(toolCall: call("search_linear_issues", [
                 "query": .string("x"), "limit": .number(0),
             ]))
+        }
+        #expect(throws: LinearToolError.missingArgument("query")) {
+            try LinearToolRequest(toolCall: call("search_linear_projects", [:]))
         }
         #expect(throws: LinearToolError.invalidLimit) {
             try LinearToolRequest(toolCall: call("list_my_linear_issues", [
@@ -122,6 +129,32 @@ struct LinearToolServiceTests {
         ], emptyNote: "None.")
         #expect(result.response["issueCount"] == .number(2))
         #expect(result.response["issues"] == .string("ENG-1 a\nENG-2 b"))
+    }
+
+    @Test func projectLineRendersNameStateLeadAndDates() {
+        let project = LinearProject(
+            id: "p1", name: "Mobile App", url: "https://linear.app/x/project/mobile",
+            state: "started", lead: .init(displayName: "alice"),
+            targetDate: "2026-09-01", updatedAt: "2026-07-14T09:30:00.000Z"
+        )
+        #expect(LinearToolService.projectLine(project)
+            == "Mobile App [started] — alice (target 2026-09-01, updated 2026-07-14) https://linear.app/x/project/mobile")
+
+        // Sparse projects degrade to the name, or the ID when unnamed.
+        #expect(LinearToolService.projectLine(LinearProject(id: "p2", name: "Bare")) == "Bare")
+        #expect(LinearToolService.projectLine(LinearProject(id: "p3")) == "p3")
+    }
+
+    @Test func projectsResultListsOneLinePerProjectAndNotesEmpty() {
+        let empty = LinearToolService.projectsResult([], emptyNote: "None.")
+        #expect(empty.response["message"] == .string("None."))
+
+        let result = LinearToolService.projectsResult([
+            LinearProject(id: "p1", name: "a"),
+            LinearProject(id: "p2", name: "b"),
+        ], emptyNote: "None.")
+        #expect(result.response["projectCount"] == .number(2))
+        #expect(result.response["projects"] == .string("a\nb"))
     }
 
     @Test func issueDetailIncludesDescriptionAndComments() {

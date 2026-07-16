@@ -12,6 +12,7 @@ import Foundation
 nonisolated enum LinearToolRequest: Equatable, Sendable {
     case teams
     case search(query: String, limit: Int)
+    case searchProjects(query: String, limit: Int)
     case myIssues(limit: Int)
     case issue(id: String)
     /// teamName is model-supplied display context for the confirmation card;
@@ -36,6 +37,8 @@ nonisolated enum LinearToolRequest: Equatable, Sendable {
             self = .teams
         case "search_linear_issues":
             self = .search(query: try required("query"), limit: try limit(default: 20))
+        case "search_linear_projects":
+            self = .searchProjects(query: try required("query"), limit: try limit(default: 20))
         case "list_my_linear_issues":
             self = .myIssues(limit: try limit(default: 25))
         case "get_linear_issue":
@@ -97,6 +100,16 @@ nonisolated struct LinearIssue: Decodable, Equatable, Sendable {
     var comments: Comments? = nil
 }
 
+nonisolated struct LinearProject: Decodable, Equatable, Sendable {
+    var id: String
+    var name: String? = nil
+    var url: String? = nil
+    var state: String? = nil
+    var lead: LinearIssue.User? = nil
+    var targetDate: String? = nil
+    var updatedAt: String? = nil
+}
+
 nonisolated struct LinearTeam: Decodable, Equatable, Sendable {
     var id: String
     var key: String? = nil
@@ -132,6 +145,20 @@ nonisolated enum LinearClient {
             variables: Variables(term: term, first: limit)
         )
         return result.searchIssues?.nodes ?? []
+    }
+
+    static func searchProjects(_ apiKey: String, term: String, limit: Int) async throws -> [LinearProject] {
+        struct Variables: Encodable { let term: String; let first: Int }
+        struct Result: Decodable {
+            struct Nodes: Decodable { let nodes: [LinearProject]? }
+            let searchProjects: Nodes?
+        }
+        let result: Result = try await call(
+            apiKey,
+            query: "query($term: String!, $first: Int!) { searchProjects(term: $term, first: $first) { nodes { id name url state lead { displayName } targetDate updatedAt } } }",
+            variables: Variables(term: term, first: limit)
+        )
+        return result.searchProjects?.nodes ?? []
     }
 
     /// The key owner's open assigned issues, most recently updated first.
@@ -260,6 +287,11 @@ final class LinearToolService: LinearToolExecuting {
                     try await LinearClient.search(apiKey, term: query, limit: limit),
                     emptyNote: "No Linear issues matched."
                 )
+            case .searchProjects(let query, let limit):
+                return Self.projectsResult(
+                    try await LinearClient.searchProjects(apiKey, term: query, limit: limit),
+                    emptyNote: "No Linear projects matched."
+                )
             case .myIssues(let limit):
                 return Self.issuesResult(
                     try await LinearClient.myIssues(apiKey, limit: limit),
@@ -319,6 +351,29 @@ final class LinearToolService: LinearToolExecuting {
         }
         if let day = day(issue.updatedAt) { line += " (updated \(day))" }
         if let url = issue.url { line += " \(url)" }
+        return line
+    }
+
+    static func projectsResult(_ projects: [LinearProject], emptyNote: String) -> ChatToolResult {
+        guard !projects.isEmpty else { return .make(status: "ok", message: emptyNote) }
+        return ChatToolResult(response: [
+            "status": .string("ok"),
+            "projectCount": .number(Double(projects.count)),
+            "projects": .string(projects.map(projectLine).joined(separator: "\n")),
+        ])
+    }
+
+    /// One "Name [state] — lead (target day, updated day) url" line per project.
+    static func projectLine(_ project: LinearProject) -> String {
+        var line = project.name ?? project.id
+        if let state = project.state, !state.isEmpty { line += " [\(state)]" }
+        if let lead = project.lead?.displayName, !lead.isEmpty { line += " — \(lead)" }
+        let dates = [
+            day(project.targetDate).map { "target \($0)" },
+            day(project.updatedAt).map { "updated \($0)" },
+        ].compactMap { $0 }
+        if !dates.isEmpty { line += " (\(dates.joined(separator: ", ")))" }
+        if let url = project.url { line += " \(url)" }
         return line
     }
 
