@@ -117,6 +117,25 @@ final class CalendarToolAdapter: ToolExecuting {
     }
 }
 
+// MARK: - Slack (dobbs)
+
+/// Read-only Slack archive access through a dobbs daemon; never needs a
+/// confirmation.
+@MainActor
+final class SlackToolAdapter: ToolExecuting {
+    private let executor: any SlackToolExecuting
+    init(_ executor: any SlackToolExecuting) { self.executor = executor }
+
+    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
+        let request = try SlackToolRequest(toolCall: call)
+        let executor = executor
+        return PreparedToolAction(
+            confirmation: nil,
+            execute: { await executor.execute(request) }
+        )
+    }
+}
+
 // MARK: - Web search
 
 /// Runs the hosted ollama.com web search through the shared tool router.

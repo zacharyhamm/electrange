@@ -33,6 +33,8 @@ nonisolated enum ChatProviderError: LocalizedError, Equatable {
             "Web search needs an ollama.com API key — add it in Electragne Settings"
         case .missingAPIKey(.gemini):
             "Gemini needs an API key — add it in Electragne Settings"
+        case .missingAPIKey(.dobbs):
+            "Slack needs a dobbs token — add it in Electragne Settings"
         case .quotaExceeded:
             "Gemini quota exceeded — try again later"
         case .toolRoundLimit:

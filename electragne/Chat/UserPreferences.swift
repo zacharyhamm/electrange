@@ -22,6 +22,26 @@ enum UserPreferences {
         preferredName() ?? OllamaClient.detectedUserName()
     }
 
+    // MARK: Slack (dobbs) — endpoint + workspace; the token lives in Keychain
+
+    nonisolated static let dobbsEndpointKey = "dobbsEndpoint"
+    nonisolated static let dobbsWorkspaceKey = "dobbsWorkspace"
+
+    /// The dobbs daemon host:port from Settings, or nil when unset/blank.
+    nonisolated static func dobbsEndpoint(in defaults: UserDefaults = .standard) -> String? {
+        trimmed(defaults.string(forKey: dobbsEndpointKey))
+    }
+
+    /// The expected Slack workspace name from Settings, or nil when unset/blank.
+    nonisolated static func dobbsWorkspace(in defaults: UserDefaults = .standard) -> String? {
+        trimmed(defaults.string(forKey: dobbsWorkspaceKey))
+    }
+
+    nonisolated private static func trimmed(_ raw: String?) -> String? {
+        let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
     // MARK: Chat font size (adjusted with Cmd+/Cmd- in the bubble)
 
     nonisolated static let chatFontSizeKey = "chatFontSize"

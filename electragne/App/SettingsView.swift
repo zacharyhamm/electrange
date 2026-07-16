@@ -18,6 +18,11 @@ struct SettingsView: View {
     @State private var googleClientSecret = ""
     @State private var fileSearchScopes: [FileSearchScope] = []
     @State private var fileSearchError: String?
+    @AppStorage(UserPreferences.dobbsEndpointKey) private var dobbsEndpoint = ""
+    @AppStorage(UserPreferences.dobbsWorkspaceKey) private var dobbsWorkspace = ""
+    @State private var dobbsToken = ""
+    @State private var dobbsMessage: String?
+    @State private var dobbsSaveFailed = false
     @State private var googleAccounts: [GoogleAccount] = []
     @State private var defaultGoogleAccountID: String?
     @State private var googleError: String?
@@ -116,6 +121,48 @@ struct SettingsView: View {
                         Text(fileSearchError)
                             .font(.caption)
                             .foregroundStyle(.red)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack {
+                        Text("Slack (dobbs)")
+                            .font(.headline)
+                        Spacer()
+                        Button("Save Token", action: saveDobbsToken)
+                    }
+                    Text("Lets the pet search and summarize Slack through a running dobbs daemon. The token is stored in macOS Keychain.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Endpoint")
+                        .font(.subheadline.weight(.medium))
+                    TextField("host:port, e.g. 127.0.0.1:7355", text: $dobbsEndpoint)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 320)
+
+                    Text("Workspace")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.top, 3)
+                    TextField("Optional expected workspace name", text: $dobbsWorkspace)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 320)
+                    Text("When set, tool calls fail unless the daemon serves this workspace.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Token")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.top, 3)
+                    SecureField("Paste the dobbs daemon token", text: $dobbsToken)
+                        .textFieldStyle(.roundedBorder)
+
+                    if let dobbsMessage {
+                        Text(dobbsMessage)
+                            .font(.caption)
+                            .foregroundStyle(dobbsSaveFailed ? .red : .secondary)
                     }
                 }
 
@@ -226,6 +273,7 @@ struct SettingsView: View {
         .onAppear {
             geminiAPIKey = ChatAPIKeyStore.key(for: .gemini) ?? ""
             ollamaAPIKey = ChatAPIKeyStore.key(for: .ollama) ?? ""
+            dobbsToken = ChatAPIKeyStore.key(for: .dobbs) ?? ""
             refreshFileSearchScopes()
             refreshGoogleAccounts()
             googleClientSecret = GoogleOAuthService.shared.clientSecret
@@ -243,6 +291,18 @@ struct SettingsView: View {
         } catch {
             apiKeySaveFailed = true
             apiKeyMessage = error.localizedDescription
+        }
+    }
+
+    private func saveDobbsToken() {
+        do {
+            try ChatAPIKeyStore.setKey(dobbsToken, for: .dobbs)
+            dobbsToken = ChatAPIKeyStore.key(for: .dobbs) ?? ""
+            dobbsSaveFailed = false
+            dobbsMessage = "Saved in macOS Keychain. Clear the field and save to remove the token."
+        } catch {
+            dobbsSaveFailed = true
+            dobbsMessage = error.localizedDescription
         }
     }
 

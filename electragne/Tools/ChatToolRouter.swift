@@ -20,6 +20,7 @@ final class ChatToolRouter {
         timerExecutor: any TimerToolExecuting,
         gmailExecutor: (any GmailToolExecuting)? = nil,
         calendarExecutor: (any CalendarToolExecuting)? = nil,
+        slackExecutor: (any SlackToolExecuting)? = nil,
         webSearchExecutor: (any ToolExecuting)? = nil
     ) {
         executors = [
@@ -29,6 +30,7 @@ final class ChatToolRouter {
             .timers: TimerToolAdapter(timerExecutor),
             .gmail: GmailToolAdapter(gmailExecutor ?? GmailToolService()),
             .calendar: CalendarToolAdapter(calendarExecutor ?? CalendarToolService()),
+            .slack: SlackToolAdapter(slackExecutor ?? SlackToolService()),
             .webSearch: webSearchExecutor ?? WebSearchExecutor(),
         ]
     }

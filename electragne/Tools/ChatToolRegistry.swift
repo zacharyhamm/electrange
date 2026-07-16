@@ -13,6 +13,7 @@ nonisolated enum ChatToolFamily: Equatable, Sendable {
     case timers
     case gmail
     case calendar
+    case slack
 }
 
 nonisolated enum ChatToolParameterType: String, Equatable, Sendable {
@@ -276,6 +277,25 @@ nonisolated enum ChatToolRegistry {
                 "accountID": property(.string, "Optional opaque Google account ID. Omit to use the default account."),
             ], required: ["summary", "start", "end"], initialStatus: "Confirm Calendar event…",
             executionStatus: "Creating Calendar event…"
+        ),
+        definition(
+            "search_slack", family: .slack,
+            description: "Full-text search the owner's archived Slack messages across all channels. Supports SQLite FTS5 syntax: words, \"quoted phrases\", and OR.",
+            properties: [
+                "query": property(.string, "Required search query."),
+                "limit": property(.number, "Optional result limit from 1 to 50."),
+            ], required: ["query"], initialStatus: "Searching Slack…",
+            executionStatus: "Searching Slack…"
+        ),
+        definition(
+            "get_slack_messages", family: .slack,
+            description: "Read archived Slack messages from one channel, optionally within a date range. Use this to summarize what is going on in a Slack channel.",
+            properties: [
+                "channel": property(.string, "Required channel name (with or without #) or channel ID."),
+                "from": property(.string, "Optional inclusive start date as YYYY-MM-DD in the owner's time zone."),
+                "to": property(.string, "Optional inclusive end date as YYYY-MM-DD in the owner's time zone."),
+            ], required: ["channel"], initialStatus: "Reading Slack…",
+            executionStatus: "Reading Slack…"
         ),
     ]
 

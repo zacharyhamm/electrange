@@ -132,9 +132,14 @@ nonisolated struct CalendarPreparedRequest: Sendable {
 nonisolated struct CalendarEventDetails: Equatable, Sendable {
     nonisolated struct Attendee: Equatable, Sendable {
         let name: String?
-        let email: String
+        let email: String?
         let responseStatus: String?
         let isSelf: Bool
+    }
+
+    nonisolated struct Attachment: Equatable, Sendable {
+        let title: String?
+        let url: URL?
     }
 
     let id: String
@@ -149,6 +154,9 @@ nonisolated struct CalendarEventDetails: Equatable, Sendable {
     let calendarURL: URL?
     let hangoutURL: URL?
     let conferenceURLs: [URL]
+    var organizer: Attendee? = nil
+    var attachments: [Attachment] = []
+    var conferenceCode: String? = nil
 
     var isEligibleForReminder: Bool {
         !isAllDay
@@ -366,7 +374,7 @@ final class CalendarToolService: CalendarToolExecuting, CalendarEventProviding {
     }
 
     nonisolated private static func eventValue(_ event: CalendarEvent) -> ChatToolValue {
-        .object([
+        var value: [String: ChatToolValue] = [
             "eventID": .string(event.id),
             "summary": .string(event.summary ?? "(No title)"),
             "start": .string(event.start?.value ?? ""),
@@ -375,7 +383,59 @@ final class CalendarToolService: CalendarToolExecuting, CalendarEventProviding {
             "location": .string(event.location ?? ""),
             "status": .string(event.status ?? ""),
             "url": .string(event.htmlLink ?? ""),
-        ])
+            "hangoutLink": .string(event.hangoutLink ?? ""),
+        ]
+        if let conferenceData = event.conferenceData {
+            value["conference"] = .object([
+                "solutionName": .string(conferenceData.conferenceSolution?.name ?? ""),
+                "solutionType": .string(conferenceData.conferenceSolution?.key?.type ?? ""),
+                "notes": .string(conferenceData.notes ?? ""),
+                "entryPoints": .array((conferenceData.entryPoints ?? []).map { entryPoint in
+                    .object([
+                        "type": .string(entryPoint.entryPointType ?? ""),
+                        "uri": .string(entryPoint.uri ?? ""),
+                        "label": .string(entryPoint.label ?? ""),
+                        "meetingCode": .string(entryPoint.meetingCode ?? ""),
+                        "accessCode": .string(entryPoint.accessCode ?? ""),
+                        "passcode": .string(entryPoint.passcode ?? ""),
+                        "password": .string(entryPoint.password ?? ""),
+                        "pin": .string(entryPoint.pin ?? ""),
+                    ])
+                }),
+            ])
+        }
+        if let attachments = event.attachments, !attachments.isEmpty {
+            value["attachments"] = .array(attachments.map { attachment in
+                .object([
+                    "title": .string(attachment.title ?? ""),
+                    "fileURL": .string(attachment.fileUrl ?? ""),
+                    "mimeType": .string(attachment.mimeType ?? ""),
+                ])
+            })
+        }
+        if let organizer = event.organizer {
+            value["organizer"] = .object([
+                "name": .string(organizer.displayName ?? ""),
+                "email": .string(organizer.email ?? ""),
+            ])
+        }
+        if let attendees = event.attendees, !attendees.isEmpty {
+            // ponytail: hard cap keeps huge rosters out of the model prompt; split a
+            // detail-level serializer if full rosters are ever needed.
+            let cap = 25
+            value["attendees"] = .array(attendees.prefix(cap).map { attendee in
+                .object([
+                    "name": .string(attendee.displayName ?? ""),
+                    "email": .string(attendee.email ?? ""),
+                    "responseStatus": .string(attendee.responseStatus ?? ""),
+                    "self": .bool(attendee.selfAttendee ?? false),
+                ])
+            })
+            if attendees.count > cap {
+                value["attendeesOmitted"] = .number(Double(attendees.count - cap))
+            }
+        }
+        return .object(value)
     }
 
     nonisolated private static func eventDetails(_ event: CalendarEvent) -> CalendarEventDetails {
@@ -400,7 +460,16 @@ final class CalendarToolService: CalendarToolExecuting, CalendarEventProviding {
             hangoutURL: event.hangoutLink.flatMap(URL.init(string:)),
             conferenceURLs: (event.conferenceData?.entryPoints ?? [])
                 .filter { $0.entryPointType == "video" }
-                .compactMap { URL(string: $0.uri) }
+                .compactMap { $0.uri.flatMap(URL.init(string:)) },
+            organizer: event.organizer.map {
+                .init(name: $0.displayName, email: $0.email, responseStatus: nil, isSelf: false)
+            },
+            attachments: (event.attachments ?? []).map {
+                .init(title: $0.title, url: $0.fileUrl.flatMap(URL.init(string:)))
+            },
+            conferenceCode: (event.conferenceData?.entryPoints ?? [])
+                .compactMap { $0.meetingCode ?? $0.passcode ?? $0.password ?? $0.pin }
+                .first
         )
     }
 
@@ -438,11 +507,13 @@ nonisolated private struct CalendarEvent: Decodable {
     let start: EventTime?
     let end: EventTime?
     let attendees: [Attendee]?
+    let organizer: Organizer?
+    let attachments: [Attachment]?
     let conferenceData: ConferenceData?
 
     struct Attendee: Decodable {
         let displayName: String?
-        let email: String
+        let email: String?
         let responseStatus: String?
         let selfAttendee: Bool?
 
@@ -454,11 +525,39 @@ nonisolated private struct CalendarEvent: Decodable {
 
     struct ConferenceData: Decodable {
         let entryPoints: [EntryPoint]?
+        let conferenceSolution: ConferenceSolution?
+        let notes: String?
+
+        struct ConferenceSolution: Decodable {
+            let key: Key?
+            let name: String?
+
+            struct Key: Decodable {
+                let type: String?
+            }
+        }
     }
 
     struct EntryPoint: Decodable {
         let entryPointType: String?
-        let uri: String
+        let uri: String?
+        let label: String?
+        let meetingCode: String?
+        let accessCode: String?
+        let passcode: String?
+        let password: String?
+        let pin: String?
+    }
+
+    struct Organizer: Decodable {
+        let displayName: String?
+        let email: String?
+    }
+
+    struct Attachment: Decodable {
+        let title: String?
+        let fileUrl: String?
+        let mimeType: String?
     }
 }
 

@@ -174,6 +174,7 @@ extension CalendarEventDetails {
     var reminderLinks: [URL] {
         var links = conferenceURLs
         if let hangoutURL { links.append(hangoutURL) }
+        links += attachments.compactMap(\.url)
         for text in [location, description].compactMap({ $0 }) {
             guard let detector = try? NSDataDetector(
                 types: NSTextCheckingResult.CheckingType.link.rawValue
@@ -214,15 +215,32 @@ extension CalendarEventDetails {
         if let end { lines.append("Ends: \(formatter.string(from: end))") }
         if let location, !location.isEmpty { lines.append("Location: \(location)") }
         if let description, !description.isEmpty { lines.append("Description: \(description)") }
+        if let organizer {
+            lines.append("Organizer: " + Self.identity(name: organizer.name, email: organizer.email))
+        }
         if !attendees.isEmpty {
             lines.append("Attendees: " + attendees.map { attendee in
-                let identity = attendee.name.map { "\($0) <\(attendee.email)>" } ?? attendee.email
+                let identity = Self.identity(name: attendee.name, email: attendee.email)
                 return attendee.responseStatus.map { "\(identity) (\($0))" } ?? identity
             }.joined(separator: ", "))
+        }
+        if let conferenceCode, !conferenceCode.isEmpty { lines.append("Meeting code: \(conferenceCode)") }
+        if !attachments.isEmpty {
+            lines.append("Attachments: " + attachments.compactMap { $0.title ?? $0.url?.absoluteString }
+                .joined(separator: ", "))
         }
         if !reminderLinks.isEmpty {
             lines.append("Links:\n" + reminderLinks.map { "- \($0.absoluteString)" }.joined(separator: "\n"))
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func identity(name: String?, email: String?) -> String {
+        switch (name, email) {
+        case let (name?, email?): return "\(name) <\(email)>"
+        case let (name?, nil): return name
+        case let (nil, email?): return email
+        default: return "(unknown)"
+        }
     }
 }
