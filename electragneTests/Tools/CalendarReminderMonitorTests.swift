@@ -131,6 +131,17 @@ struct CalendarReminderMonitorTests {
         #expect(details.reminderPrompt.contains("https://example.com/doc"))
     }
 
+    @Test func joinURLRejectsLookalikeAndInsecureHosts() {
+        func details(location: String) -> CalendarEventDetails {
+            event(start: Date(timeIntervalSince1970: 1_768_003_600), location: location)
+        }
+        #expect(details(location: "https://zoom.evil.com/x").joinURL == nil)
+        #expect(details(location: "https://notzoom.us/x").joinURL == nil)
+        #expect(details(location: "http://acme.zoom.us/j/123").joinURL == nil)
+        #expect(details(location: "https://us02web.zoom.us/j/123").joinURL != nil)
+        #expect(details(location: "https://meet.google.com/abc-defg-hij").joinURL != nil)
+    }
+
     @Test func eligibilityRejectsDeclinedCancelledAndAllDayEvents() {
         let start = Date(timeIntervalSince1970: 1_768_003_600)
         let declined = CalendarEventDetails.Attendee(

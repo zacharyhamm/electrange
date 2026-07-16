@@ -140,9 +140,9 @@ final class CalendarReminderMonitor {
                 return
             }
             guard !hasFired(fresh) else { return }
+            onReminder(fresh)
             fired.insert(occurrenceKey(fresh))
             saveFired()
-            onReminder(fresh)
         } catch {
             Log.calendar.error("Calendar reminder validation failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -193,9 +193,12 @@ extension CalendarEventDetails {
 
     var joinURL: URL? {
         conferenceURLs.first ?? hangoutURL ?? reminderLinks.first { url in
+            guard url.scheme?.lowercased() == "https" else { return false }
             let host = url.host?.lowercased() ?? ""
-            return ["meet.google.", "zoom.", "teams.microsoft.", "teams.live.",
-                    "webex.", "whereby.", "chime.aws"].contains { host.contains($0) }
+            return ["meet.google.com", "zoom.us", "teams.microsoft.com", "teams.live.com",
+                    "webex.com", "whereby.com", "chime.aws"].contains { domain in
+                host == domain || host.hasSuffix("." + domain)
+            }
         }
     }
 

@@ -75,7 +75,9 @@ nonisolated enum ReminderToolRequest: Equatable, Sendable {
             guard let completion = ReminderListRequest.Completion(rawValue: rawCompletion) else {
                 throw ReminderRequestError.invalidCompletion(rawCompletion)
             }
-            let limit = max(1, min(Int(toolCall.arguments["limit"]?.numberValue ?? 20), 50))
+            // Clamp on the Double: Int(_:) traps on non-finite or huge values.
+            let rawLimit = toolCall.arguments["limit"]?.numberValue ?? 20
+            let limit = rawLimit.isFinite ? Int(min(max(rawLimit.rounded(), 1), 50)) : 20
             self = .list(ReminderListRequest(
                 query: ReminderRequest.trimmed(toolCall.arguments["query"]?.stringValue),
                 listName: ReminderRequest.trimmed(toolCall.arguments["listName"]?.stringValue),

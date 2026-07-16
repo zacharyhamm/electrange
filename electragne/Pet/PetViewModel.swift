@@ -758,6 +758,7 @@ class PetViewModel {
         state = savedState
         let resumed = behavior(for: savedState)
         currentBehavior = resumed
+        resumed.begin(context)
         applyTimers(resumed.timerNeeds)
         stateBeforePause = nil
         resumeChildWindows()

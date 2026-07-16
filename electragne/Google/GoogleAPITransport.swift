@@ -53,9 +53,12 @@ final class GoogleAPITransport: GoogleAPITransporting {
         query: [URLQueryItem] = [],
         body: Data? = nil
     ) async throws -> Data {
-        guard var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false) else {
+        // The path is used verbatim: literal segments plus IDs already encoded
+        // via pathSegment(_:). appendingPathComponent would re-encode the "%".
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw GoogleAPIError.invalidResponse
         }
+        components.percentEncodedPath = "/" + path
         if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw GoogleAPIError.invalidResponse }
         let token = try await tokens.freshAccessToken(for: accountID)
@@ -74,6 +77,17 @@ final class GoogleAPITransport: GoogleAPITransporting {
             throw GoogleAPIError.api(http.statusCode, message)
         }
         return data
+    }
+
+    /// Percent-encodes a model-supplied ID as a single path segment: "/" is
+    /// encoded so the value cannot introduce extra segments, and the whole
+    /// segments "." / ".." are encoded so they cannot act as dot-segments.
+    nonisolated static func pathSegment(_ value: String) -> String {
+        guard value != ".", value != ".." else {
+            return value.replacingOccurrences(of: ".", with: "%2E")
+        }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
     }
 
     nonisolated private static func googleErrorMessage(_ data: Data) -> String? {

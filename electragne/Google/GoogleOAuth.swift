@@ -1,6 +1,7 @@
 import AppAuth
 import AppKit
 import Foundation
+import os
 import Security
 
 nonisolated struct GoogleAccount: Codable, Equatable, Identifiable, Sendable {
@@ -218,14 +219,18 @@ final class GoogleOAuthService: GoogleTokenProviding {
 
     func disconnect(accountID: String) async throws {
         _ = try resolveAccount(id: accountID)
-        let token = try await freshAccessToken(for: accountID)
-        var request = URLRequest(url: Self.revocationEndpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = "token=\(Self.formEncode(token))".data(using: .utf8)
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw GoogleOAuthError.badStatus((response as? HTTPURLResponse)?.statusCode ?? 0)
+
+        // Best-effort revocation: an expired/already-revoked token or a
+        // network failure must not leave the account stuck locally.
+        do {
+            let token = try await freshAccessToken(for: accountID)
+            var request = URLRequest(url: Self.revocationEndpoint)
+            request.httpMethod = "POST"
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            request.httpBody = "token=\(Self.formEncode(token))".data(using: .utf8)
+            _ = try await session.data(for: request)
+        } catch {
+            Log.lifecycle.error("Google token revocation failed; removing account anyway: \(error.localizedDescription, privacy: .public)")
         }
 
         try keychain.delete(accountID: accountID)

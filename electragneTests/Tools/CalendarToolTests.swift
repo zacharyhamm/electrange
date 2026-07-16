@@ -85,7 +85,7 @@ struct CalendarToolServiceTests {
         )
         let listedEvents = await service.execute(try await service.prepare(events))
         #expect(listedEvents.response["events"]?.arrayValue?.count == 1)
-        #expect(transport.requests.last?.path == "calendar/v3/calendars/work@example.com/events")
+        #expect(transport.requests.last?.path == "calendar/v3/calendars/work%40example.com/events")
         #expect(transport.requests.last?.query["q"] == "planning")
         #expect(transport.requests.last?.query["maxResults"] == "5")
         #expect(transport.requests.last?.query["timeMin"] == "2026-08-01T09:00:00-05:00")
@@ -160,7 +160,7 @@ private final class CalendarMockTransport: GoogleAPITransporting {
             return Data(#"{"items":[{"id":"primary@example.com","summary":"My Calendar","primary":true,"accessRole":"owner"}]}"#.utf8)
         case ("POST", "calendar/v3/calendars/primary/events"):
             return Data(#"{"id":"event-1","summary":"Lunch","status":"confirmed","htmlLink":"https://calendar.google.com/event","start":{"dateTime":"2026-07-16T12:00:00-05:00"},"end":{"dateTime":"2026-07-16T13:00:00-05:00"}}"#.utf8)
-        case ("GET", "calendar/v3/calendars/work@example.com/events"):
+        case ("GET", "calendar/v3/calendars/work%40example.com/events"):
             return Data(#"{"items":[{"id":"event-2","summary":"Planning","status":"confirmed","start":{"dateTime":"2026-08-01T09:00:00-05:00"},"end":{"dateTime":"2026-08-01T10:00:00-05:00"}}]}"#.utf8)
         case ("GET", "calendar/v3/calendars/primary/events"):
             return Data(#"{"items":[{"id":"event-3","summary":"Standup","status":"confirmed","attendees":[{"email":"me@example.com","self":true,"responseStatus":"accepted"}],"conferenceData":{"entryPoints":[{"entryPointType":"video","uri":"https://meet.google.com/abc-defg-hij"}]},"start":{"dateTime":"2026-01-09T09:00:00Z"},"end":{"dateTime":"2026-01-09T09:30:00Z"}}]}"#.utf8)

@@ -97,11 +97,7 @@ final class ChatBubbleWindowController {
         guard panel != nil else { return }
         let callback = notify ? onDismiss : nil
 
-        resolveToolConfirmation(approved: false)
-        pendingCalendarEvents.removeAll()
-        streamTask?.cancel()
-        streamTask = nil
-        activeStreamID = nil
+        teardownStream()
         removeEventMonitors()
         removeWindowObservers()
         panel?.orderOut(nil)
@@ -271,6 +267,29 @@ final class ChatBubbleWindowController {
         confirmationBroker.resolve(approved: approved)
     }
 
+    /// Cancels any in-flight stream and does the exchange bookkeeping its
+    /// task would have done, synchronously — clearing `activeStreamID` here
+    /// makes the cancelled task's own cleanup block bail out, so it must
+    /// happen now or the unanswered user turn stays in the transcript.
+    private func teardownStream() {
+        resolveToolConfirmation(approved: false)
+        pendingCalendarEvents.removeAll()
+        streamTask?.cancel()
+        if activeStreamID != nil {
+            if model.entries.last?.role == .assistant, model.entries.last?.text.isEmpty == true {
+                // Nothing streamed; drop the question so a retry doesn't
+                // duplicate it, and the empty answer placeholder.
+                model.entries.removeLast()
+                if history.last?.role == "user" { history.removeLast() }
+            } else if let partial = model.entries.last, partial.role == .assistant {
+                history.append(ChatMessage(role: "assistant", content: partial.text))
+                persistCurrentChat()
+            }
+        }
+        streamTask = nil
+        activeStreamID = nil
+    }
+
     private func persistCurrentChat() {
         if currentChat.title.isEmpty,
            let firstUserTurn = history.first(where: { $0.role == "user" }) {
@@ -287,11 +306,7 @@ final class ChatBubbleWindowController {
     }
 
     private func startNewChat() {
-        resolveToolConfirmation(approved: false)
-        pendingCalendarEvents.removeAll()
-        streamTask?.cancel()
-        streamTask = nil
-        activeStreamID = nil
+        teardownStream()
         chatStore.save(currentChat)
         currentChat = StoredChat()
         model.text = ""
@@ -302,11 +317,7 @@ final class ChatBubbleWindowController {
 
     private func switchToChat(id: UUID) {
         guard id != currentChat.id, let chat = chatStore.load(id: id) else { return }
-        resolveToolConfirmation(approved: false)
-        pendingCalendarEvents.removeAll()
-        streamTask?.cancel()
-        streamTask = nil
-        activeStreamID = nil
+        teardownStream()
         chatStore.save(currentChat)
         currentChat = chat
         model.phase = .idle

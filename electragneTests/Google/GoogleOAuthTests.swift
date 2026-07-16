@@ -26,6 +26,14 @@ struct GoogleOAuthTests {
         }
     }
 
+    @Test func pathSegmentNeutralizesSeparatorsAndDotSegments() {
+        #expect(GoogleAPITransport.pathSegment("work@example.com") == "work%40example.com")
+        #expect(GoogleAPITransport.pathSegment("../../gmail/v1/users/me/messages")
+            == "..%2F..%2Fgmail%2Fv1%2Fusers%2Fme%2Fmessages")
+        #expect(GoogleAPITransport.pathSegment("..") == "%2E%2E")
+        #expect(GoogleAPITransport.pathSegment("a?b#c") == "a%3Fb%23c")
+    }
+
     @Test func requestsLeastPrivilegeGmailScopes() {
         #expect(Set(GoogleOAuthService.gmailScopes) == [
             "openid", "email", "profile",

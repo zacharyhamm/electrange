@@ -27,7 +27,8 @@ nonisolated enum GmailToolRequest: Equatable, Sendable {
             self = .listAccounts
         case "search_gmail":
             let rawLimit = args.number("limit") ?? 10
-            guard rawLimit.isFinite, rawLimit.rounded() == rawLimit, (1...25).contains(Int(rawLimit)) else {
+            guard rawLimit.isFinite, rawLimit.rounded() == rawLimit,
+                  rawLimit >= 1, rawLimit <= 25 else {
                 throw GmailToolError.invalidLimit
             }
             self = .search(query: try required("query"), accountID: accountID, limit: Int(rawLimit))

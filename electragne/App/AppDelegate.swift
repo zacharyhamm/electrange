@@ -7,6 +7,7 @@
 //
 
 import Carbon.HIToolbox
+import os
 import SwiftUI
 import UserNotifications
 
@@ -166,11 +167,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         appModel?.petViewModel.summonToChat()
     }
 
-    private func presentCalendarReminder(_ event: CalendarEventDetails) {
+    private func presentCalendarReminder(_ event: CalendarEventDetails, attempts: Int = 10) {
         summonPetToChat()
         DispatchQueue.main.async { [weak self] in
-            guard let self, let appModel, let window = self.petWindow,
-                  appModel.petViewModel.state.isChatting else { return }
+            guard let self else { return }
+            guard let appModel, let window = self.petWindow,
+                  appModel.petViewModel.state.isChatting else {
+                // summonToChat's state transition (or the pet window itself,
+                // during launch) may not be ready yet; retry rather than
+                // silently dropping the reminder.
+                if attempts > 1 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        self?.presentCalendarReminder(event, attempts: attempts - 1)
+                    }
+                } else {
+                    Log.calendar.error("Dropping calendar reminder for \(event.summary, privacy: .public): chat never became available")
+                }
+                return
+            }
             appModel.chatBubbleController.present(
                 anchoredTo: window,
                 onDismiss: { appModel.petViewModel.dismissChat() }

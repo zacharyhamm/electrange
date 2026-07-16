@@ -319,7 +319,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         }
 
         return AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     var sources: [GeminiSource] = []
                     for try await line in lines {
@@ -337,6 +337,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

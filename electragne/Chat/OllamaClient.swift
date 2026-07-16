@@ -253,7 +253,7 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
         }
 
         return AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     for try await line in lines {
                         guard let chunk = Self.decodeChunk(fromLine: line) else { continue }
@@ -266,6 +266,7 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

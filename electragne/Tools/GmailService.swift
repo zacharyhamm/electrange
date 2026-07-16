@@ -196,7 +196,7 @@ final class GmailToolService: GmailToolExecuting {
             }
         }
         let data = try await transport.data(
-            accountID: accountID, method: "GET", path: "gmail/v1/users/me/messages/\(id)",
+            accountID: accountID, method: "GET", path: "gmail/v1/users/me/messages/\(GoogleAPITransport.pathSegment(id))",
             query: query, body: nil
         )
         return try GoogleToolSupport.decoder.decode(GmailMessage.self, from: data)
@@ -204,7 +204,7 @@ final class GmailToolService: GmailToolExecuting {
 
     private func fetchDraft(id: String, accountID: String) async throws -> GmailDraft {
         let data = try await transport.data(
-            accountID: accountID, method: "GET", path: "gmail/v1/users/me/drafts/\(id)",
+            accountID: accountID, method: "GET", path: "gmail/v1/users/me/drafts/\(GoogleAPITransport.pathSegment(id))",
             query: [URLQueryItem(name: "format", value: "full")], body: nil
         )
         return try GoogleToolSupport.decoder.decode(GmailDraft.self, from: data)

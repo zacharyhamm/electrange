@@ -18,7 +18,9 @@ nonisolated enum NoteToolRequest: Equatable, Sendable {
             guard let value = trimmed(key) else { throw NoteToolError.missingArgument(key) }
             return value
         }
-        let limit = max(1, min(Int(toolCall.arguments["limit"]?.numberValue ?? 20), 50))
+        // Clamp on the Double: Int(_:) traps on non-finite or huge values.
+        let rawLimit = toolCall.arguments["limit"]?.numberValue ?? 20
+        let limit = rawLimit.isFinite ? Int(min(max(rawLimit.rounded(), 1), 50)) : 20
         switch toolCall.name {
         case "list_notes": self = .list(folderName: trimmed("folderName"), limit: limit)
         case "search_notes": self = .search(query: try required("query"), folderName: trimmed("folderName"), limit: limit)

@@ -261,7 +261,7 @@ final class CalendarToolService: CalendarToolExecuting, CalendarEventProviding {
         do {
             let data = try await transport.data(
                 accountID: account.id, method: "GET",
-                path: "calendar/v3/calendars/primary/events/\(id)",
+                path: "calendar/v3/calendars/primary/events/\(GoogleAPITransport.pathSegment(id))",
                 query: [], body: nil
             )
             return Self.eventDetails(try GoogleToolSupport.decode(
@@ -328,7 +328,7 @@ final class CalendarToolService: CalendarToolExecuting, CalendarEventProviding {
         if let query { queryItems.append(URLQueryItem(name: "q", value: query)) }
         let data = try await transport.data(
             accountID: account.id, method: "GET",
-            path: "calendar/v3/calendars/\(calendarID)/events",
+            path: "calendar/v3/calendars/\(GoogleAPITransport.pathSegment(calendarID))/events",
             query: queryItems, body: nil
         )
         let response = try GoogleToolSupport.decode(
@@ -351,7 +351,7 @@ final class CalendarToolService: CalendarToolExecuting, CalendarEventProviding {
         )
         let data = try await transport.data(
             accountID: account.id, method: "POST",
-            path: "calendar/v3/calendars/\(calendarID)/events",
+            path: "calendar/v3/calendars/\(GoogleAPITransport.pathSegment(calendarID))/events",
             query: [], body: try GoogleToolSupport.encoder.encode(body)
         )
         let event = try GoogleToolSupport.decode(

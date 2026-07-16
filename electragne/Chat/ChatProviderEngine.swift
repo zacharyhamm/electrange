@@ -68,7 +68,7 @@ struct ChatProviderEngine: ChatClient {
                     content += token
                     onToken(token)
                 case .toolCall(let call):
-                    if !toolCalls.contains(where: { $0.id == call.id && $0.name == call.name }) {
+                    if !toolCalls.contains(call) {
                         toolCalls.append(call)
                     }
                 }
