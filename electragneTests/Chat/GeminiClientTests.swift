@@ -206,6 +206,41 @@ struct GeminiClientTests {
         #expect(functionResponse["id"] as? String == "call-9")
     }
 
+    @Test func listModelsFiltersPaginatesAndStripsPrefix() async throws {
+        let page1 = #"""
+        {"models":[
+            {"name":"models/gemini-3.1-pro","displayName":"Gemini 3.1 Pro","supportedGenerationMethods":["generateContent","countTokens"]},
+            {"name":"models/embedding-001","displayName":"Embedding","supportedGenerationMethods":["embedContent"]}
+        ],"nextPageToken":"page-2"}
+        """#
+        let page2 = #"""
+        {"models":[{"name":"gemini-3.1-flash-lite","supportedGenerationMethods":["generateContent"]}]}
+        """#
+        let transport = StubChatHTTPTransport([
+            .init(data: Data(page1.utf8)),
+            .init(data: Data(page2.utf8)),
+        ])
+
+        let models = try await GeminiClient.listModels(apiKey: "test-key", transport: transport)
+
+        #expect(models == [
+            GeminiClient.GeminiModel(id: "gemini-3.1-pro", displayName: "Gemini 3.1 Pro"),
+            GeminiClient.GeminiModel(id: "gemini-3.1-flash-lite", displayName: "gemini-3.1-flash-lite"),
+        ])
+        #expect(transport.requests.count == 2)
+        #expect(transport.requests[0].value(forHTTPHeaderField: "x-goog-api-key") == "test-key")
+        #expect(transport.requests[1].url?.query?.contains("pageToken=page-2") == true)
+    }
+
+    @Test func modelPreferenceFallsBackToConfigDefault() throws {
+        let defaults = try #require(UserDefaults(suiteName: "gemini-model-test-\(UUID().uuidString)"))
+        #expect(UserPreferences.geminiModel(in: defaults) == ChatConfig.default.geminiModel)
+        defaults.set("  ", forKey: UserPreferences.geminiModelKey)
+        #expect(UserPreferences.geminiModel(in: defaults) == ChatConfig.default.geminiModel)
+        defaults.set("gemini-3.1-pro", forKey: UserPreferences.geminiModelKey)
+        #expect(UserPreferences.geminiModel(in: defaults) == "gemini-3.1-pro")
+    }
+
     @Test func apiKeyComesFromEnvironmentFirstThenFile() throws {
         #expect(
             ChatAPIKeyStore.load(

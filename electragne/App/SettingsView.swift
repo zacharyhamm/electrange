@@ -11,7 +11,10 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage(UserPreferences.preferredNameKey) private var preferredName = ""
     @AppStorage(GoogleOAuthService.clientIDKey) private var googleClientID = ""
+    @AppStorage(UserPreferences.geminiModelKey) private var geminiModel = ChatConfig.default.geminiModel
     @State private var geminiAPIKey = ""
+    @State private var availableGeminiModels: [GeminiClient.GeminiModel] = []
+    @State private var geminiModelError: String?
     @State private var ollamaAPIKey = ""
     @State private var apiKeyMessage: String?
     @State private var apiKeySaveFailed = false
@@ -61,6 +64,22 @@ struct SettingsView: View {
                         .font(.subheadline.weight(.medium))
                     SecureField("Paste your Gemini API key", text: $geminiAPIKey)
                         .textFieldStyle(.roundedBorder)
+
+                    Text("Gemini model")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.top, 3)
+                    Picker("Gemini model", selection: $geminiModel) {
+                        ForEach(geminiModelChoices, id: \.id) { model in
+                            Text(model.displayName).tag(model.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 320)
+                    if let geminiModelError {
+                        Text(geminiModelError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
 
                     Text("Ollama API key")
                         .font(.subheadline.weight(.medium))
@@ -277,6 +296,29 @@ struct SettingsView: View {
             refreshFileSearchScopes()
             refreshGoogleAccounts()
             googleClientSecret = GoogleOAuthService.shared.clientSecret
+            refreshGeminiModels()
+        }
+    }
+
+    /// Fetched models, with the stored selection always present so the picker
+    /// never shows an empty selection before (or without) a successful fetch.
+    private var geminiModelChoices: [GeminiClient.GeminiModel] {
+        if availableGeminiModels.contains(where: { $0.id == geminiModel }) {
+            return availableGeminiModels
+        }
+        return [GeminiClient.GeminiModel(id: geminiModel, displayName: geminiModel)]
+            + availableGeminiModels
+    }
+
+    private func refreshGeminiModels() {
+        guard let key = ChatAPIKeyStore.load(for: .gemini) else { return }
+        Task {
+            do {
+                availableGeminiModels = try await GeminiClient.listModels(apiKey: key)
+                geminiModelError = nil
+            } catch {
+                geminiModelError = "Could not load the model list: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -288,6 +330,7 @@ struct SettingsView: View {
             ollamaAPIKey = ChatAPIKeyStore.key(for: .ollama) ?? ""
             apiKeySaveFailed = false
             apiKeyMessage = "Saved in macOS Keychain. Clear a field and save to remove its key."
+            refreshGeminiModels()
         } catch {
             apiKeySaveFailed = true
             apiKeyMessage = error.localizedDescription

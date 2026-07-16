@@ -37,6 +37,15 @@ enum UserPreferences {
         trimmed(defaults.string(forKey: dobbsWorkspaceKey))
     }
 
+    // MARK: Gemini model (picked in Settings)
+
+    nonisolated static let geminiModelKey = "geminiModel"
+
+    /// The Gemini model chosen in Settings, or the ChatConfig default.
+    nonisolated static func geminiModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: geminiModelKey)) ?? ChatConfig.default.geminiModel
+    }
+
     nonisolated private static func trimmed(_ raw: String?) -> String? {
         let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
         return value?.isEmpty == false ? value : nil

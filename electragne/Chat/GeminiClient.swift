@@ -45,11 +45,13 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
     nonisolated static let maxToolRounds = ChatConfig.default.maxToolRounds
 
     var baseURL: URL
-    var model: String
+    let modelOverride: String?
     let transport: any ChatHTTPTransport
     let config: ChatConfig
     let apiKey: @Sendable () -> String?
     var userName: String? { UserPreferences.resolvedUserName() }
+    /// Resolved per request so a Settings change applies without restart.
+    var model: String { modelOverride ?? UserPreferences.geminiModel() }
 
     init(
         baseURL: URL = defaultBaseURL,
@@ -59,7 +61,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         apiKey: @escaping @Sendable () -> String? = { ChatAPIKeyStore.load(for: .gemini) }
     ) {
         self.baseURL = baseURL
-        self.model = model ?? config.geminiModel
+        self.modelOverride = model
         self.transport = transport
         self.config = config
         self.apiKey = apiKey
@@ -339,6 +341,63 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    /// One chat-capable model from the ListModels endpoint.
+    nonisolated struct GeminiModel: Equatable, Sendable {
+        let id: String
+        let displayName: String
+    }
+
+    private nonisolated struct ModelsPage: Decodable {
+        struct Model: Decodable {
+            let name: String
+            let displayName: String?
+            let supportedGenerationMethods: [String]?
+        }
+
+        let models: [Model]?
+        let nextPageToken: String?
+    }
+
+    /// Fetches every model the key can use for generateContent, following
+    /// pagination. Model ids come back without the "models/" prefix.
+    static func listModels(
+        baseURL: URL = defaultBaseURL,
+        apiKey: String,
+        transport: any ChatHTTPTransport = URLSessionTransport(session: .shared)
+    ) async throws -> [GeminiModel] {
+        var models: [GeminiModel] = []
+        var pageToken: String?
+        repeat {
+            let url = baseURL.appendingPathComponent("v1beta/models")
+            guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+                throw ChatProviderError.invalidModelName
+            }
+            if let pageToken {
+                components.queryItems = [URLQueryItem(name: "pageToken", value: pageToken)]
+            }
+            guard let requestURL = components.url else { throw ChatProviderError.invalidModelName }
+            var request = URLRequest(url: requestURL)
+            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+
+            let (data, response) = try await transport.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                throw http.statusCode == 429
+                    ? ChatProviderError.quotaExceeded
+                    : ChatProviderError.badStatus(http.statusCode)
+            }
+            let page = try JSONDecoder().decode(ModelsPage.self, from: data)
+            for model in page.models ?? []
+            where model.supportedGenerationMethods?.contains("generateContent") == true {
+                let id = model.name.hasPrefix("models/")
+                    ? String(model.name.dropFirst("models/".count))
+                    : model.name
+                models.append(GeminiModel(id: id, displayName: model.displayName ?? id))
+            }
+            pageToken = page.nextPageToken
+        } while pageToken != nil
+        return models
     }
 
     func appendToolResult(
