@@ -119,8 +119,8 @@ final class CalendarToolAdapter: ToolExecuting {
 
 // MARK: - Slack (dobbs)
 
-/// Read-only Slack archive access through a dobbs daemon; never needs a
-/// confirmation.
+/// Slack access through a dobbs daemon. Reads run unconfirmed; sending a
+/// message is the one outbound write and always confirms.
 @MainActor
 final class SlackToolAdapter: ToolExecuting {
     private let executor: any SlackToolExecuting
@@ -130,7 +130,7 @@ final class SlackToolAdapter: ToolExecuting {
         let request = try SlackToolRequest(toolCall: call)
         let executor = executor
         return PreparedToolAction(
-            confirmation: nil,
+            confirmation: executor.confirmationDetails(for: request),
             execute: { await executor.execute(request) }
         )
     }

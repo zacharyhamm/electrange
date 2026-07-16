@@ -297,6 +297,43 @@ nonisolated enum ChatToolRegistry {
             ], required: ["channel"], initialStatus: "Reading Slack…",
             executionStatus: "Reading Slack…"
         ),
+        definition(
+            "get_slack_thread", family: .slack,
+            description: "Read one archived Slack thread (root message and replies). Use the channel ID and thread ts from a Slack read tool's message ids.",
+            properties: [
+                "channelID": property(.string, "Required channel ID from a message id."),
+                "threadTS": property(.string, "Required thread ts from a message id."),
+            ], required: ["channelID", "threadTS"], initialStatus: "Reading Slack…",
+            executionStatus: "Reading Slack…"
+        ),
+        definition(
+            "list_slack_users", family: .slack,
+            description: "List Slack workspace members with their user IDs and names. Use to resolve who a user ID is or find someone's ID.",
+            properties: [
+                "query": property(.string, "Optional case-insensitive match on username, real name, or display name."),
+            ], initialStatus: "Reading Slack users…",
+            executionStatus: "Reading Slack users…"
+        ),
+        definition(
+            "get_slack_permalink", family: .slack,
+            description: "Get the browser permalink for one Slack message, identified by the channel ID and ts from a Slack read tool's message ids.",
+            properties: [
+                "channelID": property(.string, "Required channel ID from a message id."),
+                "ts": property(.string, "Required message ts from a message id."),
+            ], required: ["channelID", "ts"], initialStatus: "Reading Slack…",
+            executionStatus: "Reading Slack…"
+        ),
+        definition(
+            "send_slack_message", family: .slack,
+            description: "Send a Slack message after the owner confirms it. Use a channel ID from a Slack read tool; set threadTS to reply in a thread.",
+            properties: [
+                "channel": property(.string, "Required channel ID from a Slack read tool's message ids."),
+                "channelName": property(.string, "Optional human-readable channel name from the transcript, shown to the owner in the confirmation."),
+                "text": property(.string, "Required message text."),
+                "threadTS": property(.string, "Optional thread ts from a message id to reply in that thread."),
+            ], required: ["channel", "text"], initialStatus: "Confirm Slack message…",
+            executionStatus: "Sending Slack message…"
+        ),
     ]
 
     static func definitions(for provider: ChatToolProvider) -> [ChatToolDefinition] {

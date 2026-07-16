@@ -15,6 +15,12 @@ nonisolated enum SlackToolRequest: Equatable, Sendable {
     /// the owner's time zone: from = start of that day, to = start of the day
     /// AFTER the given (inclusive) end date. nil leaves the bound open.
     case channelMessages(channel: String, from: Date?, to: Date?)
+    case thread(channelID: String, threadTS: String)
+    case users(query: String?)
+    case permalink(channelID: String, ts: String)
+    /// channelName is model-supplied display context for the confirmation
+    /// card; the channel ID is what's actually sent.
+    case post(channel: String, channelName: String?, text: String, threadTS: String?)
 
     init(toolCall: ChatToolCall, calendar: Calendar = .current) throws {
         let args = ToolCallArguments(toolCall)
@@ -36,6 +42,19 @@ nonisolated enum SlackToolRequest: Equatable, Sendable {
                 calendar.date(byAdding: .day, value: 1, to: try Self.day($0, calendar: calendar))!
             }
             self = .channelMessages(channel: try required("channel"), from: from, to: to)
+        case "get_slack_thread":
+            self = .thread(channelID: try required("channelID"), threadTS: try required("threadTS"))
+        case "list_slack_users":
+            self = .users(query: args.string("query"))
+        case "get_slack_permalink":
+            self = .permalink(channelID: try required("channelID"), ts: try required("ts"))
+        case "send_slack_message":
+            self = .post(
+                channel: try required("channel"),
+                channelName: args.string("channelName"),
+                text: try required("text"),
+                threadTS: args.string("threadTS")
+            )
         default:
             throw SlackToolError.unsupportedTool(toolCall.name)
         }
@@ -72,6 +91,7 @@ nonisolated enum SlackToolError: LocalizedError, Equatable {
 
 @MainActor
 protocol SlackToolExecuting {
+    func confirmationDetails(for request: SlackToolRequest) -> ToolConfirmationDetails?
     func execute(_ request: SlackToolRequest) async -> ChatToolResult
 }
 
@@ -85,6 +105,23 @@ final class SlackToolService: SlackToolExecuting {
 
     init(settings: @escaping () -> DobbsSettings? = DobbsSettings.current) {
         self.settings = settings
+    }
+
+    /// Reads run unconfirmed; sending a message is the one outbound write and
+    /// always confirms.
+    func confirmationDetails(for request: SlackToolRequest) -> ToolConfirmationDetails? {
+        guard case .post(let channel, let channelName, let text, let threadTS) = request else {
+            return nil
+        }
+        let channelValue = channelName.map {
+            "\($0.hasPrefix("#") ? $0 : "#\($0)") (\(channel))"
+        } ?? channel
+        var details = [(label: "Channel", value: channelValue)]
+        if let threadTS { details.append(("Thread", threadTS)) }
+        return ToolConfirmationDetails(
+            title: "Send this Slack message?", primaryText: text,
+            details: details, actionLabel: "Send"
+        )
     }
 
     func execute(_ request: SlackToolRequest) async -> ChatToolResult {
@@ -106,6 +143,28 @@ final class SlackToolService: SlackToolExecuting {
                     messages: messages,
                     emptyNote: "No archived Slack messages in that channel and range."
                 )
+            case .thread(let channelID, let threadTS):
+                let messages = try await DobbsClient.conversation(
+                    settings, channelID: channelID, threadTS: threadTS, limit: Self.messageCap
+                )
+                return Self.threadResult(messages)
+            case .users(let query):
+                return Self.usersResult(try await DobbsClient.usersList(settings), query: query)
+            case .permalink(let channelID, let ts):
+                let url = try await DobbsClient.getPermalink(settings, channel: channelID, ts: ts)
+                return ChatToolResult(response: [
+                    "status": .string("ok"),
+                    "url": .string(url),
+                ])
+            case .post(let channel, _, let text, let threadTS):
+                let ts = try await DobbsClient.postMessage(
+                    settings, channel: channel, text: text, threadTS: threadTS
+                )
+                return ChatToolResult(response: [
+                    "status": .string("ok"),
+                    "message": .string("Sent."),
+                    "ts": .string(ts),
+                ])
             }
         } catch {
             return .error(error.localizedDescription)
@@ -118,21 +177,40 @@ final class SlackToolService: SlackToolExecuting {
 
     private static func result(messages: [DobbsMessage], emptyNote: String) -> ChatToolResult {
         guard !messages.isEmpty else { return .make(status: "ok", message: emptyNote) }
-        let shown = messages.suffix(messageCap)
+        let shown = Array(messages.suffix(messageCap))
+        let note = shown.count < messages.count
+            ? "Showing only the newest \(shown.count) of \(messages.count) messages. Narrow the date range for the rest."
+            : nil
+        return transcriptResult(shown, note: note)
+    }
+
+    /// A whole thread; the daemon ignores limit for thread queries, so trim
+    /// here — keeping the root, which suffix-trimming would drop first.
+    static func threadResult(_ messages: [DobbsMessage]) -> ChatToolResult {
+        guard !messages.isEmpty else {
+            return .make(status: "ok", message: "No archived messages in that thread.")
+        }
+        guard messages.count > messageCap else { return transcriptResult(messages, note: nil) }
+        let shown = [messages[0]] + messages.suffix(messageCap - 1)
+        return transcriptResult(
+            shown,
+            note: "Showing the thread root and the newest \(messageCap - 1) of \(messages.count - 1) replies."
+        )
+    }
+
+    private static func transcriptResult(_ shown: [DobbsMessage], note: String?) -> ChatToolResult {
         var response: [String: ChatToolValue] = [
             "status": .string("ok"),
             "messageCount": .number(Double(shown.count)),
-            "messages": .string(transcript(Array(shown))),
+            "messages": .string(transcript(shown)),
         ]
-        if shown.count < messages.count {
-            response["note"] = .string(
-                "Showing only the newest \(shown.count) of \(messages.count) messages. Narrow the date range for the rest."
-            )
-        }
+        if let note { response["note"] = .string(note) }
         return ChatToolResult(response: response)
     }
 
-    /// One "[timestamp] #channel user: text" line per message.
+    /// One "[timestamp] #channel user: text (id …)" line per message. The id
+    /// suffix carries what the thread/permalink/reply tools need: channel ID,
+    /// message ts, and the thread root ts when the message is threaded.
     static func transcript(_ messages: [DobbsMessage]) -> String {
         messages.map { message in
             var parts: [String] = []
@@ -143,13 +221,55 @@ final class SlackToolService: SlackToolExecuting {
                 parts.append("#\(channel)")
             }
             let sender = message.userName ?? message.userID ?? "unknown"
-            var line = "\(parts.joined(separator: " ")) \(sender):"
-            if let threadTS = message.threadTS, !threadTS.isEmpty, threadTS != message.ts {
-                line += " (thread reply)"
-            }
-            return "\(line) \(message.text ?? "")"
+            var line = "\(parts.joined(separator: " ")) \(sender): \(message.text ?? "")"
                 .trimmingCharacters(in: .whitespaces)
+            var ids = "id \(message.channelID ?? "?")/\(message.ts)"
+            if let threadTS = message.threadTS, !threadTS.isEmpty {
+                ids += ", thread \(threadTS)"
+            }
+            line += " (\(ids))"
+            return line
         }.joined(separator: "\n")
+    }
+
+    /// The workspace directory as structured entries, active humans and bots
+    /// only, optionally filtered by a case-insensitive name query.
+    static func usersResult(_ users: [DobbsUser], query: String?) -> ChatToolResult {
+        var matched = users.filter { $0.deleted != true }
+        let query = query?.trimmingCharacters(in: .whitespaces)
+        if let query, !query.isEmpty {
+            matched = matched.filter { user in
+                [user.id, user.name, user.realName, user.displayName].contains {
+                    $0?.localizedCaseInsensitiveContains(query) == true
+                }
+            }
+        }
+        guard !matched.isEmpty else {
+            return .make(status: "ok", message: "No Slack users matched.")
+        }
+        // ponytail: flat cap; add paging if a workspace ever outgrows it
+        let shown = matched.prefix(100)
+        var response: [String: ChatToolValue] = [
+            "status": .string("ok"),
+            "users": .array(shown.map { user in
+                var entry: [String: ChatToolValue] = [
+                    "userID": .string(user.id),
+                    "name": .string([user.displayName, user.name, user.realName]
+                        .compactMap { $0 }.first { !$0.isEmpty } ?? ""),
+                ]
+                if let realName = user.realName, !realName.isEmpty {
+                    entry["realName"] = .string(realName)
+                }
+                if user.isBot == true { entry["isBot"] = .bool(true) }
+                return .object(entry)
+            }),
+        ]
+        if shown.count < matched.count {
+            response["note"] = .string(
+                "Showing only \(shown.count) of \(matched.count) users. Pass a query to narrow the list."
+            )
+        }
+        return ChatToolResult(response: response)
     }
 
     nonisolated private static let timestampFormatter: DateFormatter = {

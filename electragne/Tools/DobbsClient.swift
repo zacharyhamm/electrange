@@ -86,6 +86,25 @@ nonisolated struct DobbsMessage: Decodable, Equatable, Sendable {
     }
 }
 
+/// One workspace-directory entry from the daemon's users_list RPC.
+nonisolated struct DobbsUser: Decodable, Equatable, Sendable {
+    var id: String
+    var name: String? = nil
+    var realName: String? = nil
+    var displayName: String? = nil
+    var deleted: Bool? = nil
+    var isBot: Bool? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case realName = "real_name"
+        case displayName = "display_name"
+        case deleted
+        case isBot = "is_bot"
+    }
+}
+
 nonisolated enum DobbsClient {
     static let protocolVersion = 2
     private static let callTimeout: Duration = .seconds(20)
@@ -121,6 +140,86 @@ nonisolated enum DobbsClient {
             params: Params(channel: channel, from: from, to: to)
         )
         return result.messages ?? []
+    }
+
+    /// A whole thread (root + replies) from the archive, oldest-first.
+    static func conversation(
+        _ settings: DobbsSettings, channelID: String, threadTS: String, limit: Int
+    ) async throws -> [DobbsMessage] {
+        struct Params: Encodable {
+            let channelID: String
+            let threadTS: String
+            let limit: Int
+
+            enum CodingKeys: String, CodingKey {
+                case channelID = "channel_id"
+                case threadTS = "thread_ts"
+                case limit
+            }
+        }
+        struct Result: Decodable {
+            let messages: [DobbsMessage]?
+        }
+        let result: Result = try await call(
+            settings, method: "conversation",
+            params: Params(channelID: channelID, threadTS: threadTS, limit: limit)
+        )
+        return result.messages ?? []
+    }
+
+    /// The workspace directory.
+    static func usersList(_ settings: DobbsSettings) async throws -> [DobbsUser] {
+        struct Params: Encodable {}
+        struct Result: Decodable {
+            let users: [DobbsUser]?
+        }
+        let result: Result = try await call(
+            settings, method: "users_list", params: Params(), needsHistory: false
+        )
+        return result.users ?? []
+    }
+
+    /// Posts text to a channel (into a thread when threadTS is set) through the
+    /// daemon and returns the new message's ts. channel is a channel ID.
+    static func postMessage(
+        _ settings: DobbsSettings, channel: String, text: String, threadTS: String?
+    ) async throws -> String {
+        struct Params: Encodable {
+            let channel: String
+            let text: String
+            let threadTS: String?
+
+            enum CodingKeys: String, CodingKey {
+                case channel
+                case text
+                case threadTS = "thread_ts"
+            }
+        }
+        struct Result: Decodable {
+            let ts: String?
+        }
+        let result: Result = try await call(
+            settings, method: "post_message",
+            params: Params(channel: channel, text: text, threadTS: threadTS),
+            needsHistory: false
+        )
+        return result.ts ?? ""
+    }
+
+    /// A message's browser permalink. channel is a channel ID.
+    static func getPermalink(_ settings: DobbsSettings, channel: String, ts: String) async throws -> String {
+        struct Params: Encodable {
+            let channel: String
+            let ts: String
+        }
+        struct Result: Decodable {
+            let url: String?
+        }
+        let result: Result = try await call(
+            settings, method: "get_permalink", params: Params(channel: channel, ts: ts),
+            needsHistory: false
+        )
+        return result.url ?? ""
     }
 
     // MARK: - One-shot RPC
@@ -159,7 +258,7 @@ nonisolated enum DobbsClient {
     }
 
     private static func call<P: Encodable & Sendable, R: Decodable & Sendable>(
-        _ settings: DobbsSettings, method: String, params: P
+        _ settings: DobbsSettings, method: String, params: P, needsHistory: Bool = true
     ) async throws -> R {
         try await withTimeout(callTimeout) {
             let connection = try await DobbsConnection.connect(endpoint: settings.endpoint)
@@ -168,7 +267,7 @@ nonisolated enum DobbsClient {
             try await connection.sendLine(JSONEncoder().encode(
                 ClientHello(protocol: protocolVersion, token: settings.token)
             ))
-            try await readHello(connection, settings: settings)
+            try await readHello(connection, settings: settings, needsHistory: needsHistory)
 
             try await connection.sendLine(JSONEncoder().encode(
                 Request(id: 1, method: method, params: params)
@@ -184,7 +283,9 @@ nonisolated enum DobbsClient {
         }
     }
 
-    private static func readHello(_ connection: DobbsConnection, settings: DobbsSettings) async throws {
+    private static func readHello(
+        _ connection: DobbsConnection, settings: DobbsSettings, needsHistory: Bool
+    ) async throws {
         let line = try await connection.readLine()
         let head = try JSONDecoder().decode(FrameHead.self, from: line)
         if let error = head.error { throw DobbsError.daemon(error) }
@@ -201,7 +302,10 @@ nonisolated enum DobbsClient {
                 throw DobbsError.wrongWorkspace(expected: expected, actual: actual)
             }
         }
-        guard hello.historyAvailable == true else { throw DobbsError.historyUnavailable }
+        // The live-API methods (post/users/permalink) work without an archive.
+        if needsHistory {
+            guard hello.historyAvailable == true else { throw DobbsError.historyUnavailable }
+        }
     }
 
     private static func withTimeout<T: Sendable>(
