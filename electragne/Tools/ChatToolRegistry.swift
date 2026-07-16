@@ -14,6 +14,7 @@ nonisolated enum ChatToolFamily: Equatable, Sendable {
     case gmail
     case calendar
     case slack
+    case linear
 }
 
 nonisolated enum ChatToolParameterType: String, Equatable, Sendable {
@@ -333,6 +334,46 @@ nonisolated enum ChatToolRegistry {
                 "threadTS": property(.string, "Optional thread ts from a message id to reply in that thread."),
             ], required: ["channel", "text"], initialStatus: "Confirm Slack message…",
             executionStatus: "Sending Slack message…"
+        ),
+        definition(
+            "list_linear_teams", family: .linear,
+            description: "List Linear teams with their IDs, keys, and names. Use this first to obtain a teamID before creating an issue.",
+            initialStatus: "Reading Linear…", executionStatus: "Reading Linear…"
+        ),
+        definition(
+            "search_linear_issues", family: .linear,
+            description: "Full-text search Linear issues by title and description. Returns issue identifiers for get_linear_issue.",
+            properties: [
+                "query": property(.string, "Required search query."),
+                "limit": property(.number, "Optional result limit from 1 to 50."),
+            ], required: ["query"], initialStatus: "Searching Linear…",
+            executionStatus: "Searching Linear…"
+        ),
+        definition(
+            "list_my_linear_issues", family: .linear,
+            description: "List the owner's open Linear issues (assigned to them, not completed or canceled), most recently updated first.",
+            properties: [
+                "limit": property(.number, "Optional result limit from 1 to 50."),
+            ], initialStatus: "Reading Linear…", executionStatus: "Reading Linear…"
+        ),
+        definition(
+            "get_linear_issue", family: .linear,
+            description: "Read one Linear issue in full — description and comments — by its identifier such as ENG-123.",
+            properties: [
+                "issueID": property(.string, "Required issue identifier such as ENG-123, from a Linear read tool."),
+            ], required: ["issueID"], initialStatus: "Reading Linear…",
+            executionStatus: "Reading Linear…"
+        ),
+        definition(
+            "create_linear_issue", family: .linear,
+            description: "Create a Linear issue after the owner confirms it. Use a teamID from list_linear_teams.",
+            properties: [
+                "teamID": property(.string, "Required team ID from list_linear_teams."),
+                "teamName": property(.string, "Optional human-readable team name, shown to the owner in the confirmation."),
+                "title": property(.string, "Required issue title."),
+                "description": property(.string, "Optional issue description in Markdown."),
+            ], required: ["teamID", "title"], initialStatus: "Confirm Linear issue…",
+            executionStatus: "Creating Linear issue…"
         ),
     ]
 

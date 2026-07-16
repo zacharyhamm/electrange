@@ -5,12 +5,14 @@ nonisolated enum ChatAPIProvider: String, CaseIterable, Sendable {
     case gemini
     case ollama
     case dobbs
+    case linear
 
     var environmentKey: String {
         switch self {
         case .gemini: "GEMINI_API_KEY"
         case .ollama: "OLLAMA_API_KEY"
         case .dobbs: "DOBBS_TOKEN"
+        case .linear: "LINEAR_API_KEY"
         }
     }
 
@@ -19,6 +21,7 @@ nonisolated enum ChatAPIProvider: String, CaseIterable, Sendable {
         case .gemini: ".gemini.api.key"
         case .ollama: ".ollama/api_key"
         case .dobbs: ".dobbs/token"
+        case .linear: ".linear.api.key"
         }
     }
 }
@@ -32,22 +35,19 @@ nonisolated enum ChatAPIKeyStoreError: LocalizedError, Equatable {
 }
 
 /// Keychain storage shared by Settings and the chat clients.
+///
+/// All provider keys live in ONE keychain item (a JSON dictionary keyed by
+/// provider), read at most once per launch, so the Keychain authorization
+/// prompt appears once instead of once per provider per access.
 nonisolated enum ChatAPIKeyStore {
     private static let service = "org.impolexg.electragne.chat-api-keys"
+    private static let combinedAccount = "api-keys"
+    private static let cached = CachedKeys()
 
     static func key(for provider: ChatAPIProvider) -> String? {
-        var query = baseQuery(for: provider)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let value = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        let value = allKeys()[provider.rawValue]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
     }
 
     /// Keychain first, then environment for terminal launches, then the
@@ -75,17 +75,59 @@ nonisolated enum ChatAPIKeyStore {
 
     static func setKey(_ rawValue: String, for provider: ChatAPIProvider) throws {
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let query = baseQuery(for: provider)
+        var keys = allKeys()
+        keys[provider.rawValue] = value.isEmpty ? nil : value
+        try writeCombined(keys)
+        cached.set(keys)
+    }
 
-        if value.isEmpty {
-            let status = SecItemDelete(query as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else {
-                throw ChatAPIKeyStoreError.keychain(status)
+    // MARK: - The combined keychain item
+
+    private static func allKeys() -> [String: String] {
+        if let keys = cached.get() { return keys }
+        let keys = readCombined() ?? migrateLegacyItems()
+        cached.set(keys)
+        return keys
+    }
+
+    private static func readCombined() -> [String: String]? {
+        guard let data = readData(account: combinedAccount) else { return nil }
+        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+    }
+
+    /// One-time migration from the old one-item-per-provider layout: reads
+    /// each legacy item (the last multi-prompt launch), rewrites them as the
+    /// combined item, and deletes the legacy items.
+    private static func migrateLegacyItems() -> [String: String] {
+        var keys: [String: String] = [:]
+        for provider in ChatAPIProvider.allCases {
+            guard let data = readData(account: provider.rawValue) else { continue }
+            if let value = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                keys[provider.rawValue] = value
             }
-            return
+            SecItemDelete(baseQuery(account: provider.rawValue) as CFDictionary)
         }
+        try? writeCombined(keys)
+        return keys
+    }
 
-        let data = Data(value.utf8)
+    private static func readData(account: String) -> Data? {
+        var query = baseQuery(account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else {
+            return nil
+        }
+        return item as? Data
+    }
+
+    private static func writeCombined(_ keys: [String: String]) throws {
+        let data = try! JSONEncoder().encode(keys)
+        let query = baseQuery(account: combinedAccount)
         let status = SecItemUpdate(
             query as CFDictionary,
             [kSecValueData: data] as CFDictionary
@@ -103,11 +145,30 @@ nonisolated enum ChatAPIKeyStore {
         }
     }
 
-    private static func baseQuery(for provider: ChatAPIProvider) -> [String: Any] {
+    private static func baseQuery(account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: provider.rawValue,
+            kSecAttrAccount as String: account,
         ]
+    }
+}
+
+/// The in-memory copy of the combined item, so repeated key lookups never
+/// touch the Keychain (each access can prompt on unsigned dev builds).
+nonisolated private final class CachedKeys: @unchecked Sendable {
+    private let lock = NSLock()
+    private var keys: [String: String]?
+
+    func get() -> [String: String]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return keys
+    }
+
+    func set(_ new: [String: String]) {
+        lock.lock()
+        keys = new
+        lock.unlock()
     }
 }

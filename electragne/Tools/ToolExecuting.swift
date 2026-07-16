@@ -136,6 +136,25 @@ final class SlackToolAdapter: ToolExecuting {
     }
 }
 
+// MARK: - Linear
+
+/// Linear access through the linear.app GraphQL API. Reads run unconfirmed;
+/// creating an issue is the one write and always confirms.
+@MainActor
+final class LinearToolAdapter: ToolExecuting {
+    private let executor: any LinearToolExecuting
+    init(_ executor: any LinearToolExecuting) { self.executor = executor }
+
+    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
+        let request = try LinearToolRequest(toolCall: call)
+        let executor = executor
+        return PreparedToolAction(
+            confirmation: executor.confirmationDetails(for: request),
+            execute: { await executor.execute(request) }
+        )
+    }
+}
+
 // MARK: - Web search
 
 /// Runs the hosted ollama.com web search through the shared tool router.

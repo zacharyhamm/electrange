@@ -26,6 +26,9 @@ struct SettingsView: View {
     @State private var dobbsToken = ""
     @State private var dobbsMessage: String?
     @State private var dobbsSaveFailed = false
+    @State private var linearAPIKey = ""
+    @State private var linearMessage: String?
+    @State private var linearSaveFailed = false
     @State private var googleAccounts: [GoogleAccount] = []
     @State private var defaultGoogleAccountID: String?
     @State private var googleError: String?
@@ -189,6 +192,36 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 9) {
                     HStack {
+                        Text("Linear")
+                            .font(.headline)
+                        Spacer()
+                        Button("Save Key", action: saveLinearAPIKey)
+                    }
+                    Text("Lets the pet search, read, and create Linear issues. The API key is stored in macOS Keychain.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("API key")
+                            .font(.subheadline.weight(.medium))
+                        Spacer(minLength: 12)
+                        Link("Create one in Linear", destination: URL(string: "https://linear.app/settings/account/security")!)
+                            .font(.caption)
+                    }
+                    SecureField("Paste your Linear personal API key", text: $linearAPIKey)
+                        .textFieldStyle(.roundedBorder)
+
+                    if let linearMessage {
+                        Text(linearMessage)
+                            .font(.caption)
+                            .foregroundStyle(linearSaveFailed ? .red : .secondary)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack {
                         Text("Google accounts")
                             .font(.headline)
                         Spacer()
@@ -293,6 +326,7 @@ struct SettingsView: View {
             geminiAPIKey = ChatAPIKeyStore.key(for: .gemini) ?? ""
             ollamaAPIKey = ChatAPIKeyStore.key(for: .ollama) ?? ""
             dobbsToken = ChatAPIKeyStore.key(for: .dobbs) ?? ""
+            linearAPIKey = ChatAPIKeyStore.key(for: .linear) ?? ""
             refreshFileSearchScopes()
             refreshGoogleAccounts()
             googleClientSecret = GoogleOAuthService.shared.clientSecret
@@ -346,6 +380,18 @@ struct SettingsView: View {
         } catch {
             dobbsSaveFailed = true
             dobbsMessage = error.localizedDescription
+        }
+    }
+
+    private func saveLinearAPIKey() {
+        do {
+            try ChatAPIKeyStore.setKey(linearAPIKey, for: .linear)
+            linearAPIKey = ChatAPIKeyStore.key(for: .linear) ?? ""
+            linearSaveFailed = false
+            linearMessage = "Saved in macOS Keychain. Clear the field and save to remove the key."
+        } catch {
+            linearSaveFailed = true
+            linearMessage = error.localizedDescription
         }
     }
 

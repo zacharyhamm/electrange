@@ -21,6 +21,7 @@ final class ChatToolRouter {
         gmailExecutor: (any GmailToolExecuting)? = nil,
         calendarExecutor: (any CalendarToolExecuting)? = nil,
         slackExecutor: (any SlackToolExecuting)? = nil,
+        linearExecutor: (any LinearToolExecuting)? = nil,
         webSearchExecutor: (any ToolExecuting)? = nil
     ) {
         executors = [
@@ -31,6 +32,7 @@ final class ChatToolRouter {
             .gmail: GmailToolAdapter(gmailExecutor ?? GmailToolService()),
             .calendar: CalendarToolAdapter(calendarExecutor ?? CalendarToolService()),
             .slack: SlackToolAdapter(slackExecutor ?? SlackToolService()),
+            .linear: LinearToolAdapter(linearExecutor ?? LinearToolService()),
             .webSearch: webSearchExecutor ?? WebSearchExecutor(),
         ]
     }
