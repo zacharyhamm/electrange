@@ -158,7 +158,7 @@ nonisolated enum DobbsClient {
         }
     }
 
-    private static func call<P: Encodable, R: Decodable>(
+    private static func call<P: Encodable & Sendable, R: Decodable & Sendable>(
         _ settings: DobbsSettings, method: String, params: P
     ) async throws -> R {
         try await withTimeout(callTimeout) {
@@ -220,7 +220,7 @@ nonisolated enum DobbsClient {
 }
 
 /// One TCP connection carrying newline-delimited JSON frames, read serially.
-private final class DobbsConnection: @unchecked Sendable {
+nonisolated private final class DobbsConnection: @unchecked Sendable {
     private let connection: NWConnection
     private var buffer = Data() // touched only by the single serial caller
 
@@ -318,7 +318,7 @@ private final class DobbsConnection: @unchecked Sendable {
 
 /// Guards a continuation that competing NWConnection state callbacks might
 /// otherwise resume twice.
-private final class ResumeOnce: @unchecked Sendable {
+nonisolated private final class ResumeOnce: @unchecked Sendable {
     private let lock = NSLock()
     private var done = false
 
