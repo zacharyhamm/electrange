@@ -116,6 +116,29 @@ struct CalendarReminderMonitorTests {
         #expect(delivered == 1)
     }
 
+    @Test func exposesScheduledRemindersAsUpcomingSnapshot() async {
+        let now = Date(timeIntervalSince1970: 1_768_000_000)
+        let upcoming = event(start: now.addingTimeInterval(3_600))
+        let provider = ReminderEventProvider(snapshot: [upcoming], current: upcoming)
+        let monitor = CalendarReminderMonitor(
+            events: provider, scheduler: ReminderScheduler(),
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            now: { now }, calendar: utcCalendar
+        )
+
+        #expect(!monitor.isMonitoring)
+        #expect(monitor.upcomingReminders.isEmpty)
+
+        await monitor.refresh()
+
+        let reminders = monitor.upcomingReminders
+        #expect(reminders.count == 1)
+        #expect(reminders[0].eventID == upcoming.id)
+        #expect(reminders[0].summary == upcoming.summary)
+        #expect(reminders[0].eventStart == upcoming.start)
+        #expect(reminders[0].notifyAt == upcoming.start?.addingTimeInterval(-CalendarReminderMonitor.leadTime))
+    }
+
     @Test func extractsMeetingLinksAndFormatsAttendees() {
         let zoom = URL(string: "https://acme.zoom.us/j/123")!
         let details = event(

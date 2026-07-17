@@ -43,11 +43,10 @@ nonisolated enum ChatAPIKeyStore {
     private static let service = "org.impolexg.electragne.chat-api-keys"
     private static let combinedAccount = "api-keys"
     private static let cached = CachedKeys()
+    private static let lock = NSLock()
 
     static func key(for provider: ChatAPIProvider) -> String? {
-        let value = allKeys()[provider.rawValue]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return value?.isEmpty == false ? value : nil
+        value(forKey: provider.rawValue)
     }
 
     /// Keychain first, then environment for terminal launches, then the
@@ -74,32 +73,62 @@ nonisolated enum ChatAPIKeyStore {
     }
 
     static func setKey(_ rawValue: String, for provider: ChatAPIProvider) throws {
-        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        var keys = allKeys()
-        keys[provider.rawValue] = value.isEmpty ? nil : value
-        try writeCombined(keys)
-        cached.set(keys)
+        try setValue(rawValue, forKey: provider.rawValue)
     }
 
     // MARK: - MCP server tokens (same combined item, keyed by server id)
 
     static func mcpToken(forServer id: UUID) -> String? {
-        let value = allKeys()["mcp:\(id.uuidString)"]?
+        value(forKey: "mcp:\(id.uuidString)")
+    }
+
+    static func setMCPToken(_ rawValue: String, forServer id: UUID) throws {
+        try setValue(rawValue, forKey: "mcp:\(id.uuidString)")
+    }
+
+    /// JSON-encoded OAuth token state (access + refresh token, clientID)
+    /// written by MCPOAuthTokenStorage.
+    static func mcpOAuthState(forServer id: UUID) -> String? {
+        value(forKey: "mcp-oauth:\(id.uuidString)")
+    }
+
+    static func setMCPOAuthState(_ rawValue: String, forServer id: UUID) throws {
+        try setValue(rawValue, forKey: "mcp-oauth:\(id.uuidString)")
+    }
+
+    // MARK: - Shared accessors
+
+    private static func value(forKey key: String) -> String? {
+        let value = allKeys()[key]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return value?.isEmpty == false ? value : nil
     }
 
-    static func setMCPToken(_ rawValue: String, forServer id: UUID) throws {
+    /// Empty (after trimming) deletes the key. The lock makes the
+    /// read-modify-write atomic: MCPOAuthTokenStorage saves tokens from the
+    /// SDK's background tasks while Settings writes on the main thread.
+    private static func setValue(_ rawValue: String, forKey key: String) throws {
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        var keys = allKeys()
-        keys["mcp:\(id.uuidString)"] = value.isEmpty ? nil : value
+        lock.lock()
+        defer { lock.unlock() }
+        var keys = allKeysLocked()
+        keys[key] = value.isEmpty ? nil : value
         try writeCombined(keys)
         cached.set(keys)
     }
 
     // MARK: - The combined keychain item
 
+    /// Reads also take the lock: a cache-miss read racing a write could
+    /// otherwise repopulate the cache with a pre-write keychain snapshot,
+    /// which the next setValue would persist — deleting the racing write's key.
     private static func allKeys() -> [String: String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return allKeysLocked()
+    }
+
+    private static func allKeysLocked() -> [String: String] {
         if let keys = cached.get() { return keys }
         let keys = readCombined() ?? migrateLegacyItems()
         cached.set(keys)

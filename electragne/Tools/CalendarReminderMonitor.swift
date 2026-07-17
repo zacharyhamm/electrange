@@ -46,7 +46,15 @@ final class CalendarReminderMonitor {
 
     private struct ScheduledReminder {
         let start: Date
+        let summary: String
         let timer: any CalendarReminderTimer
+    }
+
+    struct UpcomingReminder {
+        let eventID: String
+        let summary: String
+        let eventStart: Date
+        let notifyAt: Date
     }
 
     private let events: any CalendarEventProviding
@@ -59,6 +67,20 @@ final class CalendarReminderMonitor {
     private var fired: Set<String>
     private var started = false
     var onReminder: (CalendarEventDetails) -> Void = { _ in }
+
+    var isMonitoring: Bool { started }
+
+    var upcomingReminders: [UpcomingReminder] {
+        scheduled.map { id, reminder in
+            UpcomingReminder(
+                eventID: id,
+                summary: reminder.summary,
+                eventStart: reminder.start,
+                notifyAt: reminder.start.addingTimeInterval(-Self.leadTime)
+            )
+        }
+        .sorted { $0.eventStart < $1.eventStart }
+    }
 
     init(
         events: (any CalendarEventProviding)? = nil,
@@ -121,7 +143,7 @@ final class CalendarReminderMonitor {
         let timer = scheduler.schedule(at: fireDate) { [weak self] in
             Task { await self?.validateAndFire(eventID: event.id, expectedStart: start) }
         }
-        scheduled[event.id] = ScheduledReminder(start: start, timer: timer)
+        scheduled[event.id] = ScheduledReminder(start: start, summary: event.summary, timer: timer)
     }
 
     private func validateAndFire(eventID: String, expectedStart: Date) async {

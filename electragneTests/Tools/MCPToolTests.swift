@@ -318,3 +318,179 @@ private final class UnusedTimerExecutor: TimerToolExecuting {
     func confirmationDetails(for request: TimerToolRequest) -> ToolConfirmationDetails? { nil }
     func execute(_ request: TimerToolRequest) async -> ChatToolResult { .error("unused") }
 }
+
+// MARK: - OAuth
+
+struct MCPOAuthTests {
+    @Test func oauthTokenRoundTripsThroughStorage() throws {
+        let serverID = UUID()
+        let storage = MCPOAuthTokenStorage(serverID: serverID)
+        defer { try? ChatAPIKeyStore.setMCPOAuthState("", forServer: serverID) }
+
+        #expect(storage.load() == nil)
+        let token = OAuthAccessToken(
+            value: "access-abc",
+            tokenType: "Bearer",
+            expiresAt: Date(timeIntervalSince1970: 2_000_000_000),
+            scopes: ["read", "write"],
+            authorizationServer: URL(string: "https://auth.example.com"),
+            refreshToken: "refresh-xyz",
+            clientID: "client-1"
+        )
+        storage.save(token)
+
+        let loaded = try #require(storage.load())
+        #expect(loaded.value == "access-abc")
+        #expect(loaded.refreshToken == "refresh-xyz")
+        #expect(loaded.clientID == "client-1")
+        #expect(loaded.scopes == ["read", "write"])
+        #expect(loaded.expiresAt == token.expiresAt)
+
+        // The SDK clears before attempting the refresh grant; the refresh
+        // credentials must survive so a transient refresh failure doesn't
+        // force a browser re-sign-in.
+        storage.clear()
+        let cleared = try #require(storage.load())
+        #expect(cleared.value.isEmpty)
+        #expect(cleared.refreshToken == "refresh-xyz")
+        #expect(cleared.clientID == "client-1")
+        // Must read as expired: a nil expiresAt would make the SDK send the
+        // empty value as "Bearer " instead of entering the refresh path.
+        #expect(cleared.expiresAt == .distantPast)
+        #expect(cleared.isExpired())
+    }
+
+    @Test func clearWithoutRefreshTokenHardDeletes() throws {
+        let serverID = UUID()
+        let storage = MCPOAuthTokenStorage(serverID: serverID)
+        defer { try? ChatAPIKeyStore.setMCPOAuthState("", forServer: serverID) }
+
+        storage.save(
+            OAuthAccessToken(
+                value: "access-only",
+                tokenType: "Bearer",
+                expiresAt: nil,
+                scopes: [],
+                authorizationServer: nil,
+                refreshToken: nil
+            ))
+        storage.clear()
+        #expect(storage.load() == nil)
+    }
+
+    @Test func nonInteractiveDelegateDeclinesWithoutOpeningBrowser() async {
+        let delegate = MCPOAuthBrowserDelegate(interactive: false)
+        #expect(delegate.redirectURL == nil)
+
+        await #expect(throws: MCPServerError.self) {
+            _ = try await delegate.presentAuthorizationURL(
+                URL(string: "https://auth.example.com/authorize")!
+            )
+        }
+        #expect(delegate.takeAuthError() == .signInRequired)
+        #expect(delegate.takeAuthError() == nil)
+    }
+
+    @Test func delegateAnswersTheSelectorTheRedirectHandlerCalls() {
+        // OIDRedirectHTTPHandler calls this selector without checking for it
+        // first; a miss is an unrecognized-selector crash mid sign-in.
+        let delegate = MCPOAuthBrowserDelegate(interactive: false)
+        #expect(delegate.responds(to: NSSelectorFromString("resumeExternalUserAgentFlowWithURL:error:")))
+        #expect(delegate.responds(to: NSSelectorFromString("failExternalUserAgentFlowWithError:")))
+        #expect(delegate.responds(to: NSSelectorFromString("cancel")))
+    }
+
+    @Test func interactiveDelegateConsumesOnlyTheOAuthRedirect() async throws {
+        let delegate = MCPOAuthBrowserDelegate(interactive: true)
+        let redirectURL = try #require(delegate.redirectURL)
+
+        async let redirect = delegate.presentAuthorizationURL(
+            URL(string: "https://auth.example.com/authorize")!
+        )
+        // Give presentAuthorizationURL a moment to install the continuation.
+        try await Task.sleep(for: .milliseconds(50))
+
+        // A stray favicon request must not complete the flow.
+        #expect(delegate.resumeExternalUserAgentFlow(with: URL(string: "/favicon.ico")!) == false)
+        // The listener hands over a host-relative URL; it should be consumed
+        // and rebuilt onto the listener's absolute base.
+        #expect(delegate.resumeExternalUserAgentFlow(with: URL(string: "/?code=c1&state=s1")!))
+
+        let result = try await redirect
+        #expect(result.host == redirectURL.host)
+        #expect(result.port == redirectURL.port)
+        #expect(result.query == "code=c1&state=s1")
+
+        // The listener is dead after one presentation; a retry must fail fast
+        // (mapped to .needsAuth) instead of opening a browser onto a dead port
+        // and hanging until the timeout.
+        await #expect(throws: MCPServerError.self) {
+            _ = try await delegate.presentAuthorizationURL(
+                URL(string: "https://auth.example.com/authorize")!
+            )
+        }
+        #expect(delegate.takeAuthError() == .signInRequired)
+    }
+
+    @Test func redirectBeforePresentationIsNotConsumed() async throws {
+        let delegate = MCPOAuthBrowserDelegate(interactive: true)
+        _ = try #require(delegate.redirectURL)
+
+        // A code-bearing request before presentAuthorizationURL installs the
+        // continuation (stale tab, local probe) must be refused, or the
+        // handler kills the listener before the real redirect arrives.
+        #expect(delegate.resumeExternalUserAgentFlow(with: URL(string: "/?code=stale")!) == false)
+
+        async let redirect = delegate.presentAuthorizationURL(
+            URL(string: "https://auth.example.com/authorize")!
+        )
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(delegate.resumeExternalUserAgentFlow(with: URL(string: "/?code=real")!))
+        let result = try await redirect
+        #expect(result.query == "code=real")
+    }
+
+    @Test func keychainWritesFromConcurrentTasksBothLand() async throws {
+        let idA = UUID()
+        let idB = UUID()
+        defer {
+            try? ChatAPIKeyStore.setMCPToken("", forServer: idA)
+            try? ChatAPIKeyStore.setMCPToken("", forServer: idB)
+        }
+        // Tripwire for the read-modify-write lock: without it, one of the two
+        // interleaved writers overwrites the other's key.
+        await withTaskGroup(of: Void.self) { group in
+            for (id, value) in [(idA, "token-a"), (idB, "token-b")] {
+                group.addTask {
+                    for _ in 0..<50 {
+                        try? ChatAPIKeyStore.setMCPToken(value, forServer: id)
+                    }
+                }
+            }
+        }
+        #expect(ChatAPIKeyStore.mcpToken(forServer: idA) == "token-a")
+        #expect(ChatAPIKeyStore.mcpToken(forServer: idB) == "token-b")
+    }
+
+    @Test func keychainReadsDuringWritesDoNotLoseKeys() async throws {
+        let id = UUID()
+        defer { try? ChatAPIKeyStore.setMCPToken("", forServer: id) }
+        // Tripwire for the read-populate race: a cache-miss read racing a
+        // write must not repopulate the cache with a pre-write snapshot that
+        // the next write persists (deleting the racing write's key).
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for i in 0..<100 {
+                    try? ChatAPIKeyStore.setMCPToken("token-\(i)", forServer: id)
+                }
+            }
+            group.addTask {
+                for _ in 0..<100 {
+                    _ = ChatAPIKeyStore.mcpToken(forServer: id)
+                }
+            }
+        }
+        try ChatAPIKeyStore.setMCPToken("final", forServer: id)
+        #expect(ChatAPIKeyStore.mcpToken(forServer: id) == "final")
+    }
+}

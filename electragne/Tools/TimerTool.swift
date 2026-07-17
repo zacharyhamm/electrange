@@ -256,11 +256,16 @@ final class TimerToolService: TimerToolExecuting {
     }
 
     private func timerValues(_ timer: TimerRecord) -> [String: ChatToolValue] {
+        Self.timerValues(timer, now: now())
+    }
+
+    /// The timer JSON shape shared with report_app_status (AppStatusExecutor).
+    nonisolated static func timerValues(_ timer: TimerRecord, now: Date) -> [String: ChatToolValue] {
         [
             "timerID": .string(timer.id),
             "label": .string(timer.label),
-            "endsAt": .string(Self.dateString(timer.fireDate)),
-            "remainingSeconds": .number(Double(max(0, Int(timer.fireDate.timeIntervalSince(now()).rounded(.up))))),
+            "endsAt": .string(dateString(timer.fireDate)),
+            "remainingSeconds": .number(Double(max(0, Int(timer.fireDate.timeIntervalSince(now).rounded(.up))))),
         ]
     }
 
@@ -279,7 +284,7 @@ final class TimerToolService: TimerToolExecuting {
         return parts.joined(separator: " ")
     }
 
-    private static func dateString(_ date: Date) -> String {
+    nonisolated private static func dateString(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.string(from: date)

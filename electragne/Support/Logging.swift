@@ -22,4 +22,6 @@ enum Log {
     /// Movement / dock / physics tracing.
     static let physics = Logger(subsystem: subsystem, category: "physics")
     static let calendar = Logger(subsystem: subsystem, category: "calendar")
+    /// MCP server connections and OAuth (MCPServerManager, MCPOAuth).
+    static let mcp = Logger(subsystem: subsystem, category: "mcp")
 }

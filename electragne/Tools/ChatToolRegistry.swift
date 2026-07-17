@@ -15,6 +15,7 @@ nonisolated enum ChatToolFamily: Equatable, Sendable {
     case calendar
     case slack
     case linear
+    case status
 }
 
 nonisolated enum ChatToolParameterType: String, Equatable, Sendable {
@@ -197,6 +198,11 @@ nonisolated enum ChatToolRegistry {
                 "timerID": property(.string, "Opaque timer ID returned by create_timer or list_timers.")
             ], required: ["timerID"], initialStatus: "Confirm timer…",
             executionStatus: "Updating timers…"
+        ),
+        definition(
+            "report_app_status", family: .status,
+            description: "Report Electragne's own internal scheduling state: active countdown timers and which calendar events it will proactively notify the owner about.",
+            initialStatus: "Checking internal state…", executionStatus: "Checking internal state…"
         ),
         definition(
             "list_google_accounts", family: .gmail,

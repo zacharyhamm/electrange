@@ -45,6 +45,9 @@ struct MCPSettingsTab: View {
                         .padding(.top, 3)
                     SecureField("Paste the server's token", text: $newToken)
                         .textFieldStyle(.roundedBorder)
+                    Text("Leave empty to use OAuth sign-in if the server requires it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     HStack {
                         Spacer()
@@ -77,6 +80,11 @@ struct MCPSettingsTab: View {
                     .font(.headline)
                 statusBadge(for: server.id)
                 Spacer()
+                if manager.status[server.id] == .needsAuth {
+                    Button("Sign In") {
+                        Task { await manager.refresh(server.id, interactive: true) }
+                    }
+                }
                 Button("Refresh") {
                     Task { await manager.refresh(server.id) }
                 }
@@ -131,6 +139,9 @@ struct MCPSettingsTab: View {
             Text("\(toolCount) tools")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        case .needsAuth:
+            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                .foregroundStyle(.orange)
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)

@@ -12,8 +12,14 @@ import Foundation
 @MainActor
 final class AppModel {
     let petViewModel = PetViewModel()
-    let chatBubbleController = ChatBubbleWindowController(toolRouter: ChatToolRouter())
     let calendarReminderMonitor = CalendarReminderMonitor()
+    let chatBubbleController: ChatBubbleWindowController
+
+    init() {
+        chatBubbleController = ChatBubbleWindowController(
+            toolRouter: ChatToolRouter(calendarMonitor: calendarReminderMonitor)
+        )
+    }
 
     /// App bootstrap, called when the pet window content appears.
     func start() {
