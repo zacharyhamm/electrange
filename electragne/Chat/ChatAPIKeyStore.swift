@@ -81,6 +81,22 @@ nonisolated enum ChatAPIKeyStore {
         cached.set(keys)
     }
 
+    // MARK: - MCP server tokens (same combined item, keyed by server id)
+
+    static func mcpToken(forServer id: UUID) -> String? {
+        let value = allKeys()["mcp:\(id.uuidString)"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    static func setMCPToken(_ rawValue: String, forServer id: UUID) throws {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        var keys = allKeys()
+        keys["mcp:\(id.uuidString)"] = value.isEmpty ? nil : value
+        try writeCombined(keys)
+        cached.set(keys)
+    }
+
     // MARK: - The combined keychain item
 
     private static func allKeys() -> [String: String] {

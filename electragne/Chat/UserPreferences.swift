@@ -46,6 +46,22 @@ enum UserPreferences {
         trimmed(defaults.string(forKey: geminiModelKey)) ?? ChatConfig.default.geminiModel
     }
 
+    // MARK: MCP servers (managed in Settings; tokens live in Keychain)
+
+    nonisolated static let mcpServersKey = "mcpServers"
+
+    nonisolated static func mcpServers(in defaults: UserDefaults = .standard) -> [MCPServerConfig] {
+        guard let data = defaults.data(forKey: mcpServersKey) else { return [] }
+        return (try? JSONDecoder().decode([MCPServerConfig].self, from: data)) ?? []
+    }
+
+    nonisolated static func setMCPServers(
+        _ servers: [MCPServerConfig],
+        in defaults: UserDefaults = .standard
+    ) {
+        defaults.set(try? JSONEncoder().encode(servers), forKey: mcpServersKey)
+    }
+
     nonisolated private static func trimmed(_ raw: String?) -> String? {
         let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
         return value?.isEmpty == false ? value : nil

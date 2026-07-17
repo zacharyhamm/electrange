@@ -35,6 +35,31 @@ struct SettingsView: View {
     @State private var googleBusy = false
 
     var body: some View {
+        TabView {
+            generalTab
+                .tabItem { Label("General", systemImage: "gearshape") }
+            integrationsTab
+                .tabItem { Label("Integrations", systemImage: "link") }
+            MCPSettingsTab()
+                .tabItem { Label("MCP", systemImage: "wrench.and.screwdriver") }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        // This view is hosted in a manually managed NSWindow. Keep its viewport
+        // stable so account updates cannot trigger an AppKit layout recursion.
+        .frame(width: 560, height: 520)
+        .onAppear {
+            geminiAPIKey = ChatAPIKeyStore.key(for: .gemini) ?? ""
+            ollamaAPIKey = ChatAPIKeyStore.key(for: .ollama) ?? ""
+            dobbsToken = ChatAPIKeyStore.key(for: .dobbs) ?? ""
+            linearAPIKey = ChatAPIKeyStore.key(for: .linear) ?? ""
+            refreshFileSearchScopes()
+            refreshGoogleAccounts()
+            googleClientSecret = GoogleOAuthService.shared.clientSecret
+            refreshGeminiModels()
+        }
+    }
+
+    private var generalTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 7) {
@@ -145,9 +170,15 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                     }
                 }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+        }
+    }
 
-                Divider()
-
+    private var integrationsTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 9) {
                     HStack {
                         Text("Slack (dobbs)")
@@ -317,20 +348,6 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-        // This view is hosted in a manually managed NSWindow. Keep its viewport
-        // stable so account updates cannot trigger an AppKit layout recursion.
-        .frame(width: 560, height: 520)
-        .onAppear {
-            geminiAPIKey = ChatAPIKeyStore.key(for: .gemini) ?? ""
-            ollamaAPIKey = ChatAPIKeyStore.key(for: .ollama) ?? ""
-            dobbsToken = ChatAPIKeyStore.key(for: .dobbs) ?? ""
-            linearAPIKey = ChatAPIKeyStore.key(for: .linear) ?? ""
-            refreshFileSearchScopes()
-            refreshGoogleAccounts()
-            googleClientSecret = GoogleOAuthService.shared.clientSecret
-            refreshGeminiModels()
         }
     }
 

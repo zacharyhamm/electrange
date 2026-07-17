@@ -116,7 +116,7 @@ struct GeminiClientTests {
             ChatMessage(role: "assistant", content: "I'm a sheep!"),
             ChatMessage(role: "user", content: "Search for sheep facts"),
         ]
-        let body = try GeminiClient.makeRequestBody(history: history, userName: "Zed")
+        let body = try GeminiClient.makeRequestBody(history: history, userName: "Zed", mcpTools: [])
 
         let json = try #require(
             try JSONSerialization.jsonObject(with: body) as? [String: Any]
@@ -158,6 +158,41 @@ struct GeminiClientTests {
 
         let toolConfig = try #require(json["toolConfig"] as? [String: Any])
         #expect(toolConfig["includeServerSideToolInvocations"] as? Bool == true)
+    }
+
+    @Test func requestBodyPassesMCPSchemasThroughUntouched() throws {
+        let descriptor = MCPToolDescriptor(
+            serverID: UUID(),
+            serverName: "docs",
+            toolName: "search",
+            description: "Searches the docs",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "query": .object(["type": .string("string")]),
+                    "filters": .object([
+                        "type": .string("object"),
+                        "properties": .object(["tag": .object(["type": .string("string")])]),
+                    ]),
+                ]),
+                "required": .array([.string("query")]),
+            ])
+        )
+        let body = try GeminiClient.makeRequestBody(
+            history: [ChatMessage(role: "user", content: "hi")],
+            mcpTools: [descriptor]
+        )
+
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let tools = try #require(json["tools"] as? [[String: Any]])
+        let functions = try #require(tools[1]["functionDeclarations"] as? [[String: Any]])
+        let mcp = try #require(functions.first { $0["name"] as? String == "mcp__docs__search" })
+        #expect(mcp["description"] as? String == "Searches the docs")
+        let parameters = try #require(mcp["parameters"] as? [String: Any])
+        #expect(parameters["required"] as? [String] == ["query"])
+        let properties = try #require(parameters["properties"] as? [String: Any])
+        let filters = try #require(properties["filters"] as? [String: Any])
+        #expect((filters["properties"] as? [String: Any])?.keys.contains("tag") == true)
     }
 
     @Test func decodesFunctionCallAndPreservesOpaqueModelParts() throws {

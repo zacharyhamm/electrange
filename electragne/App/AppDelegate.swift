@@ -33,6 +33,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
 
+        // Connect configured MCP servers so their tools are available to chat.
+        Task { await MCPServerManager.shared.connectAll() }
+
         // Create menu bar item
         setupMenuBar()
 

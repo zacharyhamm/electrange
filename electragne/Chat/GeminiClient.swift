@@ -75,33 +75,30 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         struct Empty: Encodable {}
 
         struct FunctionDeclaration: Encodable {
-            struct Parameters: Encodable {
-                struct Property: Encodable {
-                    let type: String
-                    let description: String
-                }
-
-                let type = "OBJECT"
-                let properties: [String: Property]
-                let required: [String]
-            }
-
             let name: String
             let description: String
-            let parameters: Parameters
+            /// JSON-shaped so runtime MCP schemas pass through untouched.
+            let parameters: ChatToolValue
 
             init(_ definition: ChatToolDefinition) {
                 name = definition.name
                 description = definition.description
-                parameters = Parameters(
-                    properties: definition.properties.mapValues { parameter in
-                        Parameters.Property(
-                            type: parameter.type.rawValue.uppercased(),
-                            description: parameter.description
-                        )
-                    },
-                    required: definition.required
-                )
+                parameters = .object([
+                    "type": .string("OBJECT"),
+                    "properties": .object(definition.properties.mapValues { parameter in
+                        .object([
+                            "type": .string(parameter.type.rawValue.uppercased()),
+                            "description": .string(parameter.description),
+                        ])
+                    }),
+                    "required": .array(definition.required.map(ChatToolValue.string)),
+                ])
+            }
+
+            init(_ descriptor: MCPToolDescriptor) {
+                name = descriptor.namespacedName
+                description = descriptor.description
+                parameters = descriptor.inputSchema
             }
         }
 
@@ -181,13 +178,15 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         history: [ChatMessage],
         userName: String? = nil,
         now: Date = Date(),
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = .current,
+        mcpTools: [MCPToolDescriptor]? = nil
     ) throws -> Data {
         try makeRequestBody(
             contents: contents(from: history),
             userName: userName,
             now: now,
-            timeZone: timeZone
+            timeZone: timeZone,
+            mcpTools: mcpTools
         )
     }
 
@@ -228,8 +227,13 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         contents: [GeminiContent],
         userName: String? = nil,
         now: Date = Date(),
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = .current,
+        mcpTools: [MCPToolDescriptor]? = nil
     ) throws -> Data {
+        // Resolved per request, like the model name, so Settings changes and
+        // newly connected MCP servers apply without restart.
+        let mcpDeclarations = (mcpTools ?? MCPToolCatalog.offeredTools())
+            .map(GenerateRequest.FunctionDeclaration.init)
         let request = GenerateRequest(
             systemInstruction: GenerateRequest.SystemInstruction(
                 parts: [.object([
@@ -239,7 +243,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
             contents: contents,
             tools: [
                 .search,
-                .functions(functionDeclarations),
+                .functions(functionDeclarations + mcpDeclarations),
             ]
         )
         return try JSONEncoder().encode(request)

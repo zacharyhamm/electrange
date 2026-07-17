@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		EF0000000000000000000001 /* AppAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF0000000000000000000003 /* AppAuth */; };
 		EE0000000000000000000001 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = EE0000000000000000000003 /* SwiftMath */; };
+		EA0000000000000000000001 /* MCP in Frameworks */ = {isa = PBXBuildFile; productRef = EA0000000000000000000003 /* MCP */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -46,6 +47,7 @@
 			files = (
 				EF0000000000000000000001 /* AppAuth in Frameworks */,
 				EE0000000000000000000001 /* SwiftMath in Frameworks */,
+				EA0000000000000000000001 /* MCP in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -99,6 +101,7 @@
 			packageProductDependencies = (
 				EF0000000000000000000003 /* AppAuth */,
 				EE0000000000000000000003 /* SwiftMath */,
+				EA0000000000000000000003 /* MCP */,
 			);
 			productName = electragne;
 			productReference = 3F53307D2F32F272003EA740 /* electragne.app */;
@@ -160,6 +163,7 @@
 			packageReferences = (
 				EF0000000000000000000002 /* XCRemoteSwiftPackageReference "AppAuth-iOS" */,
 				EE0000000000000000000002 /* XCRemoteSwiftPackageReference "SwiftMath" */,
+				EA0000000000000000000002 /* XCRemoteSwiftPackageReference "swift-sdk" */,
 			);
 			projectDirPath = "";
 			projectRoot = "";
@@ -229,6 +233,14 @@
 				minimumVersion = 1.7.3;
 			};
 		};
+		EA0000000000000000000002 /* XCRemoteSwiftPackageReference "swift-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/modelcontextprotocol/swift-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.12.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -241,6 +253,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = EE0000000000000000000002 /* XCRemoteSwiftPackageReference "SwiftMath" */;
 			productName = SwiftMath;
+		};
+		EA0000000000000000000003 /* MCP */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EA0000000000000000000002 /* XCRemoteSwiftPackageReference "swift-sdk" */;
+			productName = MCP;
 		};
 /* End XCSwiftPackageProductDependency section */
 

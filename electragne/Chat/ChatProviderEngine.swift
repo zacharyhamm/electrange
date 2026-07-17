@@ -85,8 +85,7 @@ struct ChatProviderEngine: ChatClient {
 
             messages.append(ChatMessage(role: "assistant", content: content, toolCalls: toolCalls))
             for call in toolCalls {
-                onStatus(ChatToolRegistry.definition(named: call.name)?.initialStatus
-                    ?? "Confirm action…")
+                onStatus(Self.initialStatus(for: call.name))
                 let result = await onToolCall(call)
                 if call.name == "web_search",
                    result.response["status"] == .string("error"),
@@ -97,6 +96,15 @@ struct ChatProviderEngine: ChatClient {
             }
             onStatus("Thinking…")
         }
+    }
+
+    /// MCP tools are not in ChatToolRegistry, and whether they confirm
+    /// depends on their policy — so don't promise a confirmation.
+    private static func initialStatus(for name: String) -> String {
+        if name.hasPrefix("mcp__") {
+            return "Calling \(MCPToolCatalog.descriptor(named: name)?.toolName ?? "MCP tool")…"
+        }
+        return ChatToolRegistry.definition(named: name)?.initialStatus ?? "Confirm action…"
     }
 }
 

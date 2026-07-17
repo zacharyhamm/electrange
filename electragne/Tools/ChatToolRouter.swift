@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class ChatToolRouter {
     private let executors: [ChatToolFamily: any ToolExecuting]
+    private let mcpExecutor: any ToolExecuting
 
     convenience init() {
         self.init(
@@ -22,8 +23,10 @@ final class ChatToolRouter {
         calendarExecutor: (any CalendarToolExecuting)? = nil,
         slackExecutor: (any SlackToolExecuting)? = nil,
         linearExecutor: (any LinearToolExecuting)? = nil,
-        webSearchExecutor: (any ToolExecuting)? = nil
+        webSearchExecutor: (any ToolExecuting)? = nil,
+        mcpExecutor: (any ToolExecuting)? = nil
     ) {
+        self.mcpExecutor = mcpExecutor ?? MCPToolExecutor()
         executors = [
             .reminders: ReminderToolAdapter(reminderExecutor),
             .notes: NotesToolAdapter(notesExecutor),
@@ -42,8 +45,16 @@ final class ChatToolRouter {
         confirm: (ToolConfirmationDetails) async -> Bool,
         onStatus: (String) -> Void
     ) async -> ChatToolResult {
-        guard let definition = ChatToolRegistry.definition(named: call.name),
-              let executor = executors[definition.family] else {
+        let executor: any ToolExecuting
+        let executionStatus: String
+        if call.name.hasPrefix("mcp__") {
+            executor = mcpExecutor
+            executionStatus = "Running \(MCPToolCatalog.descriptor(named: call.name)?.toolName ?? call.name)…"
+        } else if let definition = ChatToolRegistry.definition(named: call.name),
+                  let familyExecutor = executors[definition.family] {
+            executor = familyExecutor
+            executionStatus = definition.executionStatus
+        } else {
             return .error("Unknown tool ‘\(call.name)’.")
         }
 
@@ -57,7 +68,7 @@ final class ChatToolRouter {
         if let confirmation = action.confirmation {
             guard await confirm(confirmation) else { return Self.cancelledResult }
         }
-        onStatus(definition.executionStatus)
+        onStatus(executionStatus)
         return await action.execute()
     }
 
