@@ -51,6 +51,14 @@ nonisolated enum ChatAPIKeyStore {
         value(forKey: provider.rawValue)
     }
 
+    /// Populates the cache off the main thread. The first keychain read after
+    /// a rebuild blocks on the user authorization prompt (the signature
+    /// changed); calling this before any main-thread read keeps a pending
+    /// prompt from freezing the app.
+    static func warm() async {
+        await Task.detached { _ = allKeys() }.value
+    }
+
     /// Keychain first, then environment for terminal launches, then the
     /// provider CLI's key file for Finder launches.
     static func load(for provider: ChatAPIProvider) -> String? {

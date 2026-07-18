@@ -29,12 +29,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private var isPetVisible = true
     private var summonHotkey: GlobalHotkey?
     private var settingsWindow: NSWindow?
+    private var collectionBehaviorObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
 
         // Connect configured MCP servers so their tools are available to chat.
-        Task { await MCPServerManager.shared.connectAll() }
+        // Warm the key store first: its initial keychain read can block on the
+        // authorization prompt and must not happen on the main actor.
+        Task {
+            await ChatAPIKeyStore.warm()
+            await MCPServerManager.shared.connectAll()
+        }
 
         // Create menu bar item
         setupMenuBar()
@@ -98,6 +104,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         window.standardWindowButton(.closeButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
+
+        // SwiftUI's Window scene rewrites collectionBehavior after launch,
+        // replacing .fullScreenAuxiliary with .fullScreenNone — which bars the
+        // pet from other apps' fullscreen spaces. Reassert it whenever it drops.
+        if collectionBehaviorObserver == nil {
+            collectionBehaviorObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didUpdateNotification, object: window, queue: nil
+            ) { [weak window] _ in
+                // didUpdate is posted synchronously on the main thread.
+                MainActor.assumeIsolated {
+                    guard let window, !window.collectionBehavior.contains(.fullScreenAuxiliary) else { return }
+                    window.collectionBehavior.remove(.fullScreenNone)
+                    window.collectionBehavior.insert(.fullScreenAuxiliary)
+                }
+            }
+        }
 
         // Note: Window size is managed by SwiftUI via .windowResizability(.contentSize)
         // and the @AppStorage("petSize") binding in ContentView.

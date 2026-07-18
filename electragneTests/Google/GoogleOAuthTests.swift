@@ -49,10 +49,10 @@ struct GoogleOAuthTests {
     }
 }
 
-@MainActor
-private final class MemoryGoogleCredentialStore: GoogleCredentialStoring {
+private final class MemoryGoogleCredentialStore: GoogleCredentialStoring, @unchecked Sendable {
+    private let lock = NSLock()
     private var values: [String: Data] = [:]
-    func save(_ data: Data, accountID: String) throws { values[accountID] = data }
-    func load(accountID: String) throws -> Data? { values[accountID] }
-    func delete(accountID: String) throws { values.removeValue(forKey: accountID) }
+    func save(_ data: Data, accountID: String) throws { lock.withLock { values[accountID] = data } }
+    func load(accountID: String) throws -> Data? { lock.withLock { values[accountID] } }
+    func delete(accountID: String) throws { lock.withLock { _ = values.removeValue(forKey: accountID) } }
 }

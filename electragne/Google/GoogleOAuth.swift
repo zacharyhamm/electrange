@@ -197,7 +197,7 @@ final class GoogleOAuthService: GoogleTokenProviding {
     }
 
     func freshAccessToken(for accountID: String) async throws -> String {
-        let state = try loadState(accountID: accountID)
+        let state = try await loadState(accountID: accountID)
         return try await withCheckedThrowingContinuation { continuation in
             state.performAction(freshTokens: { [weak self] accessToken, _, error in
                 guard let self else {
@@ -256,8 +256,12 @@ final class GoogleOAuthService: GoogleTokenProviding {
         try keychain.save(data, accountID: accountID)
     }
 
-    private func loadState(accountID: String) throws -> OIDAuthState {
-        guard let data = try keychain.load(accountID: accountID),
+    private func loadState(accountID: String) async throws -> OIDAuthState {
+        // The first keychain read after a rebuild blocks on the user
+        // authorization prompt (the signature changed); off the main thread
+        // so a pending prompt can't freeze the app.
+        let keychain = self.keychain
+        guard let data = try await Task.detached(operation: { try keychain.load(accountID: accountID) }).value,
               let state = try NSKeyedUnarchiver.unarchivedObject(ofClass: OIDAuthState.self, from: data) else {
             throw GoogleOAuthError.missingCredentials
         }
@@ -269,15 +273,13 @@ final class GoogleOAuthService: GoogleTokenProviding {
     }
 }
 
-@MainActor
-protocol GoogleCredentialStoring {
+nonisolated protocol GoogleCredentialStoring: Sendable {
     func save(_ data: Data, accountID: String) throws
     func load(accountID: String) throws -> Data?
     func delete(accountID: String) throws
 }
 
-@MainActor
-struct KeychainGoogleCredentialStore: GoogleCredentialStoring {
+nonisolated struct KeychainGoogleCredentialStore: GoogleCredentialStoring {
     private let service = "org.impolexg.electragne.google-oauth"
 
     func save(_ data: Data, accountID: String) throws {
