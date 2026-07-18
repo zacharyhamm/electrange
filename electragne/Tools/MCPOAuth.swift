@@ -19,11 +19,13 @@ nonisolated enum MCPOAuth {
     /// One authorizer per transport (SDK rule); shared state lives in the
     /// Keychain-backed storage. Seeding the stored token's clientID lets the
     /// refresh grant work across app restarts without re-registering.
+    /// Takes the whole config so a pre-registered clientID or custom scopes
+    /// field can be added later without signature churn.
     static func authorizer(
-        serverID: UUID,
+        server config: MCPServerConfig,
         interactive: Bool
     ) -> (OAuthAuthorizer, MCPOAuthBrowserDelegate) {
-        let storage = MCPOAuthTokenStorage(serverID: serverID)
+        let storage = MCPOAuthTokenStorage(serverID: config.id)
         let delegate = MCPOAuthBrowserDelegate(interactive: interactive)
         // ponytail: the DCR registration response is not persisted (only the
         // token's clientID). If a server registers us as a confidential
@@ -112,15 +114,22 @@ nonisolated final class MCPOAuthBrowserDelegate: NSObject, OAuthAuthorizationDel
     /// Why sign-in couldn't proceed. The transport wraps thrown errors in
     /// MCPError.internalError (type lost), so MCPServerManager reads this
     /// instead to classify the failure. nil once taken.
-    private var authError: MCPServerError?
+    private var authError: MCPAuthDecline?
     /// One-shot: nilled after the first presentation, since the loopback
     /// listener can't be restarted on the same port.
     private var handler: OIDRedirectHTTPHandler?
     private let listenerError: String?
     private let lock = NSLock()
     private var continuation: CheckedContinuation<URL, Error>?
+    /// Presents the authorization URL; overridden in tests so they don't pop
+    /// a real browser window.
+    private let openURL: (URL) -> Void
 
-    init(interactive: Bool) {
+    init(
+        interactive: Bool,
+        openURL: @escaping (URL) -> Void = { url in Task { @MainActor in NSWorkspace.shared.open(url) } }
+    ) {
+        self.openURL = openURL
         if interactive {
             let handler = OIDRedirectHTTPHandler(successURL: nil)
             var error: NSError?
@@ -137,7 +146,7 @@ nonisolated final class MCPOAuthBrowserDelegate: NSObject, OAuthAuthorizationDel
     }
 
     /// Read-and-clear the recorded auth failure.
-    func takeAuthError() -> MCPServerError? {
+    func takeAuthError() -> MCPAuthDecline? {
         lock.lock()
         defer { lock.unlock() }
         let error = authError
@@ -153,31 +162,41 @@ nonisolated final class MCPOAuthBrowserDelegate: NSObject, OAuthAuthorizationDel
 
     func presentAuthorizationURL(_ url: URL) async throws -> URL {
         guard let handler = takeHandler(), redirectURL != nil else {
-            let error: MCPServerError =
-                if let listenerError {
-                    .signInFailed(listenerError)
-                } else {
-                    .signInRequired
-                }
-            record(error)
-            throw error
+            if let listenerError {
+                record(.failed(listenerError))
+                throw MCPServerError.signInFailed(listenerError)
+            } else {
+                record(.needsAuth)
+                throw MCPServerError.signInRequired
+            }
         }
         handler.currentAuthorizationFlow = self
-        defer {
-            handler.currentAuthorizationFlow = nil
-            handler.cancelHTTPListener()
-        }
         let timeout = Task { [weak self] in
             try await Task.sleep(for: .seconds(300))
-            self?.record(.signInTimedOut)
-            self?.finish(with: .failure(MCPServerError.signInTimedOut))
+            guard let self else { return }
+            // Only record if this task actually won the race against a real
+            // redirect; finish() is one-shot, so a losing timeout must not
+            // stomp a success that already resumed the continuation.
+            if self.finish(with: .failure(MCPServerError.signInTimedOut)) {
+                self.record(.timedOut)
+            }
         }
         defer { timeout.cancel() }
-        return try await withCheckedThrowingContinuation { continuation in
-            install(continuation)
-            Task { @MainActor in
-                NSWorkspace.shared.open(url)
+        do {
+            let result = try await withCheckedThrowingContinuation { continuation in
+                install(continuation)
+                openURL(url)
             }
+            handler.currentAuthorizationFlow = nil
+            return result
+        } catch {
+            handler.currentAuthorizationFlow = nil
+            // AppAuth already stopped the listener on the success path (it
+            // tears down its own socket once it handles the redirect); only
+            // the throw path needs us to do it, hopped to the main actor so
+            // it doesn't race AppAuth's own teardown thread.
+            Task { @MainActor in handler.cancelHTTPListener() }
+            throw error
         }
     }
 
@@ -195,8 +214,9 @@ nonisolated final class MCPOAuthBrowserDelegate: NSObject, OAuthAuthorizationDel
     // with the BOOL + NSError** signature the handler expects (it only checks
     // the BOOL).
     @objc(resumeExternalUserAgentFlowWithURL:error:)
-    func resumeExternalUserAgentFlow(withURL url: URL, error: NSErrorPointer) -> Bool {
-        resume(url)
+    func resumeExternalUserAgentFlow(withURL url: URL?, error: NSErrorPointer) -> Bool {
+        guard let url else { return false }
+        return resume(url)
     }
 
     func failExternalUserAgentFlowWithError(_ error: any Error) {
@@ -233,9 +253,9 @@ nonisolated final class MCPOAuthBrowserDelegate: NSObject, OAuthAuthorizationDel
         return finish(with: .success(url))
     }
 
-    private func record(_ error: MCPServerError) {
+    private func record(_ decline: MCPAuthDecline) {
         lock.lock()
-        authError = error
+        authError = decline
         lock.unlock()
     }
 

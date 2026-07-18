@@ -80,7 +80,7 @@ struct MCPSettingsTab: View {
                     .font(.headline)
                 statusBadge(for: server.id)
                 Spacer()
-                if manager.status[server.id] == .needsAuth {
+                if manager.status[server.id]?.canSignIn == true {
                     Button("Sign In") {
                         Task { await manager.refresh(server.id, interactive: true) }
                     }

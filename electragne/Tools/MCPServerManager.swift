@@ -15,6 +15,30 @@ nonisolated enum MCPServerStatus: Equatable, Sendable {
     case connected(toolCount: Int)
     case needsAuth
     case failed(String)
+
+    var canSignIn: Bool {
+        switch self {
+        case .needsAuth, .failed: true
+        case .connecting, .connected: false
+        }
+    }
+}
+
+/// What the OAuth browser delegate can record about a declined/failed
+/// sign-in, narrower than `MCPServerError` (which also covers direct-throw
+/// cases like `.notConnected`/`.signInInProgress` that the delegate never
+/// produces). Shared by both places that classify a decline into a status.
+nonisolated enum MCPAuthDecline: Equatable {
+    case needsAuth
+    case timedOut
+    case failed(String)
+
+    var status: MCPServerStatus {
+        switch self {
+        case .needsAuth, .timedOut: .needsAuth
+        case .failed(let reason): .failed(reason)
+        }
+    }
 }
 
 nonisolated enum MCPServerError: LocalizedError, Equatable {
@@ -94,13 +118,17 @@ final class MCPServerManager {
     }
 
     func refresh(_ id: UUID, interactive: Bool = false) async {
-        while let inflight = refreshTasks[id] {
+        if let inflight = refreshTasks[id] {
             // A background reconnect must not block behind a browser flow.
             if !interactive, inflight.interactive { return }
             await inflight.task.value
             // Piggyback on the refresh that just finished; only an
             // interactive request (Sign In button) re-runs so a click racing
-            // a background refresh still opens the browser.
+            // a background refresh still opens the browser. Fall through
+            // unconditionally rather than re-checking refreshTasks[id]: the
+            // creator may not have cleared it yet, and re-awaiting the same
+            // already-completed task here would spin forever without ever
+            // suspending, starving the creator's own cleanup.
             if !interactive { return }
         }
         guard servers.contains(where: { $0.id == id }) else { return }
@@ -112,6 +140,9 @@ final class MCPServerManager {
 
     private func performRefresh(_ id: UUID, interactive: Bool) async {
         guard let config = servers.first(where: { $0.id == id }) else { return }
+        // Read before overwriting with .connecting: the needs-auth gate below
+        // is about what the *previous* refresh learned.
+        let previousStatus = status[id]
         status[id] = .connecting
         if let old = clients.removeValue(forKey: id) { await old.disconnect() }
         // A pasted bearer token wins; otherwise attach the SDK's OAuth
@@ -121,8 +152,12 @@ final class MCPServerManager {
         let token = ChatAPIKeyStore.mcpToken(forServer: id)
         var authorizer: OAuthAuthorizer?
         var oauthDelegate: MCPOAuthBrowserDelegate?
-        if token == nil {
-            (authorizer, oauthDelegate) = MCPOAuth.authorizer(serverID: id, interactive: interactive)
+        // Once a non-interactive refresh has already learned the server
+        // needs auth, attaching another authorizer just triggers another
+        // dynamic client registration (with no reachable redirect URI) that
+        // the delegate can only decline again — only Sign In should retry.
+        if token == nil, interactive || previousStatus != .needsAuth {
+            (authorizer, oauthDelegate) = MCPOAuth.authorizer(server: config, interactive: interactive)
         }
         oauthDelegates[id] = oauthDelegate
         var client: Client?
@@ -130,34 +165,43 @@ final class MCPServerManager {
             let connected = try await connect(config, token: token, authorizer: authorizer)
             client = connected
             let descriptors = try await discoverTools(from: connected, config: config)
-            guard stillConfigured(id, client: connected) else { return }
+            guard isConfigured(id) else {
+                cleanUpAfterRemoval(id, client: connected)
+                return
+            }
             clients[id] = connected
             tools[id] = descriptors
             MCPToolCatalog.setTools(descriptors, forServer: id)
             status[id] = .connected(toolCount: descriptors.count)
         } catch {
             await client?.disconnect()
-            guard stillConfigured(id, client: nil) else { return }
+            guard isConfigured(id) else {
+                cleanUpAfterRemoval(id, client: nil)
+                return
+            }
             tools[id] = nil
             MCPToolCatalog.removeServer(id)
+            // token == nil && authorizer == nil means the needs-auth gate
+            // above deliberately connected without credentials; the resulting
+            // 401 is still "needs sign-in", not a new failure.
             status[id] =
-                switch oauthDelegate?.takeAuthError() {
-                case .signInRequired, .signInInProgress, .signInTimedOut: .needsAuth
-                case .signInFailed(let reason): .failed(reason)
-                case nil, .notConnected: .failed(error.localizedDescription)
-                }
+                oauthDelegate?.takeAuthError()?.status
+                ?? (token == nil && authorizer == nil
+                    ? .needsAuth : .failed(error.localizedDescription))
         }
     }
 
     /// The server may have been removed while refresh was awaiting the network
     /// or an interactive sign-in; completing anyway would resurrect its tools
     /// and re-persist OAuth tokens the removal just wiped.
-    private func stillConfigured(_ id: UUID, client: Client?) -> Bool {
-        guard !servers.contains(where: { $0.id == id }) else { return true }
+    private func isConfigured(_ id: UUID) -> Bool {
+        servers.contains(where: { $0.id == id })
+    }
+
+    private func cleanUpAfterRemoval(_ id: UUID, client: Client?) {
         if let client { Task { await client.disconnect() } }
         try? ChatAPIKeyStore.setMCPOAuthState("", forServer: id)
         oauthDelegates[id] = nil
-        return false
     }
 
     func callTool(
@@ -175,8 +219,10 @@ final class MCPServerManager {
             // A mid-session 401 on the live transport declines auth inside the
             // delegate; reflect it so Settings doesn't keep showing .connected.
             let serverID = descriptor.serverID
-            if oauthDelegates[serverID]?.takeAuthError() != nil {
-                status[serverID] = .needsAuth
+            // A concurrent performRefresh may still need this delegate's
+            // one-shot auth error to classify its own outcome; don't race it.
+            if refreshTasks[serverID] == nil, let decline = oauthDelegates[serverID]?.takeAuthError() {
+                status[serverID] = decline.status
                 if let client = clients.removeValue(forKey: serverID) {
                     Task { await client.disconnect() }
                 }
@@ -192,6 +238,12 @@ final class MCPServerManager {
         if let client = clients[serverID] { return client }
         guard let config = servers.first(where: { $0.id == serverID }) else {
             throw MCPServerError.notConnected(serverID.uuidString)
+        }
+        // Already known to need auth and nothing is retrying it right now:
+        // don't spam another reconnect (transport + tool + OAuth discovery)
+        // that can only fail the same way; only Sign In should retry.
+        if refreshTasks[serverID] == nil, status[serverID] == .needsAuth {
+            throw MCPServerError.signInRequired
         }
         // The launch-time connect may have failed (offline, wrong token);
         // retry once now that the model actually wants the tool.

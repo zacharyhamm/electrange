@@ -284,7 +284,7 @@ final class TimerToolService: TimerToolExecuting {
         return parts.joined(separator: " ")
     }
 
-    nonisolated private static func dateString(_ date: Date) -> String {
+    nonisolated static func dateString(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.string(from: date)

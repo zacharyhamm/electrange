@@ -323,6 +323,8 @@ private final class UnusedTimerExecutor: TimerToolExecuting {
 
 struct MCPOAuthTests {
     @Test func oauthTokenRoundTripsThroughStorage() throws {
+        ChatAPIKeyStore.useInMemoryStoreForTesting = true
+        defer { ChatAPIKeyStore.useInMemoryStoreForTesting = false }
         let serverID = UUID()
         let storage = MCPOAuthTokenStorage(serverID: serverID)
         defer { try? ChatAPIKeyStore.setMCPOAuthState("", forServer: serverID) }
@@ -361,6 +363,8 @@ struct MCPOAuthTests {
     }
 
     @Test func clearWithoutRefreshTokenHardDeletes() throws {
+        ChatAPIKeyStore.useInMemoryStoreForTesting = true
+        defer { ChatAPIKeyStore.useInMemoryStoreForTesting = false }
         let serverID = UUID()
         let storage = MCPOAuthTokenStorage(serverID: serverID)
         defer { try? ChatAPIKeyStore.setMCPOAuthState("", forServer: serverID) }
@@ -387,7 +391,7 @@ struct MCPOAuthTests {
                 URL(string: "https://auth.example.com/authorize")!
             )
         }
-        #expect(delegate.takeAuthError() == .signInRequired)
+        #expect(delegate.takeAuthError() == .needsAuth)
         #expect(delegate.takeAuthError() == nil)
     }
 
@@ -401,7 +405,7 @@ struct MCPOAuthTests {
     }
 
     @Test func interactiveDelegateConsumesOnlyTheOAuthRedirect() async throws {
-        let delegate = MCPOAuthBrowserDelegate(interactive: true)
+        let delegate = MCPOAuthBrowserDelegate(interactive: true, openURL: { _ in })
         let redirectURL = try #require(delegate.redirectURL)
 
         async let redirect = delegate.presentAuthorizationURL(
@@ -429,11 +433,11 @@ struct MCPOAuthTests {
                 URL(string: "https://auth.example.com/authorize")!
             )
         }
-        #expect(delegate.takeAuthError() == .signInRequired)
+        #expect(delegate.takeAuthError() == .needsAuth)
     }
 
     @Test func redirectBeforePresentationIsNotConsumed() async throws {
-        let delegate = MCPOAuthBrowserDelegate(interactive: true)
+        let delegate = MCPOAuthBrowserDelegate(interactive: true, openURL: { _ in })
         _ = try #require(delegate.redirectURL)
 
         // A code-bearing request before presentAuthorizationURL installs the
@@ -451,6 +455,8 @@ struct MCPOAuthTests {
     }
 
     @Test func keychainWritesFromConcurrentTasksBothLand() async throws {
+        ChatAPIKeyStore.useInMemoryStoreForTesting = true
+        defer { ChatAPIKeyStore.useInMemoryStoreForTesting = false }
         let idA = UUID()
         let idB = UUID()
         defer {
@@ -473,6 +479,8 @@ struct MCPOAuthTests {
     }
 
     @Test func keychainReadsDuringWritesDoNotLoseKeys() async throws {
+        ChatAPIKeyStore.useInMemoryStoreForTesting = true
+        defer { ChatAPIKeyStore.useInMemoryStoreForTesting = false }
         let id = UUID()
         defer { try? ChatAPIKeyStore.setMCPToken("", forServer: id) }
         // Tripwire for the read-populate race: a cache-miss read racing a

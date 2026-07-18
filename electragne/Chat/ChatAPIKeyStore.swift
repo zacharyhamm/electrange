@@ -42,7 +42,9 @@ nonisolated enum ChatAPIKeyStoreError: LocalizedError, Equatable {
 nonisolated enum ChatAPIKeyStore {
     private static let service = "org.impolexg.electragne.chat-api-keys"
     private static let combinedAccount = "api-keys"
-    private static let cached = CachedKeys()
+    /// Every access is already inside a critical section guarded by `lock`
+    /// (see `allKeysLocked()`/`setValue()`), so this needs no lock of its own.
+    nonisolated(unsafe) private static var cached: [String: String]?
     private static let lock = NSLock()
 
     static func key(for provider: ChatAPIProvider) -> String? {
@@ -113,8 +115,14 @@ nonisolated enum ChatAPIKeyStore {
         defer { lock.unlock() }
         var keys = allKeysLocked()
         keys[key] = value.isEmpty ? nil : value
+        #if DEBUG
+        if !useInMemoryStoreForTesting {
+            try writeCombined(keys)
+        }
+        #else
         try writeCombined(keys)
-        cached.set(keys)
+        #endif
+        cached = keys
     }
 
     // MARK: - The combined keychain item
@@ -129,9 +137,15 @@ nonisolated enum ChatAPIKeyStore {
     }
 
     private static func allKeysLocked() -> [String: String] {
-        if let keys = cached.get() { return keys }
+        if let keys = cached { return keys }
+        #if DEBUG
+        if useInMemoryStoreForTesting {
+            cached = [:]
+            return [:]
+        }
+        #endif
         let keys = readCombined() ?? migrateLegacyItems()
-        cached.set(keys)
+        cached = keys
         return keys
     }
 
@@ -197,23 +211,10 @@ nonisolated enum ChatAPIKeyStore {
             kSecAttrAccount as String: account,
         ]
     }
-}
 
-/// The in-memory copy of the combined item, so repeated key lookups never
-/// touch the Keychain (each access can prompt on unsigned dev builds).
-nonisolated private final class CachedKeys: @unchecked Sendable {
-    private let lock = NSLock()
-    private var keys: [String: String]?
-
-    func get() -> [String: String]? {
-        lock.lock()
-        defer { lock.unlock() }
-        return keys
-    }
-
-    func set(_ new: [String: String]) {
-        lock.lock()
-        keys = new
-        lock.unlock()
-    }
+    #if DEBUG
+    /// Test-only: when true, reads/writes stay in `cached` and never touch
+    /// the Keychain. Tests must reset both this and `cached` when done.
+    nonisolated(unsafe) static var useInMemoryStoreForTesting = false
+    #endif
 }
