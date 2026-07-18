@@ -9,7 +9,7 @@
 
 import os
 
-enum Log {
+nonisolated enum Log {
     /// Matches PRODUCT_BUNDLE_IDENTIFIER so logs are filterable by subsystem.
     private static let subsystem = "org.impolexg.electragne"
 

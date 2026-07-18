@@ -9,7 +9,7 @@
 //  AppAuth's loopback redirect listener.
 //
 
-import AppAuth
+@preconcurrency import AppAuth
 import AppKit
 import Foundation
 import MCP
@@ -97,14 +97,34 @@ nonisolated final class MCPOAuthTokenStorage: TokenStorage, @unchecked Sendable 
     }
 }
 
+/// Base class that carries the raw `resumeExternalUserAgentFlowWithURL:error:`
+/// selector for MCPOAuthBrowserDelegate. It lives here, on a type that does
+/// NOT conform to OIDExternalUserAgentSession, because Swift rejects any
+/// declaration of that selector on a conforming type: the optional
+/// requirement is imported in a `(with:error:()) throws` shape that cannot be
+/// witnessed (`()` isn't ObjC-representable), and a same-selector
+/// non-witness is a "conflicts with optional requirement" error. Inherited
+/// methods are exempt from that check, and ObjC optional-requirement dispatch
+/// is plain respondsToSelector, so inheritance satisfies the caller.
+/// OIDRedirectHTTPHandler invokes this selector directly with error:nil — a
+/// missing selector is an unrecognized-selector crash mid sign-in (a test
+/// asserts it stays reachable).
+nonisolated class MCPOAuthLoopbackResponder: NSObject {
+    @objc(resumeExternalUserAgentFlowWithURL:error:)
+    fileprivate func resumeRedirect(_ url: URL?, error: NSErrorPointer) -> Bool {
+        guard let url, let delegate = self as? MCPOAuthBrowserDelegate else { return false }
+        return delegate.resume(url)
+    }
+}
+
 /// Presents the authorization URL in the default browser and catches the
 /// loopback redirect with AppAuth's OIDRedirectHTTPHandler (the pattern
 /// GoogleOAuth already uses; the sandbox network.server entitlement covers
 /// the listener). Non-interactive instances decline instead, so a launch-time
 /// reconnect never pops a browser — the manager maps the decline to a
 /// "needs sign-in" status.
-nonisolated final class MCPOAuthBrowserDelegate: NSObject, OAuthAuthorizationDelegate,
-    OIDExternalUserAgentSession, @unchecked Sendable
+nonisolated final class MCPOAuthBrowserDelegate: MCPOAuthLoopbackResponder,
+    OAuthAuthorizationDelegate, OIDExternalUserAgentSession, @unchecked Sendable
 {
     /// The loopback listener's URL; nil when non-interactive. Must exist
     /// before OAuthConfiguration is built so the authorization request's
@@ -206,19 +226,6 @@ nonisolated final class MCPOAuthBrowserDelegate: NSObject, OAuthAuthorizationDel
         resume(url)
     }
 
-    // The preferred (non-deprecated) requirement, which OIDRedirectHTTPHandler
-    // invokes directly with error:nil — a missing selector is an
-    // unrecognized-selector crash mid sign-in. Swift imports it in a
-    // `(with:error:()) throws` shape that cannot be marked @objc, so it can't
-    // be witnessed normally; instead the raw selector is provided directly
-    // with the BOOL + NSError** signature the handler expects (it only checks
-    // the BOOL).
-    @objc(resumeExternalUserAgentFlowWithURL:error:)
-    func resumeExternalUserAgentFlow(withURL url: URL?, error: NSErrorPointer) -> Bool {
-        guard let url else { return false }
-        return resume(url)
-    }
-
     func failExternalUserAgentFlowWithError(_ error: any Error) {
         finish(with: .failure(error))
     }
@@ -238,7 +245,7 @@ nonisolated final class MCPOAuthBrowserDelegate: NSObject, OAuthAuthorizationDel
     /// fetches), as a URL that may lack scheme/host. Consume only the OAuth
     /// redirect, rebuilt onto the listener's absolute base so the SDK's
     /// redirect-URI check passes.
-    private func resume(_ incoming: URL) -> Bool {
+    fileprivate func resume(_ incoming: URL) -> Bool {
         guard let redirectURL,
               let components = URLComponents(url: incoming, resolvingAgainstBaseURL: false),
               components.queryItems?.contains(where: { $0.name == "code" || $0.name == "error" })

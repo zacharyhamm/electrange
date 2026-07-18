@@ -321,7 +321,24 @@ private final class UnusedTimerExecutor: TimerToolExecuting {
 
 // MARK: - OAuth
 
-struct MCPOAuthTests {
+// Serialized: several tests toggle the process-global
+// ChatAPIKeyStore.useInMemoryStoreForTesting flag; run in parallel, one
+// test's reset would flip the store out from under another mid-flight.
+@Suite(.serialized) struct MCPOAuthTests {
+    @Test func inMemoryStoreToggleResetsAllState() throws {
+        ChatAPIKeyStore.useInMemoryStoreForTesting = true
+        defer { ChatAPIKeyStore.useInMemoryStoreForTesting = false }
+        let id = UUID()
+        try ChatAPIKeyStore.setMCPToken("poison", forServer: id)
+        #expect(ChatAPIKeyStore.mcpToken(forServer: id) == "poison")
+
+        // Toggling off and on must drop both the backing store and the
+        // cache — otherwise test data leaks into later real Keychain writes.
+        ChatAPIKeyStore.useInMemoryStoreForTesting = false
+        ChatAPIKeyStore.useInMemoryStoreForTesting = true
+        #expect(ChatAPIKeyStore.mcpToken(forServer: id) == nil)
+    }
+
     @Test func oauthTokenRoundTripsThroughStorage() throws {
         ChatAPIKeyStore.useInMemoryStoreForTesting = true
         defer { ChatAPIKeyStore.useInMemoryStoreForTesting = false }

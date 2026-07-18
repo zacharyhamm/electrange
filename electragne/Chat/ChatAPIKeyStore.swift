@@ -115,13 +115,7 @@ nonisolated enum ChatAPIKeyStore {
         defer { lock.unlock() }
         var keys = allKeysLocked()
         keys[key] = value.isEmpty ? nil : value
-        #if DEBUG
-        if !useInMemoryStoreForTesting {
-            try writeCombined(keys)
-        }
-        #else
         try writeCombined(keys)
-        #endif
         cached = keys
     }
 
@@ -138,18 +132,15 @@ nonisolated enum ChatAPIKeyStore {
 
     private static func allKeysLocked() -> [String: String] {
         if let keys = cached { return keys }
-        #if DEBUG
-        if useInMemoryStoreForTesting {
-            cached = [:]
-            return [:]
-        }
-        #endif
         let keys = readCombined() ?? migrateLegacyItems()
         cached = keys
         return keys
     }
 
     private static func readCombined() -> [String: String]? {
+        #if DEBUG
+        if let backing = inMemoryBacking { return backing }
+        #endif
         guard let data = readData(account: combinedAccount) else { return nil }
         return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
     }
@@ -185,6 +176,12 @@ nonisolated enum ChatAPIKeyStore {
     }
 
     private static func writeCombined(_ keys: [String: String]) throws {
+        #if DEBUG
+        if inMemoryBacking != nil {
+            inMemoryBacking = keys
+            return
+        }
+        #endif
         let data = try! JSONEncoder().encode(keys)
         let query = baseQuery(account: combinedAccount)
         let status = SecItemUpdate(
@@ -213,8 +210,20 @@ nonisolated enum ChatAPIKeyStore {
     }
 
     #if DEBUG
-    /// Test-only: when true, reads/writes stay in `cached` and never touch
-    /// the Keychain. Tests must reset both this and `cached` when done.
-    nonisolated(unsafe) static var useInMemoryStoreForTesting = false
+    /// Test-only: when non-nil, readCombined/writeCombined use this dictionary
+    /// instead of the Keychain. Only touched under `lock` (the public accessor
+    /// takes it; the boundary functions are already inside it).
+    nonisolated(unsafe) private static var inMemoryBacking: [String: String]?
+    /// Test-only: toggling in either direction resets both the backing store
+    /// and the cache, so a test can't poison state for later real writes.
+    static var useInMemoryStoreForTesting: Bool {
+        get { lock.withLock { inMemoryBacking != nil } }
+        set {
+            lock.withLock {
+                inMemoryBacking = newValue ? [:] : nil
+                cached = nil
+            }
+        }
+    }
     #endif
 }

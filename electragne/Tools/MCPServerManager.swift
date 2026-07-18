@@ -39,6 +39,14 @@ nonisolated enum MCPAuthDecline: Equatable {
         case .failed(let reason): .failed(reason)
         }
     }
+
+    var error: MCPServerError {
+        switch self {
+        case .needsAuth: .signInRequired
+        case .timedOut: .signInTimedOut
+        case .failed(let reason): .signInFailed(reason)
+        }
+    }
 }
 
 nonisolated enum MCPServerError: LocalizedError, Equatable {
@@ -117,25 +125,36 @@ final class MCPServerManager {
         }
     }
 
+    /// Sign In only helps when no bearer token is pasted: a token suppresses
+    /// the OAuth authorizer in performRefresh, so the browser can never open.
+    func canSignIn(_ id: UUID) -> Bool {
+        status[id]?.canSignIn == true && ChatAPIKeyStore.mcpToken(forServer: id) == nil
+    }
+
     func refresh(_ id: UUID, interactive: Bool = false) async {
-        if let inflight = refreshTasks[id] {
+        while let inflight = refreshTasks[id] {
             // A background reconnect must not block behind a browser flow.
             if !interactive, inflight.interactive { return }
             await inflight.task.value
             // Piggyback on the refresh that just finished; only an
-            // interactive request (Sign In button) re-runs so a click racing
-            // a background refresh still opens the browser. Fall through
-            // unconditionally rather than re-checking refreshTasks[id]: the
-            // creator may not have cleared it yet, and re-awaiting the same
-            // already-completed task here would spin forever without ever
-            // suspending, starving the creator's own cleanup.
-            if !interactive { return }
+            // interactive request (Sign In button) racing a *background*
+            // refresh re-runs, so the click still opens the browser — a
+            // click racing another browser flow piggybacks instead of
+            // opening a second one.
+            if !interactive || inflight.interactive { return }
+            // If the completed task's entry is still in place, stop waiting
+            // and re-run; if a different task replaced it, loop and await
+            // that one. Re-awaiting the same completed task would spin
+            // without ever suspending, starving the creator's own cleanup.
+            if refreshTasks[id]?.task == inflight.task { break }
         }
         guard servers.contains(where: { $0.id == id }) else { return }
         let task = Task { await performRefresh(id, interactive: interactive) }
         refreshTasks[id] = (interactive, task)
         await task.value
-        refreshTasks[id] = nil
+        // Only clear our own entry — a piggybacking interactive refresh may
+        // have already replaced it with a still-running task.
+        if refreshTasks[id]?.task == task { refreshTasks[id] = nil }
     }
 
     private func performRefresh(_ id: UUID, interactive: Bool) async {
@@ -226,7 +245,7 @@ final class MCPServerManager {
                 if let client = clients.removeValue(forKey: serverID) {
                     Task { await client.disconnect() }
                 }
-                return .error(MCPServerError.signInRequired.localizedDescription)
+                return .error(decline.error.localizedDescription)
             }
             return .error("MCP tool ‘\(descriptor.toolName)’ failed: \(error.localizedDescription)")
         }
