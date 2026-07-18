@@ -173,6 +173,7 @@ enum ChatTextFormatter {
             case .left: style.alignment = .left
             case .center: style.alignment = .center
             case .right: style.alignment = .right
+            @unknown default: style.alignment = .natural
             }
             style.paragraphSpacing = 0
             return style
