@@ -34,6 +34,12 @@ nonisolated struct MemoryNode: Codable, Equatable, Identifiable, Sendable {
     let sourceChatID: UUID
     /// Nil only for graphs written before source-aware extraction.
     var source: MemorySource? = nil
+    /// Stable identity for a mutable owner fact, such as owner/employer.
+    var canonicalKey: String? = nil
+    /// Normalized value used to distinguish repetition from replacement.
+    var canonicalValue: String? = nil
+    /// Superseded nodes stay on disk for history but are excluded from recall.
+    var supersededAt: Date? = nil
 }
 
 nonisolated struct MemoryGraph: Codable, Sendable {
@@ -55,21 +61,22 @@ struct MemoryStore {
 
     private var fileURL: URL { directory.appendingPathComponent("graph.json") }
 
-    func load() -> MemoryGraph {
-        guard let data = try? Data(contentsOf: fileURL),
-              let graph = try? Self.decoder.decode(MemoryGraph.self, from: data) else {
+    func load() throws -> MemoryGraph {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return MemoryGraph()
         }
-        return graph
+        return try Self.decoder.decode(
+            MemoryGraph.self,
+            from: Data(contentsOf: fileURL)
+        )
     }
 
-    func save(_ graph: MemoryGraph) {
-        try? FileManager.default.createDirectory(
+    func save(_ graph: MemoryGraph) throws {
+        try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true
         )
-        guard let data = try? Self.encoder.encode(graph) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        try Self.encoder.encode(graph).write(to: fileURL, options: .atomic)
     }
 
     private static let encoder: JSONEncoder = {

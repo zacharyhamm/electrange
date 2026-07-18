@@ -3,7 +3,7 @@ import Testing
 @testable import electragne
 
 struct MemoryStoreTests {
-    @Test func roundTripsAGraph() {
+    @Test func roundTripsAGraph() throws {
         let store = MemoryStore(
             directory: FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString)
@@ -22,17 +22,17 @@ struct MemoryStoreTests {
             sourceChatID: UUID(),
             source: .owner
         )
-        store.save(MemoryGraph(nodes: [node]))
+        try store.save(MemoryGraph(nodes: [node]))
 
-        #expect(store.load().nodes == [node])
+        #expect(try store.load().nodes == [node])
     }
 
-    @Test func loadsAnEmptyGraphWhenNothingIsStored() {
+    @Test func loadsAnEmptyGraphWhenNothingIsStored() throws {
         let store = MemoryStore(
             directory: FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString)
         )
-        #expect(store.load().nodes.isEmpty)
+        #expect(try store.load().nodes.isEmpty)
     }
 
     @Test func loadsLegacyGraphWithoutSource() throws {
@@ -49,8 +49,30 @@ struct MemoryStoreTests {
         """#
         try Data(json.utf8).write(to: directory.appendingPathComponent("graph.json"))
 
-        let graph = MemoryStore(directory: directory).load()
+        let graph = try MemoryStore(directory: directory).load()
         #expect(graph.nodes.count == 1)
         #expect(graph.nodes[0].source == nil)
+        #expect(graph.nodes[0].canonicalKey == nil)
+        #expect(graph.nodes[0].supersededAt == nil)
+    }
+
+    @Test func failedSavePreservesThePreviousGraph() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = MemoryStore(directory: directory)
+        let valid = MemoryNode(
+            id: UUID(), summary: "Valid", facts: [], entities: [], topic: "",
+            timestamp: Date(), firstSeen: Date(), mentionCount: 1,
+            embedding: [1], semanticNeighbors: [], sourceChatID: UUID()
+        )
+        try store.save(MemoryGraph(nodes: [valid]))
+        let before = try Data(contentsOf: directory.appendingPathComponent("graph.json"))
+        var invalid = valid
+        invalid.embedding = [.nan]
+
+        #expect(throws: (any Error).self) {
+            try store.save(MemoryGraph(nodes: [invalid]))
+        }
+        #expect(try Data(contentsOf: directory.appendingPathComponent("graph.json")) == before)
     }
 }

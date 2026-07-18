@@ -50,6 +50,27 @@ struct MemoryExtractorTests {
         )
         #expect(extraction == nil)
     }
+
+    @Test func extractionReceivesPriorTurnsAsReferenceOnlyContext() async {
+        let client = CannedChatClient(
+            reply: #"{"ownerMemory": null, "assistantOutcome": null}"#
+        )
+        _ = await MemoryExtractor.extract(
+            userText: "She lives there now",
+            assistantText: "Understood",
+            context: [
+                ChatMessage(role: "user", content: "My sister is Mara"),
+                ChatMessage(role: "assistant", content: "Mara moved to Portland"),
+            ],
+            client: client
+        )
+
+        let prompt = client.histories[0][0].content
+        #expect(prompt.contains("user: My sister is Mara"))
+        #expect(prompt.contains("assistant: Mara moved to Portland"))
+        #expect(prompt.contains("it is not new evidence"))
+        #expect(prompt.contains("newest Owner text"))
+    }
 }
 
 /// Replays one canned reply for extraction tests.

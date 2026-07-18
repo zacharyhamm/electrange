@@ -88,6 +88,25 @@ struct ChatToolRouterTests {
             == "Timer duration must be a whole number from 1 second to 7 days.")
     }
 
+    @Test func injectedMemoryEngineIsImmediatelyVisibleToRecallTool() async {
+        let engine = MemoryEngine(store: MemoryStore(
+            directory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+        ))
+        let router = ChatToolRouter(memoryEngine: engine)
+        await engine.ingest(
+            userText: "I like cobalt", assistantText: "Noted", chatID: UUID(),
+            client: CannedChatClient(reply: #"{"ownerMemory":{"summary":"Owner likes cobalt"},"assistantOutcome":null}"#)
+        )
+
+        let result = await router.execute(
+            call("recall_memory", ["query": .string("cobalt")]),
+            confirm: { _ in true }, onStatus: { _ in }
+        )
+
+        #expect(result.response["memories"]?.stringValue?.contains("Owner likes cobalt") == true)
+    }
+
     private func makeRouter(
         _ reminders: MockReminderExecutor,
         _ notes: MockNotesExecutor,
@@ -103,7 +122,11 @@ struct ChatToolRouterTests {
             timerExecutor: timers,
             gmailExecutor: gmail ?? MockGmailExecutor(),
             calendarExecutor: calendar ?? MockCalendarExecutor(),
-            webSearchExecutor: MockWebSearchExecutor()
+            webSearchExecutor: MockWebSearchExecutor(),
+            memoryExecutor: MemoryToolExecutor(engine: MemoryEngine(store: MemoryStore(
+                directory: FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString)
+            )))
         )
     }
 

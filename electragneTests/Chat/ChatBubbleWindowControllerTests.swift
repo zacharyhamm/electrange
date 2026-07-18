@@ -36,12 +36,17 @@ struct ChatBubbleWindowControllerTests {
     }
 
     private func makeController(client: ControlledChatClient) -> ChatBubbleWindowController {
-        ChatBubbleWindowController(
+        let memoryEngine = MemoryEngine(store: MemoryStore(
+            directory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+        ))
+        return ChatBubbleWindowController(
             ollamaClient: client,
             geminiClient: client,
-            toolRouter: ChatToolRouter(),
+            toolRouter: ChatToolRouter(memoryEngine: memoryEngine),
             chatStore: ChatStore(directory: FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString))
+                .appendingPathComponent(UUID().uuidString)),
+            memoryEngine: memoryEngine
         )
     }
 

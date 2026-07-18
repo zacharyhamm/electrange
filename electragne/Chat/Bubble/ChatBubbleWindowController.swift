@@ -46,7 +46,7 @@ final class ChatBubbleWindowController {
         openAICompatibleClient: any ChatClient = OpenAICompatibleClient(),
         toolRouter: ChatToolRouter,
         chatStore: ChatStore = ChatStore(),
-        memoryEngine: MemoryEngine = MemoryEngine()
+        memoryEngine: MemoryEngine
     ) {
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
@@ -171,6 +171,7 @@ final class ChatBubbleWindowController {
         setExpanded(true)
 
         history.append(ChatMessage(role: "user", content: userMessage))
+        let extractionContext = Array(history.dropLast().suffix(4))
 
         let provider = ChatProviderPreference.selected
         let client: any ChatClient = switch provider {
@@ -248,6 +249,7 @@ final class ChatBubbleWindowController {
                             userText: userMessage,
                             assistantText: streamed,
                             chatID: chatID,
+                            context: extractionContext,
                             client: client
                         )
                     }

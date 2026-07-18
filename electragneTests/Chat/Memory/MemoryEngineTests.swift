@@ -180,6 +180,110 @@ struct MemoryEngineTests {
         #expect(block?.contains("Owner works at Anthropic") == true)
     }
 
+    @Test func mergeRefreshesSummaryFactsEmbeddingAndSemanticEdges() async {
+        let (engine, embedder) = makeEngine()
+        await seed(
+            engine, embedder, summary: "Owner enjoys art",
+            entities: ["art"], vector: [1, 0]
+        )
+        await seed(
+            engine, embedder, summary: "Assistant recommended a gallery",
+            entities: ["gallery"], vector: [0.8, 0.6]
+        )
+        let firstID = engine.graph.nodes[0].id
+        let neighborID = engine.graph.nodes[1].id
+        #expect(engine.graph.nodes[1].semanticNeighbors.contains(firstID))
+
+        embedder.vectors["Owner prefers sculpture\nPrefers sculpture"] = [0.96, -0.28]
+        await engine.ingest(
+            userText: "I prefer sculpture", assistantText: "Noted", chatID: UUID(),
+            client: CannedChatClient(reply: #"""
+                {"ownerMemory":{"summary":"Owner prefers sculpture","topic":"art",
+                "entities":["sculpture"],"facts":["Prefers sculpture"]},
+                "assistantOutcome":null}
+                """#)
+        )
+
+        let merged = engine.graph.nodes.first { $0.id == firstID }
+        #expect(merged?.summary == "Owner prefers sculpture")
+        #expect(merged?.facts == ["Prefers sculpture"])
+        #expect(merged?.embedding == [0.96, -0.28])
+        #expect(merged?.semanticNeighbors.contains(neighborID) == false)
+        #expect(engine.graph.nodes.first { $0.id == neighborID }?.semanticNeighbors.contains(firstID) == false)
+        embedder.vectors["sculpture"] = [0.96, -0.28]
+        #expect(engine.contextBlock(for: "sculpture")?.contains("Prefers sculpture") == true)
+    }
+
+    @Test func changedCanonicalValueSupersedesTheOldMemory() async {
+        let (engine, embedder) = makeEngine()
+        embedder.vectors["Owner works at Anthropic"] = [1, 0]
+        await engine.ingest(
+            userText: "I work at Anthropic", assistantText: "Noted", chatID: UUID(),
+            client: CannedChatClient(reply: #"""
+                {"ownerMemory":{"summary":"Owner works at Anthropic",
+                "canonicalKey":"owner/employer","canonicalValue":"Anthropic"},
+                "assistantOutcome":null}
+                """#)
+        )
+        embedder.vectors["Owner works at OpenAI"] = [0, 1]
+        await engine.ingest(
+            userText: "I now work at OpenAI", assistantText: "Noted", chatID: UUID(),
+            client: CannedChatClient(reply: #"""
+                {"ownerMemory":{"summary":"Owner works at OpenAI",
+                "canonicalKey":"owner/employer","canonicalValue":"OpenAI"},
+                "assistantOutcome":null}
+                """#)
+        )
+
+        #expect(engine.graph.nodes.count == 2)
+        #expect(engine.graph.nodes[0].supersededAt != nil)
+        embedder.vectors["employer"] = [0, 1]
+        #expect(engine.retrieve(query: "employer").map(\.summary) == ["Owner works at OpenAI"])
+
+        embedder.vectors["OpenAI is the owner's current employer"] = [-1, 0]
+        await engine.ingest(
+            userText: "OpenAI is still my employer", assistantText: "Noted", chatID: UUID(),
+            client: CannedChatClient(reply: #"""
+                {"ownerMemory":{"summary":"OpenAI is the owner's current employer",
+                "canonicalKey":"owner/employer","canonicalValue":"OpenAI"},
+                "assistantOutcome":null}
+                """#)
+        )
+        #expect(engine.graph.nodes.count == 2)
+        #expect(engine.graph.nodes.last?.mentionCount == 2)
+    }
+
+    @Test func keywordMatchingUsesWholeUniqueNonStopwordTokens() async {
+        let (engine, embedder) = makeEngine()
+        await seed(
+            engine, embedder, summary: "Owner is going to a party",
+            entities: ["party"], vector: [1, 0]
+        )
+        embedder.vectors["art"] = [0, 1]
+
+        #expect(engine.retrieve(query: "art").isEmpty)
+        #expect(engine.retrieve(query: "what do you remember about this").isEmpty)
+    }
+
+    @Test func corruptGraphIsNotOverwrittenByLaterIngestion() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("graph.json")
+        let corrupt = Data("not json".utf8)
+        try corrupt.write(to: file)
+        let embedder = StubEmbedder()
+        embedder.vectors["Owner likes cobalt"] = [1, 0]
+        let engine = MemoryEngine(store: MemoryStore(directory: directory), embedder: embedder)
+
+        await engine.ingest(
+            userText: "I like cobalt", assistantText: "Noted", chatID: UUID(),
+            client: CannedChatClient(reply: #"{"ownerMemory":{"summary":"Owner likes cobalt"},"assistantOutcome":null}"#)
+        )
+
+        #expect(try Data(contentsOf: file) == corrupt)
+    }
+
     @Test func persistsAcrossEngineInstances() async {
         let store = MemoryStore(
             directory: FileManager.default.temporaryDirectory

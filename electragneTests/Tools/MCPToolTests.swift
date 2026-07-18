@@ -264,7 +264,11 @@ struct MCPRouterDispatchTests {
             notesExecutor: UnusedNotesExecutor(),
             desktopExecutor: UnusedDesktopExecutor(),
             timerExecutor: UnusedTimerExecutor(),
-            mcpExecutor: mcp
+            mcpExecutor: mcp,
+            memoryExecutor: MemoryToolExecutor(engine: MemoryEngine(store: MemoryStore(
+                directory: FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString)
+            )))
         )
 
         let result = await router.execute(

@@ -19,8 +19,8 @@ final class AppModel {
     init() {
         chatBubbleController = ChatBubbleWindowController(
             toolRouter: ChatToolRouter(
-                calendarMonitor: calendarReminderMonitor,
-                memoryEngine: memoryEngine
+                memoryEngine: memoryEngine,
+                calendarMonitor: calendarReminderMonitor
             ),
             memoryEngine: memoryEngine
         )
