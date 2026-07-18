@@ -82,10 +82,12 @@ final class ChatBubbleWindowController {
                 onSubmit: { [weak self] message in self?.startStream(userMessage: message) },
                 onNewChat: { [weak self] in self?.startNewChat() },
                 onSelectChat: { [weak self] id in self?.switchToChat(id: id) },
+                onSelectModel: { [weak self] id in self?.selectModel(id) },
                 onConfirmTool: { [weak self] in self?.resolveToolConfirmation(approved: true) },
                 onCancelTool: { [weak self] in self?.resolveToolConfirmation(approved: false) }
             )
             refreshChatList()
+            refreshModels()
             let panel = makePanel(rootView: bubbleView)
             self.panel = panel
             installEventMonitors()
@@ -250,7 +252,7 @@ final class ChatBubbleWindowController {
                             assistantText: streamed,
                             chatID: chatID,
                             context: extractionContext,
-                            client: client
+                            client: Self.memoryClient(fallback: client)
                         )
                     }
                 }
@@ -337,6 +339,62 @@ final class ChatBubbleWindowController {
     private func refreshChatList() {
         model.availableChats = chatStore.listSummaries()
         model.currentChatID = currentChat.id
+    }
+
+    /// The client memory extraction uses: the chat client, unless Settings
+    /// picked a dedicated memory provider (and optionally model).
+    private static func memoryClient(fallback: any ChatClient) -> any ChatClient {
+        guard let provider = MemoryProviderPreference.selected else { return fallback }
+        let model = MemoryProviderPreference.model
+        return switch provider {
+        case .ollama: OllamaClient(model: model)
+        case .gemini: GeminiClient(model: model)
+        case .openAICompatible: OpenAICompatibleClient(model: model)
+        }
+    }
+
+    /// The current provider's model UserDefaults key; nil to hide the picker.
+    private static func modelKey(for provider: ChatProvider) -> String {
+        switch provider {
+        case .ollama: UserPreferences.ollamaModelKey
+        case .gemini: UserPreferences.geminiModelKey
+        case .openAICompatible: UserPreferences.openAICompatibleModelKey
+        }
+    }
+
+    private static func storedModel(for provider: ChatProvider) -> String {
+        switch provider {
+        case .ollama: UserPreferences.ollamaModel()
+        case .gemini: UserPreferences.geminiModel()
+        case .openAICompatible: UserPreferences.openAICompatibleModel()
+        }
+    }
+
+    /// Fetches the active provider's model list so the header picker can
+    /// appear when there is more than one to choose from.
+    private func refreshModels() {
+        let provider = ChatProviderPreference.selected
+        let current = Self.storedModel(for: provider)
+        model.currentModel = current
+        model.availableModels = [current]
+
+        let model = model
+        Task {
+            do {
+                let fetched = try await provider.listModelIDs()
+                // Keep the stored selection present even if the fetch omits it.
+                var seen = Set<String>()
+                model.availableModels = ([current] + fetched.sorted()).filter { seen.insert($0).inserted }
+            } catch {
+                // No list, no picker; the configured model still works.
+            }
+        }
+    }
+
+    private func selectModel(_ id: String) {
+        let provider = ChatProviderPreference.selected
+        UserDefaults.standard.set(id, forKey: Self.modelKey(for: provider))
+        model.currentModel = id
     }
 
     private func startNewChat() {

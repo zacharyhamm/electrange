@@ -29,6 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private var isPetVisible = true
     private var summonHotkey: GlobalHotkey?
     private var settingsWindow: NSWindow?
+    private var memoryBrowserWindow: NSWindow?
     private var collectionBehaviorObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -158,6 +159,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
         providerItem.submenu = providerMenu
         menu.addItem(providerItem)
+
+        menu.addItem(NSMenuItem(
+            title: "Browse Memories…",
+            action: #selector(openMemoryBrowser),
+            keyEquivalent: ""
+        ))
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Increase Size", action: #selector(increaseSize), keyEquivalent: "+"))
@@ -292,6 +299,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc func openMemoryBrowser() {
+        guard let memoryEngine = appModel?.memoryEngine else { return }
+        if memoryBrowserWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Electragne Memories"
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: MemoryBrowserView(engine: memoryEngine))
+            window.center()
+            memoryBrowserWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        memoryBrowserWindow?.makeKeyAndOrderFront(nil)
     }
 
     @objc func quitApp() {

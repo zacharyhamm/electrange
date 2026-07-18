@@ -34,6 +34,17 @@ struct OllamaClientTests {
         #expect(String(decoding: transport.requests[1].httpBody ?? Data(), as: UTF8.self).contains("tool_name"))
     }
 
+    @Test func listModelsDecodesTagNames() async throws {
+        let transport = StubChatHTTPTransport([
+            .init(data: Data(#"{"models":[{"name":"gemma4:latest"},{"name":"qwen3:8b"}]}"#.utf8)),
+        ])
+
+        let models = try await OllamaClient.listModels(transport: transport)
+
+        #expect(models == ["gemma4:latest", "qwen3:8b"])
+        #expect(transport.requests.first?.url?.path == "/api/tags")
+    }
+
     @Test func streamThrowsHTTPError() async {
         let client = OllamaClient(transport: StubChatHTTPTransport([.init(status: 503)]))
         await #expect(throws: ChatProviderError.badStatus(503)) {

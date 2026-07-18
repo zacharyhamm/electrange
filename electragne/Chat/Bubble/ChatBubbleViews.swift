@@ -14,6 +14,7 @@ struct ChatBubbleView: View {
     let onSubmit: (String) -> Void
     let onNewChat: () -> Void
     let onSelectChat: (UUID) -> Void
+    let onSelectModel: (String) -> Void
     let onConfirmTool: () -> Void
     let onCancelTool: () -> Void
 
@@ -39,6 +40,30 @@ struct ChatBubbleView: View {
                         .font(.system(size: 14, weight: .semibold))
 
                     Spacer()
+
+                    if model.availableModels.count > 1 {
+                        Menu {
+                            ForEach(model.availableModels, id: \.self) { id in
+                                Button {
+                                    onSelectModel(id)
+                                } label: {
+                                    if id == model.currentModel {
+                                        Label(id, systemImage: "checkmark")
+                                    } else {
+                                        Text(id)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "cpu")
+                                .font(.system(size: 11, weight: .bold))
+                                .frame(width: 18, height: 18)
+                        }
+                        .buttonStyle(.plain)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .accessibilityLabel("Model")
+                    }
 
                     Menu {
                         Button("New Chat", action: onNewChat)

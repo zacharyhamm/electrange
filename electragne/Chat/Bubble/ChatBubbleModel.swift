@@ -41,6 +41,8 @@ final class ChatBubbleModel {
     var phase: ChatBubblePhase = .idle
     var availableChats: [ChatSummary] = []
     var currentChatID: UUID?
+    var availableModels: [String] = []
+    var currentModel = ""
     var fontSize: CGFloat = UserPreferences.chatFontSize()
     var pendingToolConfirmation: PendingToolConfirmation?
 

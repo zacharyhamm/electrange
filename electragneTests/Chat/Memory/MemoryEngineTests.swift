@@ -239,6 +239,10 @@ struct MemoryEngineTests {
         #expect(engine.graph.nodes[0].supersededAt != nil)
         embedder.vectors["employer"] = [0, 1]
         #expect(engine.retrieve(query: "employer").map(\.summary) == ["Owner works at OpenAI"])
+        embedder.vectors["Anthropic"] = [1, 0]
+        #expect(engine.retrieve(query: "Anthropic").isEmpty)
+        #expect(engine.retrieve(query: "Anthropic", includingSuperseded: true)
+            .map(\.summary) == ["Owner works at Anthropic"])
 
         embedder.vectors["OpenAI is the owner's current employer"] = [-1, 0]
         await engine.ingest(
@@ -305,6 +309,23 @@ struct MemoryEngineTests {
         #expect(reloaded.retrieve(query: "anthropic").count == 1)
     }
 
+    @Test func browserTextSearchCoversFieldsAndSortsNewestFirst() {
+        let old = browserNode(
+            summary: "Owner likes tea", facts: ["Drinks sencha"],
+            entities: ["Kyoto"], topic: "travel", timestamp: .distantPast
+        )
+        let new = browserNode(
+            summary: "Owner likes coffee", facts: ["Orders cortados"],
+            entities: ["Lisbon"], topic: "travel", timestamp: .now
+        )
+
+        #expect(MemoryBrowserView.textResults(in: [old, new], query: "OWNER")
+            .map(\.id) == [new.id, old.id])
+        #expect(MemoryBrowserView.textResults(in: [old], query: "sencha").map(\.id) == [old.id])
+        #expect(MemoryBrowserView.textResults(in: [old], query: "kyoto").map(\.id) == [old.id])
+        #expect(MemoryBrowserView.textResults(in: [old], query: "travel").map(\.id) == [old.id])
+    }
+
     // MARK: - Helpers
 
     private func makeEngine() -> (MemoryEngine, StubEmbedder) {
@@ -317,6 +338,21 @@ struct MemoryEngineTests {
             embedder: embedder
         )
         return (engine, embedder)
+    }
+
+    private func browserNode(
+        summary: String,
+        facts: [String],
+        entities: [String],
+        topic: String,
+        timestamp: Date
+    ) -> MemoryNode {
+        MemoryNode(
+            id: UUID(), summary: summary, facts: facts, entities: entities,
+            topic: topic, timestamp: timestamp, firstSeen: timestamp,
+            mentionCount: 1, embedding: [], semanticNeighbors: [],
+            sourceChatID: UUID(), source: .owner
+        )
     }
 
     /// Ingests one canned memory whose summary embeds to `vector`.

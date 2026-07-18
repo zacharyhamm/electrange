@@ -185,6 +185,38 @@ nonisolated enum ChatProvider: String, CaseIterable, Sendable {
         case .openAICompatible: "OpenAI-compatible"
         }
     }
+
+    /// Providers usable right now: local Ollama needs no key, the rest need one.
+    static func configured() -> [ChatProvider] {
+        allCases.filter { provider in
+            switch provider {
+            case .ollama: true
+            case .gemini: ChatAPIKeyStore.load(for: .gemini) != nil
+            case .openAICompatible: ChatAPIKeyStore.load(for: .openAICompatible) != nil
+            }
+        }
+    }
+
+    /// The provider's live model list, for pickers.
+    func listModelIDs() async throws -> [String] {
+        switch self {
+        case .ollama:
+            return try await OllamaClient.listModels()
+        case .gemini:
+            guard let key = ChatAPIKeyStore.load(for: .gemini) else { return [] }
+            return try await GeminiClient.listModels(apiKey: key).map(\.id)
+        case .openAICompatible:
+            guard let baseURL = URL(string: UserPreferences.openAICompatibleBaseURL()),
+                  let key = OpenAICompatibleClient.resolveAPIKey(
+                    baseURL: baseURL,
+                    keychainKey: ChatAPIKeyStore.key(for: .openAICompatible)
+                  ) else { return [] }
+            return try await OpenAICompatibleClient.listModels(
+                baseURL: baseURL,
+                apiKey: key
+            ).map(\.id)
+        }
+    }
 }
 
 /// Which backend the menu-bar provider submenu has selected.
@@ -206,4 +238,26 @@ enum ChatProviderPreference {
     static func set(_ provider: ChatProvider, in defaults: UserDefaults = .standard) {
         defaults.set(provider.rawValue, forKey: providerKey)
     }
+}
+
+/// Which backend forms memories after each exchange. Unset (the default)
+/// follows the chat provider and its model.
+enum MemoryProviderPreference {
+    nonisolated static let providerKey = "memoryProvider"
+    nonisolated static let modelKey = "memoryModel"
+
+    /// nil means "same as chat".
+    nonisolated static func selected(in defaults: UserDefaults = .standard) -> ChatProvider? {
+        defaults.string(forKey: providerKey).flatMap(ChatProvider.init(rawValue:))
+    }
+
+    static var selected: ChatProvider? { selected() }
+
+    /// nil means the provider's normally configured model.
+    nonisolated static func model(in defaults: UserDefaults = .standard) -> String? {
+        guard let value = defaults.string(forKey: modelKey), !value.isEmpty else { return nil }
+        return value
+    }
+
+    static var model: String? { model() }
 }

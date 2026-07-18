@@ -11,8 +11,10 @@
 //
 
 import Foundation
+import Observation
 import os
 
+@Observable
 final class MemoryEngine {
     private let store: MemoryStore
     private let embedder: any TextEmbedding
@@ -161,8 +163,8 @@ final class MemoryEngine {
 
     /// RRF anchor fusion over vector, keyword, and recency rankers, then
     /// one hop of expansion via semantic neighbors and shared entities.
-    func retrieve(query: String) -> [MemoryNode] {
-        let nodes = graph.nodes.filter { $0.supersededAt == nil }
+    func retrieve(query: String, includingSuperseded: Bool = false) -> [MemoryNode] {
+        let nodes = graph.nodes.filter { includingSuperseded || $0.supersededAt == nil }
         guard !nodes.isEmpty else { return [] }
         let queryVector = embedder.vector(for: query) ?? []
         let terms = Self.terms(in: query)

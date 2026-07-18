@@ -27,6 +27,10 @@ struct SettingsView: View {
     @State private var openAICompatibleModelError: String?
     @State private var apiKeyMessage: String?
     @State private var apiKeySaveFailed = false
+    @AppStorage(MemoryProviderPreference.providerKey) private var memoryProvider = ""
+    @AppStorage(MemoryProviderPreference.modelKey) private var memoryModel = ""
+    @State private var availableMemoryModels: [String] = []
+    @State private var memoryModelError: String?
     @State private var googleClientSecret = ""
     @State private var fileSearchScopes: [FileSearchScope] = []
     @State private var fileSearchError: String?
@@ -67,6 +71,7 @@ struct SettingsView: View {
             googleClientSecret = GoogleOAuthService.shared.clientSecret
             refreshGeminiModels()
             refreshOpenAICompatibleModels()
+            refreshMemoryModels()
         }
     }
 
@@ -167,6 +172,11 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(apiKeySaveFailed ? .red : .secondary)
                     }
+                }
+
+                if ChatProvider.configured().count > 1 {
+                    Divider()
+                    memorySection
                 }
 
                 Divider()
@@ -392,6 +402,76 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
+        }
+    }
+
+    private var memorySection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Memory")
+                .font(.headline)
+            Text("Memories are extracted after each chat exchange. Pick a dedicated provider — for example a cheap local model — or leave it matching the chat.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("Provider")
+                .font(.subheadline.weight(.medium))
+            Picker("Memory provider", selection: $memoryProvider) {
+                Text("Same as chat").tag("")
+                ForEach(ChatProvider.configured(), id: \.rawValue) { provider in
+                    Text(provider.displayName).tag(provider.rawValue)
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 320)
+            .onChange(of: memoryProvider) { _, _ in
+                // A model id from one provider is meaningless on another.
+                memoryModel = ""
+                availableMemoryModels = []
+                refreshMemoryModels()
+            }
+
+            if !memoryProvider.isEmpty {
+                HStack {
+                    Text("Model")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Button("Reload Models", action: refreshMemoryModels)
+                }
+                Picker("Memory model", selection: $memoryModel) {
+                    Text("Provider default").tag("")
+                    ForEach(memoryModelChoices, id: \.self) { id in
+                        Text(id).tag(id)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 320)
+                if let memoryModelError {
+                    Text(memoryModelError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    /// Fetched models, with the stored selection always present so the picker
+    /// never shows an empty selection before (or without) a successful fetch.
+    private var memoryModelChoices: [String] {
+        if memoryModel.isEmpty || availableMemoryModels.contains(memoryModel) {
+            return availableMemoryModels
+        }
+        return [memoryModel] + availableMemoryModels
+    }
+
+    private func refreshMemoryModels() {
+        guard let provider = ChatProvider(rawValue: memoryProvider) else { return }
+        Task {
+            do {
+                availableMemoryModels = try await provider.listModelIDs().sorted()
+                memoryModelError = nil
+            } catch {
+                memoryModelError = "Could not load the model list: \(error.localizedDescription)"
+            }
         }
     }
 

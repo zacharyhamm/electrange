@@ -46,6 +46,15 @@ enum UserPreferences {
         trimmed(defaults.string(forKey: geminiModelKey)) ?? ChatConfig.default.geminiModel
     }
 
+    // MARK: Ollama model (picked in the chat bubble)
+
+    nonisolated static let ollamaModelKey = "ollamaModel"
+
+    /// The Ollama model chosen in the chat bubble, or the ChatConfig default.
+    nonisolated static func ollamaModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: ollamaModelKey)) ?? ChatConfig.default.ollamaModel
+    }
+
     // MARK: OpenAI-compatible provider
 
     nonisolated static let openAICompatibleBaseURLKey = "openAICompatibleBaseURL"

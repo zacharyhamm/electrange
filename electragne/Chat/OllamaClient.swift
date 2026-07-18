@@ -115,9 +115,11 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
     nonisolated static let maxToolRounds = ChatConfig.default.maxToolRounds
 
     var baseURL: URL
-    var model: String
+    let modelOverride: String?
     let transport: any ChatHTTPTransport
     let config: ChatConfig
+    /// Resolved per request so model-picker/Settings changes apply immediately.
+    var model: String { modelOverride ?? UserPreferences.ollamaModel() }
     /// Resolved per request so Settings changes apply immediately.
     var userName: String? { UserPreferences.resolvedUserName() }
 
@@ -128,9 +130,27 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
         config: ChatConfig = .default
     ) {
         self.baseURL = baseURL
-        self.model = model ?? config.ollamaModel
+        self.modelOverride = model
         self.transport = transport
         self.config = config
+    }
+
+    private nonisolated struct TagsResponse: Decodable {
+        struct Model: Decodable { let name: String }
+        let models: [Model]
+    }
+
+    /// The models pulled into the local Ollama server, via GET api/tags.
+    static func listModels(
+        baseURL: URL = defaultBaseURL,
+        transport: any ChatHTTPTransport = URLSessionTransport(session: .shared)
+    ) async throws -> [String] {
+        let request = URLRequest(url: baseURL.appendingPathComponent("api/tags"))
+        let (data, response) = try await transport.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw ChatProviderError.badStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(TagsResponse.self, from: data).models.map(\.name)
     }
 
     private nonisolated struct ChatRequest: Encodable {
