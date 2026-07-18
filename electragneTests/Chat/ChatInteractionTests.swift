@@ -212,6 +212,45 @@ struct ChatInteractionTests {
         #expect(foundLink)
     }
 
+    @Test @MainActor func displayTextRendersHeadersAndTables() {
+        let display = ChatTextFormatter.displayText("""
+            # Forecast
+
+            | City | High | Rain |
+            |:-----|-----:|:----:|
+            | KC | 78 | Yes |
+            """)
+
+        #expect(!display.string.contains("#"))
+        #expect(!display.string.contains("|"))
+
+        let forecastRange = (display.string as NSString).range(of: "Forecast")
+        let forecastFont = display.attribute(
+            .font,
+            at: forecastRange.location,
+            effectiveRange: nil
+        ) as? NSFont
+        #expect(forecastFont?.fontDescriptor.symbolicTraits.contains(.bold) == true)
+        #expect(forecastFont?.pointSize == 18)
+
+        for (cell, alignment) in [
+            ("City", NSTextAlignment.left),
+            ("High", .right),
+            ("Rain", .center),
+        ] {
+            let range = (display.string as NSString).range(of: cell)
+            let style = display.attribute(
+                .paragraphStyle,
+                at: range.location,
+                effectiveRange: nil
+            ) as? NSParagraphStyle
+            #expect(style?.textBlocks.first is NSTextTableBlock)
+            #expect(style?.alignment == alignment)
+            let font = display.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+            #expect(font?.fontDescriptor.symbolicTraits.contains(.bold) == true)
+        }
+    }
+
     @Test func inlineMathParserFindsBothSupportedDelimiterStyles() {
         let extraction = InlineMathParser.extract(
             from: "Euler: $e^{i\\pi}+1=0$ and \\(a^2+b^2=c^2\\)."

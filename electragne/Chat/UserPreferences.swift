@@ -46,6 +46,28 @@ enum UserPreferences {
         trimmed(defaults.string(forKey: geminiModelKey)) ?? ChatConfig.default.geminiModel
     }
 
+    // MARK: OpenAI-compatible provider
+
+    nonisolated static let openAICompatibleBaseURLKey = "openAICompatibleBaseURL"
+    nonisolated static let openAICompatibleModelKey = "openAICompatibleModel"
+    nonisolated static let deepSeekThinkingKey = "deepSeekThinking"
+
+    nonisolated static func openAICompatibleBaseURL(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAICompatibleBaseURLKey))
+            ?? ChatConfig.default.openAICompatibleBaseURL
+    }
+
+    nonisolated static func openAICompatibleModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAICompatibleModelKey))
+            ?? ChatConfig.default.openAICompatibleModel
+    }
+
+    nonisolated static func deepSeekThinking(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: deepSeekThinkingKey) == nil
+            ? ChatConfig.default.deepSeekThinking
+            : defaults.bool(forKey: deepSeekThinkingKey)
+    }
+
     // MARK: MCP servers (managed in Settings; tokens live in Keychain)
 
     nonisolated static let mcpServersKey = "mcpServers"

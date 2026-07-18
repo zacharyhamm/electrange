@@ -16,6 +16,15 @@ struct SettingsView: View {
     @State private var availableGeminiModels: [GeminiClient.GeminiModel] = []
     @State private var geminiModelError: String?
     @State private var ollamaAPIKey = ""
+    @State private var openAICompatibleAPIKey = ""
+    @AppStorage(UserPreferences.openAICompatibleBaseURLKey)
+    private var openAICompatibleBaseURL = ChatConfig.default.openAICompatibleBaseURL
+    @AppStorage(UserPreferences.openAICompatibleModelKey)
+    private var openAICompatibleModel = ChatConfig.default.openAICompatibleModel
+    @AppStorage(UserPreferences.deepSeekThinkingKey)
+    private var deepSeekThinking = ChatConfig.default.deepSeekThinking
+    @State private var availableOpenAICompatibleModels: [OpenAICompatibleClient.Model] = []
+    @State private var openAICompatibleModelError: String?
     @State private var apiKeyMessage: String?
     @State private var apiKeySaveFailed = false
     @State private var googleClientSecret = ""
@@ -50,12 +59,14 @@ struct SettingsView: View {
         .onAppear {
             geminiAPIKey = ChatAPIKeyStore.key(for: .gemini) ?? ""
             ollamaAPIKey = ChatAPIKeyStore.key(for: .ollama) ?? ""
+            openAICompatibleAPIKey = ChatAPIKeyStore.key(for: .openAICompatible) ?? ""
             dobbsToken = ChatAPIKeyStore.key(for: .dobbs) ?? ""
             linearAPIKey = ChatAPIKeyStore.key(for: .linear) ?? ""
             refreshFileSearchScopes()
             refreshGoogleAccounts()
             googleClientSecret = GoogleOAuthService.shared.clientSecret
             refreshGeminiModels()
+            refreshOpenAICompatibleModels()
         }
     }
 
@@ -117,6 +128,39 @@ struct SettingsView: View {
                     Text("The Ollama key is used only for hosted web search; local Ollama chat remains keyless.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Text("OpenAI-compatible API key")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.top, 3)
+                    SecureField("Paste your DeepSeek or OpenAI-compatible API key", text: $openAICompatibleAPIKey)
+                        .textFieldStyle(.roundedBorder)
+
+                    Text("Base URL")
+                        .font(.subheadline.weight(.medium))
+                    TextField("https://api.deepseek.com", text: $openAICompatibleBaseURL)
+                        .textFieldStyle(.roundedBorder)
+
+                    HStack {
+                        Text("Model")
+                            .font(.subheadline.weight(.medium))
+                        Spacer()
+                        Button("Reload Models", action: refreshOpenAICompatibleModels)
+                    }
+                    Picker("OpenAI-compatible model", selection: $openAICompatibleModel) {
+                        ForEach(openAICompatibleModelChoices, id: \.id) { model in
+                            Text(model.id).tag(model.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 320)
+                    if isOfficialDeepSeekEndpoint {
+                        Toggle("DeepSeek thinking mode", isOn: $deepSeekThinking)
+                    }
+                    if let openAICompatibleModelError {
+                        Text(openAICompatibleModelError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
 
                     if let apiKeyMessage {
                         Text(apiKeyMessage)
@@ -373,15 +417,48 @@ struct SettingsView: View {
         }
     }
 
+    private var isOfficialDeepSeekEndpoint: Bool {
+        URL(string: openAICompatibleBaseURL).map(OpenAICompatibleClient.isOfficialDeepSeek) == true
+    }
+
+    private var openAICompatibleModelChoices: [OpenAICompatibleClient.Model] {
+        var ids = OpenAICompatibleClient.defaultModels
+        ids.append(contentsOf: availableOpenAICompatibleModels.map(\.id))
+        ids.append(openAICompatibleModel)
+        return Array(Set(ids)).sorted().map(OpenAICompatibleClient.Model.init(id:))
+    }
+
+    private func refreshOpenAICompatibleModels() {
+        guard let baseURL = URL(string: openAICompatibleBaseURL),
+              let key = OpenAICompatibleClient.resolveAPIKey(
+                baseURL: baseURL,
+                keychainKey: ChatAPIKeyStore.key(for: .openAICompatible)
+              ) else { return }
+        Task {
+            do {
+                availableOpenAICompatibleModels = try await OpenAICompatibleClient.listModels(
+                    baseURL: baseURL,
+                    apiKey: key
+                )
+                openAICompatibleModelError = nil
+            } catch {
+                openAICompatibleModelError = "Could not load the model list: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func saveAPIKeys() {
         do {
             try ChatAPIKeyStore.setKey(geminiAPIKey, for: .gemini)
             try ChatAPIKeyStore.setKey(ollamaAPIKey, for: .ollama)
+            try ChatAPIKeyStore.setKey(openAICompatibleAPIKey, for: .openAICompatible)
             geminiAPIKey = ChatAPIKeyStore.key(for: .gemini) ?? ""
             ollamaAPIKey = ChatAPIKeyStore.key(for: .ollama) ?? ""
+            openAICompatibleAPIKey = ChatAPIKeyStore.key(for: .openAICompatible) ?? ""
             apiKeySaveFailed = false
             apiKeyMessage = "Saved in macOS Keychain. Clear a field and save to remove its key."
             refreshGeminiModels()
+            refreshOpenAICompatibleModels()
         } catch {
             apiKeySaveFailed = true
             apiKeyMessage = error.localizedDescription

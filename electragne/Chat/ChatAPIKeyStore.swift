@@ -4,6 +4,7 @@ import Security
 nonisolated enum ChatAPIProvider: String, CaseIterable, Sendable {
     case gemini
     case ollama
+    case openAICompatible
     case dobbs
     case linear
 
@@ -11,6 +12,7 @@ nonisolated enum ChatAPIProvider: String, CaseIterable, Sendable {
         switch self {
         case .gemini: "GEMINI_API_KEY"
         case .ollama: "OLLAMA_API_KEY"
+        case .openAICompatible: "OPENAI_API_KEY"
         case .dobbs: "DOBBS_TOKEN"
         case .linear: "LINEAR_API_KEY"
         }
@@ -20,6 +22,7 @@ nonisolated enum ChatAPIProvider: String, CaseIterable, Sendable {
         switch self {
         case .gemini: ".gemini.api.key"
         case .ollama: ".ollama/api_key"
+        case .openAICompatible: ".openai_api_key"
         case .dobbs: ".dobbs/token"
         case .linear: ".linear.api.key"
         }

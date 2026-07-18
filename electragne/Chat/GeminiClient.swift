@@ -29,8 +29,8 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
     nonisolated static let defaultModel = ChatConfig.default.geminiModel
     nonisolated static let systemPrompt = ChatSystemPrompt.make(providerDetails: """
         Markdown formatting is welcome: bold, italics, [title](url) links, \
-        bullet lists using "-", and inline math using $...$ or \\(...\\); \
-        avoid headings, tables, code blocks, and display-math delimiters. \
+        bullet lists using "-", headings, tables, and inline math using $...$ or \\(...\\); \
+        avoid code blocks and display-math delimiters. \
         You have Google Search available: use it when asked to search, or \
         for current events and facts you are not sure about. You can manage \
         Apple Reminders and Notes, manage countdown timers, open apps and websites, \

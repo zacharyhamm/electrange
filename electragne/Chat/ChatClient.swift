@@ -140,12 +140,14 @@ nonisolated struct ChatMessage: Equatable, Codable, Sendable {
     var role: String
     var content: String
     var toolName: String? = nil
+    var toolCallID: String? = nil
     var toolCalls: [ChatToolCall]? = nil
 
     enum CodingKeys: String, CodingKey {
         case role
         case content
         case toolName = "tool_name"
+        case toolCallID = "tool_call_id"
         case toolCalls = "tool_calls"
     }
 }
@@ -171,11 +173,37 @@ protocol ChatClient {
     ) async throws
 }
 
-/// Which backend the menu-bar toggle has selected.
+nonisolated enum ChatProvider: String, CaseIterable, Sendable {
+    case ollama
+    case gemini
+    case openAICompatible
+
+    var displayName: String {
+        switch self {
+        case .ollama: "Ollama"
+        case .gemini: "Gemini"
+        case .openAICompatible: "OpenAI-compatible"
+        }
+    }
+}
+
+/// Which backend the menu-bar provider submenu has selected.
 enum ChatProviderPreference {
+    nonisolated static let providerKey = "chatProvider"
     nonisolated static let useGeminiKey = "useGeminiChat"
 
-    static var useGemini: Bool {
-        UserDefaults.standard.bool(forKey: useGeminiKey)
+    nonisolated static func selected(in defaults: UserDefaults = .standard) -> ChatProvider {
+        if let raw = defaults.string(forKey: providerKey), let provider = ChatProvider(rawValue: raw) {
+            return provider
+        }
+        let provider: ChatProvider = defaults.bool(forKey: useGeminiKey) ? .gemini : .ollama
+        defaults.set(provider.rawValue, forKey: providerKey)
+        return provider
+    }
+
+    static var selected: ChatProvider { selected() }
+
+    static func set(_ provider: ChatProvider, in defaults: UserDefaults = .standard) {
+        defaults.set(provider.rawValue, forKey: providerKey)
     }
 }

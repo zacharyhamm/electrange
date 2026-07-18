@@ -3,6 +3,7 @@ import Foundation
 nonisolated enum ChatToolProvider: Hashable, Sendable {
     case gemini
     case ollama
+    case openAICompatible
 }
 
 nonisolated enum ChatToolFamily: Equatable, Sendable {
@@ -46,7 +47,7 @@ nonisolated enum ChatToolRegistry {
             "web_search", family: .webSearch,
             description: "Search the web and return the top results.",
             properties: ["query": property(.string, "The search query")],
-            required: ["query"], providers: [.ollama],
+            required: ["query"], providers: [.ollama, .openAICompatible],
             initialStatus: "Searching the web…", executionStatus: "Searching the web…"
         ),
         definition(
@@ -413,7 +414,7 @@ nonisolated enum ChatToolRegistry {
         description: String,
         properties: [String: ChatToolParameter] = [:],
         required: [String] = [],
-        providers: Set<ChatToolProvider> = [.gemini, .ollama],
+        providers: Set<ChatToolProvider> = [.gemini, .ollama, .openAICompatible],
         initialStatus: String,
         executionStatus: String
     ) -> ChatToolDefinition {

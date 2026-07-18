@@ -15,13 +15,16 @@ struct ChatToolRegistryTests {
     @Test func providerCatalogsContainEveryApplicableDefinition() {
         let gemini = ChatToolRegistry.definitions(for: .gemini)
         let ollama = ChatToolRegistry.definitions(for: .ollama)
+        let openAICompatible = ChatToolRegistry.definitions(for: .openAICompatible)
 
-        // web_search is the only Ollama-only tool: Gemini uses server-side
-        // grounding instead. Every other definition is shared.
+        // Gemini uses server-side grounding; Ollama and OpenAI-compatible
+        // providers can use the hosted Ollama web-search executor.
         #expect(gemini.count == ChatToolRegistry.definitions.count - 1)
         #expect(!gemini.contains { $0.name == "web_search" })
         #expect(ollama.count == ChatToolRegistry.definitions.count)
         #expect(ollama.first?.name == "web_search")
+        #expect(openAICompatible.count == ChatToolRegistry.definitions.count)
+        #expect(openAICompatible.first?.name == "web_search")
         #expect(Set(gemini.map(\.name)).isSubset(of: Set(ollama.map(\.name))))
     }
 

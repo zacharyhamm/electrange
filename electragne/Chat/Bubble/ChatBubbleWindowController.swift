@@ -18,6 +18,7 @@ final class ChatBubbleWindowController {
     private var onDismiss: (() -> Void)?
     private let ollamaClient: any ChatClient
     private let geminiClient: any ChatClient
+    private let openAICompatibleClient: any ChatClient
     private let toolRouter: ChatToolRouter
     private var streamTask: Task<Void, Never>?
     private let confirmationBroker = ConfirmationBroker()
@@ -41,11 +42,13 @@ final class ChatBubbleWindowController {
     init(
         ollamaClient: any ChatClient = OllamaClient(),
         geminiClient: any ChatClient = GeminiClient(),
+        openAICompatibleClient: any ChatClient = OpenAICompatibleClient(),
         toolRouter: ChatToolRouter,
         chatStore: ChatStore = ChatStore()
     ) {
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
+        self.openAICompatibleClient = openAICompatibleClient
         self.toolRouter = toolRouter
         self.chatStore = chatStore
 
@@ -166,8 +169,12 @@ final class ChatBubbleWindowController {
 
         history.append(ChatMessage(role: "user", content: userMessage))
 
-        let useGemini = ChatProviderPreference.useGemini
-        let client: any ChatClient = useGemini ? geminiClient : ollamaClient
+        let provider = ChatProviderPreference.selected
+        let client: any ChatClient = switch provider {
+        case .ollama: ollamaClient
+        case .gemini: geminiClient
+        case .openAICompatible: openAICompatibleClient
+        }
         let model = model
         let messages = history
         let streamID = UUID()
@@ -199,7 +206,7 @@ final class ChatBubbleWindowController {
             } catch {
                 model.phase = .failed(
                     error is URLError
-                        ? (useGemini ? "Gemini not reachable" : "Ollama not reachable")
+                        ? "\(provider.displayName) not reachable"
                         : error.localizedDescription
                 )
             }

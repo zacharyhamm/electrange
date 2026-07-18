@@ -25,7 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     /// single mechanism that identifies it.
     private var petWindow: NSWindow? { appModel?.petViewModel.petWindow }
     private var toggleVisibilityMenuItem: NSMenuItem?
-    private var geminiToggleMenuItem: NSMenuItem?
+    private var chatProviderMenuItems: [ChatProvider: NSMenuItem] = [:]
     private var isPetVisible = true
     private var summonHotkey: GlobalHotkey?
     private var settingsWindow: NSWindow?
@@ -143,14 +143,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         chatItem.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(chatItem)
 
-        let geminiItem = NSMenuItem(
-            title: "Use Gemini (Cloud)",
-            action: #selector(toggleGeminiChat),
-            keyEquivalent: ""
-        )
-        geminiItem.state = ChatProviderPreference.useGemini ? .on : .off
-        geminiToggleMenuItem = geminiItem
-        menu.addItem(geminiItem)
+        let providerItem = NSMenuItem(title: "Chat Provider", action: nil, keyEquivalent: "")
+        let providerMenu = NSMenu(title: "Chat Provider")
+        for provider in ChatProvider.allCases {
+            let item = NSMenuItem(
+                title: provider.displayName,
+                action: #selector(selectChatProvider(_:)),
+                keyEquivalent: ""
+            )
+            item.representedObject = provider.rawValue
+            item.state = ChatProviderPreference.selected == provider ? .on : .off
+            chatProviderMenuItems[provider] = item
+            providerMenu.addItem(item)
+        }
+        providerItem.submenu = providerMenu
+        menu.addItem(providerItem)
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Increase Size", action: #selector(increaseSize), keyEquivalent: "+"))
@@ -166,11 +173,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         summonPetToChat()
     }
 
-    @objc func toggleGeminiChat() {
-        let defaults = UserDefaults.standard
-        let useGemini = !defaults.bool(forKey: ChatProviderPreference.useGeminiKey)
-        defaults.set(useGemini, forKey: ChatProviderPreference.useGeminiKey)
-        geminiToggleMenuItem?.state = useGemini ? .on : .off
+    @objc func selectChatProvider(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let provider = ChatProvider(rawValue: raw) else { return }
+        ChatProviderPreference.set(provider)
+        for (candidate, item) in chatProviderMenuItems {
+            item.state = candidate == provider ? .on : .off
+        }
     }
 
     private func summonPetToChat() {

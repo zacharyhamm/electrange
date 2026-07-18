@@ -80,7 +80,7 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
     nonisolated static let defaultModel = ChatConfig.default.ollamaModel
     nonisolated static let systemPrompt = ChatSystemPrompt.make(providerDetails: """
         Markdown formatting is welcome: bold, italics, [title](url) links, \
-        and bullet lists using "-"; avoid headings, tables, and code blocks. \
+        bullet lists using "-", headings, and tables; avoid code blocks. \
         You can manage Apple Reminders and Notes, manage countdown timers, open \
         apps and websites, search approved folders by file name, reveal search \
         results in Finder, use Gmail and Google Calendar from connected Google accounts, and search the web. \
