@@ -26,6 +26,7 @@ final class ChatBubbleWindowController {
     /// across app launches. Never trimmed — the request-time cap for the
     /// local model happens in startStream.
     private let chatStore: ChatStore
+    private let memoryEngine: MemoryEngine
     private var currentChat: StoredChat
     private var activeStreamID: UUID?
     private var pendingCalendarEvents: [CalendarEventDetails] = []
@@ -44,13 +45,15 @@ final class ChatBubbleWindowController {
         geminiClient: any ChatClient = GeminiClient(),
         openAICompatibleClient: any ChatClient = OpenAICompatibleClient(),
         toolRouter: ChatToolRouter,
-        chatStore: ChatStore = ChatStore()
+        chatStore: ChatStore = ChatStore(),
+        memoryEngine: MemoryEngine = MemoryEngine()
     ) {
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
         self.openAICompatibleClient = openAICompatibleClient
         self.toolRouter = toolRouter
         self.chatStore = chatStore
+        self.memoryEngine = memoryEngine
 
         // Resume the most recent chat across launches; start fresh otherwise.
         if let recent = chatStore.listSummaries().first,
@@ -176,7 +179,15 @@ final class ChatBubbleWindowController {
         case .openAICompatible: openAICompatibleClient
         }
         let model = model
-        let messages = history
+        var messages = history
+        if let memories = memoryEngine.contextBlock(for: userMessage) {
+            // Injected into the outgoing request only, right before the new
+            // user turn — never persisted to the chat or shown in the bubble.
+            messages.insert(
+                ChatMessage(role: "system", content: memories),
+                at: messages.count - 1
+            )
+        }
         let streamID = UUID()
         activeStreamID = streamID
 
@@ -227,6 +238,20 @@ final class ChatBubbleWindowController {
                     self.history.append(ChatMessage(role: "assistant", content: streamed))
                 }
                 self.persistCurrentChat()
+                if toolsEnabled, !streamed.isEmpty {
+                    // Form a memory from the completed exchange. Proactive
+                    // calendar summaries (toolsEnabled == false) are excluded:
+                    // repetitive machine traffic would silt the graph.
+                    let chatID = self.currentChat.id
+                    Task {
+                        await self.memoryEngine.ingest(
+                            userText: userMessage,
+                            assistantText: streamed,
+                            chatID: chatID,
+                            client: client
+                        )
+                    }
+                }
             }
 
             if let url = openURLAfterResponse {

@@ -13,11 +13,16 @@ import Foundation
 final class AppModel {
     let petViewModel = PetViewModel()
     let calendarReminderMonitor = CalendarReminderMonitor()
+    let memoryEngine = MemoryEngine()
     let chatBubbleController: ChatBubbleWindowController
 
     init() {
         chatBubbleController = ChatBubbleWindowController(
-            toolRouter: ChatToolRouter(calendarMonitor: calendarReminderMonitor)
+            toolRouter: ChatToolRouter(
+                calendarMonitor: calendarReminderMonitor,
+                memoryEngine: memoryEngine
+            ),
+            memoryEngine: memoryEngine
         )
     }
 

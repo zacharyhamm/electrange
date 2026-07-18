@@ -17,6 +17,7 @@ nonisolated enum ChatToolFamily: Equatable, Sendable {
     case slack
     case linear
     case status
+    case memory
 }
 
 nonisolated enum ChatToolParameterType: String, Equatable, Sendable {
@@ -341,6 +342,14 @@ nonisolated enum ChatToolRegistry {
                 "threadTS": property(.string, "Optional thread ts from a message id to reply in that thread."),
             ], required: ["channel", "text"], initialStatus: "Confirm Slack message…",
             executionStatus: "Sending Slack message…"
+        ),
+        definition(
+            "recall_memory", family: .memory,
+            description: "Search your long-term memory of past conversations with the owner. Use when asked what you remember, or when past context about the owner would help.",
+            properties: [
+                "query": property(.string, "Topic, name, or question to look up."),
+            ], required: ["query"], initialStatus: "Remembering…",
+            executionStatus: "Remembering…"
         ),
         definition(
             "list_linear_teams", family: .linear,

@@ -24,4 +24,6 @@ nonisolated enum Log {
     static let calendar = Logger(subsystem: subsystem, category: "calendar")
     /// MCP server connections and OAuth (MCPServerManager, MCPOAuth).
     static let mcp = Logger(subsystem: subsystem, category: "mcp")
+    /// Long-term memory formation and retrieval (MemoryEngine, MemoryExtractor).
+    static let memory = Logger(subsystem: subsystem, category: "memory")
 }

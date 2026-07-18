@@ -5,13 +5,17 @@ final class ChatToolRouter {
     private let executors: [ChatToolFamily: any ToolExecuting]
     private let mcpExecutor: any ToolExecuting
 
-    convenience init(calendarMonitor: CalendarReminderMonitor? = nil) {
+    convenience init(
+        calendarMonitor: CalendarReminderMonitor? = nil,
+        memoryEngine: MemoryEngine? = nil
+    ) {
         self.init(
             reminderExecutor: AppleReminderService(),
             notesExecutor: AppleNotesService(),
             desktopExecutor: DesktopToolService(),
             timerExecutor: TimerToolService(),
-            calendarMonitor: calendarMonitor
+            calendarMonitor: calendarMonitor,
+            memoryExecutor: memoryEngine.map { MemoryToolExecutor(engine: $0) }
         )
     }
 
@@ -27,7 +31,8 @@ final class ChatToolRouter {
         webSearchExecutor: (any ToolExecuting)? = nil,
         mcpExecutor: (any ToolExecuting)? = nil,
         calendarMonitor: CalendarReminderMonitor? = nil,
-        statusExecutor: (any ToolExecuting)? = nil
+        statusExecutor: (any ToolExecuting)? = nil,
+        memoryExecutor: (any ToolExecuting)? = nil
     ) {
         self.mcpExecutor = mcpExecutor ?? MCPToolExecutor()
         executors = [
@@ -41,6 +46,7 @@ final class ChatToolRouter {
             .linear: LinearToolAdapter(linearExecutor ?? LinearToolService()),
             .webSearch: webSearchExecutor ?? WebSearchExecutor(),
             .status: statusExecutor ?? AppStatusExecutor(monitor: calendarMonitor),
+            .memory: memoryExecutor ?? MemoryToolExecutor(engine: MemoryEngine()),
         ]
     }
 

@@ -178,7 +178,7 @@ struct OllamaClientTests {
             try JSONSerialization.jsonObject(with: body) as? [String: Any]
         )
         let tools = try #require(json["tools"] as? [[String: Any]])
-        #expect(tools.count == 39)
+        #expect(tools.count == 40)
         let function = try #require(tools[0]["function"] as? [String: Any])
         #expect(function["name"] as? String == "web_search")
         let parameters = try #require(function["parameters"] as? [String: Any])
