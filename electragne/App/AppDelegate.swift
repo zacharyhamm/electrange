@@ -29,7 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private var isPetVisible = true
     private var summonHotkey: GlobalHotkey?
     private var settingsWindow: NSWindow?
-    private var collectionBehaviorObserver: NSObjectProtocol?
+    private var collectionBehaviorObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
@@ -94,7 +94,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         window.isOpaque = false
         window.backgroundColor = .clear
         window.level = .floating
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        PetWindowPresentation.enforce(on: window)
         window.isMovableByWindowBackground = false
         window.hasShadow = false
         window.titlebarAppearsTransparent = true
@@ -105,20 +105,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
 
-        // SwiftUI's Window scene rewrites collectionBehavior after launch,
-        // replacing .fullScreenAuxiliary with .fullScreenNone — which bars the
-        // pet from other apps' fullscreen spaces. Reassert it whenever it drops.
-        if collectionBehaviorObserver == nil {
-            collectionBehaviorObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.didUpdateNotification, object: window, queue: nil
-            ) { [weak window] _ in
-                // didUpdate is posted synchronously on the main thread.
-                MainActor.assumeIsolated {
-                    guard let window, !window.collectionBehavior.contains(.fullScreenAuxiliary) else { return }
-                    window.collectionBehavior.remove(.fullScreenNone)
-                    window.collectionBehavior.insert(.fullScreenAuxiliary)
-                }
-            }
+        // SwiftUI's Window scene rewrites collectionBehavior after launch.
+        // Observe that property directly and restore the overlay policy.
+        if collectionBehaviorObservation == nil {
+            collectionBehaviorObservation = PetWindowPresentation.observe(window)
         }
 
         // Note: Window size is managed by SwiftUI via .windowResizability(.contentSize)

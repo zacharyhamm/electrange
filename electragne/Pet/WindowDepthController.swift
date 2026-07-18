@@ -32,6 +32,7 @@ final class WindowDepthController {
         targetWindowID = windowID
         guard let window = petWindow else { return }
         window.level = .normal
+        PetWindowPresentation.enforce(on: window)
         window.order(.above, relativeTo: Int(windowID))
 
         // Re-assert the instant another app comes forward — the exact moment the
@@ -60,6 +61,7 @@ final class WindowDepthController {
         targetWindowID = nil
         guard let window = petWindow else { return }
         window.level = .floating
+        PetWindowPresentation.enforce(on: window)
         // Don't orderFront a pet hidden via the menu bar.
         if window.isVisible {
             window.orderFront(nil)

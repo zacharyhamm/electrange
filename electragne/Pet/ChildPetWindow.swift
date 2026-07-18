@@ -85,7 +85,7 @@ class ChildPetWindow: NSWindow {
         self.isOpaque = false
         self.backgroundColor = .clear
         self.level = .floating
-        self.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        PetWindowPresentation.enforce(on: self)
         self.hasShadow = false
 
         // Setup image view

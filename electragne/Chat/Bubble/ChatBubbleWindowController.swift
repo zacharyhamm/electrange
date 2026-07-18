@@ -373,7 +373,7 @@ final class ChatBubbleWindowController {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        PetWindowPresentation.enforce(on: panel)
         panel.isMovable = false
         panel.hidesOnDeactivate = false
         panel.contentView = NSHostingView(rootView: rootView)
