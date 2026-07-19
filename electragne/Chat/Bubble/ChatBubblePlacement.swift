@@ -24,6 +24,25 @@ struct ChatBubblePlacement: Equatable {
     let tailEdge: ChatBubbleTailEdge
     let tailOffset: CGFloat
 
+    /// The largest bubble that still fits the visible frame with margins and
+    /// leaves room for the pet (plus gap) stacked below it. Never smaller
+    /// than minPanelSize so the panel's min/max stay consistent.
+    static func maxSize(petFrame: CGRect, visibleFrame: CGRect) -> CGSize {
+        CGSize(
+            width: max(
+                minPanelSize.width,
+                min(maxPanelSize.width, visibleFrame.width - 2 * screenMargin)
+            ),
+            height: max(
+                minPanelSize.height,
+                min(
+                    maxPanelSize.height,
+                    visibleFrame.height - 2 * screenMargin - petFrame.height - petGap
+                )
+            )
+        )
+    }
+
     static func calculate(
         petFrame: CGRect,
         visibleFrame: CGRect,

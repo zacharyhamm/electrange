@@ -82,6 +82,34 @@ struct ChatInteractionTests {
         #expect(placement.tailOffset == 170)
     }
 
+    @Test func maxBubbleSizeLeavesRoomForPetAndScreenMargins() {
+        let size = ChatBubblePlacement.maxSize(
+            petFrame: CGRect(x: 700, y: 0, width: 40, height: 40),
+            visibleFrame: CGRect(x: 0, y: 0, width: 600, height: 500)
+        )
+
+        // Width: 600 - 2*8; height: 500 - 2*8 - 40 (pet) - 4 (gap).
+        #expect(size == CGSize(width: 584, height: 440))
+    }
+
+    @Test func maxBubbleSizeIsCappedByMaxPanelSizeOnBigScreens() {
+        let size = ChatBubblePlacement.maxSize(
+            petFrame: CGRect(x: 700, y: 0, width: 40, height: 40),
+            visibleFrame: CGRect(x: 0, y: 0, width: 5120, height: 2880)
+        )
+
+        #expect(size == ChatBubblePlacement.maxPanelSize)
+    }
+
+    @Test func maxBubbleSizeNeverDropsBelowMinPanelSize() {
+        let size = ChatBubblePlacement.maxSize(
+            petFrame: CGRect(x: 0, y: 0, width: 200, height: 200),
+            visibleFrame: CGRect(x: 0, y: 0, width: 300, height: 250)
+        )
+
+        #expect(size == ChatBubblePlacement.minPanelSize)
+    }
+
     @Test func summonPlacesPetInRightThirdOnTheGround() {
         let origin = PetViewModel.summonOrigin(
             petSize: 90,

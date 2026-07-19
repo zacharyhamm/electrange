@@ -138,6 +138,21 @@ final class ChatBubbleWindowController {
             ?? NSScreen.main
         guard let visibleFrame = screen?.visibleFrame else { return }
 
+        // Cap the bubble so it fits on screen with the pet below it, and
+        // shrink it now if it's already past the cap (setContentSize is not
+        // constrained by maxSize; only user resizing is).
+        let maxSize = ChatBubblePlacement.maxSize(
+            petFrame: petWindow.frame,
+            visibleFrame: visibleFrame
+        )
+        panel.maxSize = maxSize
+        if panel.frame.width > maxSize.width || panel.frame.height > maxSize.height {
+            panel.setContentSize(CGSize(
+                width: min(panel.frame.width, maxSize.width),
+                height: min(panel.frame.height, maxSize.height)
+            ))
+        }
+
         let placement = ChatBubblePlacement.calculate(
             petFrame: petWindow.frame,
             visibleFrame: visibleFrame,
