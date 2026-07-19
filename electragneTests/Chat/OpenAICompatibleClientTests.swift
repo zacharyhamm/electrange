@@ -29,14 +29,14 @@ struct OpenAICompatibleClientTests {
         #expect(compatibleJSON["thinking"] == nil)
     }
 
-    @Test func requestOnlyOffersOllamaWebSearchWhenItsKeyIsAvailable() throws {
-        func toolNames(ollamaWebSearchAvailable: Bool) throws -> [String] {
+    @Test func requestOnlyOffersWebSearchWhenEndpointIsConfigured() throws {
+        func toolNames(webSearchAvailable: Bool) throws -> [String] {
             let body = try OpenAICompatibleClient.makeRequestBody(
                 baseURL: OpenAICompatibleClient.defaultBaseURL,
                 model: "test",
                 thinking: false,
                 history: [],
-                ollamaWebSearchAvailable: ollamaWebSearchAvailable,
+                webSearchAvailable: webSearchAvailable,
                 mcpTools: []
             )
             let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
@@ -44,8 +44,8 @@ struct OpenAICompatibleClientTests {
             return tools.compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
         }
 
-        #expect(try !toolNames(ollamaWebSearchAvailable: false).contains("web_search"))
-        #expect(try toolNames(ollamaWebSearchAvailable: true).contains("web_search"))
+        #expect(try !toolNames(webSearchAvailable: false).contains("web_search"))
+        #expect(try toolNames(webSearchAvailable: true).contains("web_search"))
     }
 
     @Test func streamAssemblesParallelCallsAndReplaysReasoningAndIDs() async throws {

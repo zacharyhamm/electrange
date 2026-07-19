@@ -130,11 +130,11 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
         model: String,
         thinking: Bool,
         history: [ChatMessage],
-        ollamaWebSearchAvailable: Bool = false,
+        webSearchAvailable: Bool = false,
         mcpTools: [MCPToolDescriptor]? = nil
     ) throws -> Data {
         let definitions = ChatToolRegistry.definitions(for: .openAICompatible).filter {
-            $0.family != .webSearch || ollamaWebSearchAvailable
+            $0.family != .webSearch || webSearchAvailable
         }
         let tools = definitions.map { definition in
             RequestBody.Tool(function: .init(
@@ -232,7 +232,7 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
             model: model,
             thinking: thinking,
             history: messages,
-            ollamaWebSearchAvailable: ChatAPIKeyStore.load(for: .ollama) != nil
+            webSearchAvailable: UserPreferences.searxngEndpoint() != nil
         )
 
         let (lines, response) = try await transport.lines(for: request)

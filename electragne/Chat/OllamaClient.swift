@@ -7,25 +7,14 @@ nonisolated struct OllamaChatChunk: Equatable {
     var toolCalls: [ChatToolCall] = []
 }
 
-/// Client for Ollama's hosted web search API (requires an ollama.com API key).
-nonisolated struct OllamaWebSearch {
-    static let endpoint = URL(string: "https://ollama.com/api/web_search")!
+/// Client for a self-hosted SearXNG instance's JSON search API.
+nonisolated struct SearXNGSearch {
     static let maxResults = 4
     static let maxResultCharacters = 1500
     let transport: any ChatHTTPTransport
 
     init(transport: any ChatHTTPTransport = LoggingTransport()) {
         self.transport = transport
-    }
-
-    private struct SearchRequest: Encodable {
-        let query: String
-        let maxResults: Int
-
-        enum CodingKeys: String, CodingKey {
-            case query
-            case maxResults = "max_results"
-        }
     }
 
     private struct SearchResponse: Decodable {
@@ -38,20 +27,25 @@ nonisolated struct OllamaWebSearch {
         let results: [Result]
     }
 
+    /// GET {endpoint}/search?q={query}&format=json for the configured endpoint.
+    nonisolated static func searchURL(endpoint: String, query: String) -> URL? {
+        guard var components = URLComponents(string: endpoint) else { return nil }
+        components.path = components.path.hasSuffix("/search")
+            ? components.path : components.path + "/search"
+        components.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "format", value: "json"),
+        ]
+        return components.url.flatMap { $0.scheme == nil ? nil : $0 }
+    }
+
     func resultsText(query: String) async throws -> String {
-        guard let key = ChatAPIKeyStore.load(for: .ollama) else {
-            throw ChatProviderError.missingAPIKey(.ollama)
+        guard let endpoint = UserPreferences.searxngEndpoint(),
+              let url = Self.searchURL(endpoint: endpoint, query: query) else {
+            throw ChatProviderError.invalidEndpoint
         }
 
-        var request = URLRequest(url: Self.endpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONEncoder().encode(
-            SearchRequest(query: query, maxResults: Self.maxResults)
-        )
-
-        let (data, response) = try await transport.data(for: request)
+        let (data, response) = try await transport.data(for: URLRequest(url: url))
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw ChatProviderError.badStatus(http.statusCode)
         }
@@ -63,7 +57,7 @@ nonisolated struct OllamaWebSearch {
               !decoded.results.isEmpty else {
             return "No results found."
         }
-        return decoded.results.enumerated().map { index, result in
+        return decoded.results.prefix(maxResults).enumerated().map { index, result in
             let content = String((result.content ?? "").prefix(maxResultCharacters))
             return """
                 Result \(index + 1): \(result.title ?? "Untitled")

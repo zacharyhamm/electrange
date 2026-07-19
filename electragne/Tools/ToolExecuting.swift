@@ -157,11 +157,11 @@ final class LinearToolAdapter: ToolExecuting {
 
 // MARK: - Web search
 
-/// Runs the hosted ollama.com web search through the shared tool router.
+/// Runs the self-hosted SearXNG web search through the shared tool router.
 @MainActor
 final class WebSearchExecutor: ToolExecuting {
-    private let webSearch: OllamaWebSearch
-    init(webSearch: OllamaWebSearch = OllamaWebSearch()) { self.webSearch = webSearch }
+    private let webSearch: SearXNGSearch
+    init(webSearch: SearXNGSearch = SearXNGSearch()) { self.webSearch = webSearch }
 
     func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
         let query = call.arguments["query"]?.stringValue ?? ""
@@ -173,8 +173,8 @@ final class WebSearchExecutor: ToolExecuting {
                     "status": .string("ok"),
                     "results": .string(text),
                 ])
-            } catch ChatProviderError.missingAPIKey(.ollama) {
-                return .error("Web search needs an ollama.com API key. Add it in Electragne Settings.")
+            } catch ChatProviderError.invalidEndpoint {
+                return .error("Web search needs a SearXNG endpoint. Set it in Electragne Settings.")
             } catch {
                 // Let the model explain the failure instead of aborting.
                 return .error("Web search failed: \(error.localizedDescription)")

@@ -31,8 +31,6 @@ nonisolated enum ChatProviderError: LocalizedError, Equatable {
         switch self {
         case .badStatus:
             "The chat provider returned an error."
-        case .missingAPIKey(.ollama):
-            "Web search needs an ollama.com API key — add it in Electragne Settings"
         case .missingAPIKey(.gemini):
             "Gemini needs an API key — add it in Electragne Settings"
         case .missingAPIKey(.openAICompatible):
@@ -95,11 +93,6 @@ struct ChatProviderEngine: ChatClient {
             for call in toolCalls {
                 onStatus(Self.initialStatus(for: call.name))
                 let result = await onToolCall(call)
-                if call.name == "web_search",
-                   result.response["status"] == .string("error"),
-                   result.response["message"]?.stringValue?.contains("API key") == true {
-                    throw ChatProviderError.missingAPIKey(.ollama)
-                }
                 backend.appendToolResult(result, for: call, to: &messages)
             }
             onStatus("Thinking…")

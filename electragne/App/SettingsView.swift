@@ -15,7 +15,7 @@ struct SettingsView: View {
     @State private var geminiAPIKey = ""
     @State private var availableGeminiModels: [GeminiClient.GeminiModel] = []
     @State private var geminiModelError: String?
-    @State private var ollamaAPIKey = ""
+    @AppStorage(UserPreferences.searxngEndpointKey) private var searxngEndpoint = ""
     @State private var openAICompatibleAPIKey = ""
     @AppStorage(UserPreferences.openAICompatibleBaseURLKey)
     private var openAICompatibleBaseURL = ChatConfig.default.openAICompatibleBaseURL
@@ -66,7 +66,6 @@ struct SettingsView: View {
         .frame(width: 560, height: 520)
         .onAppear {
             geminiAPIKey = ChatAPIKeyStore.key(for: .gemini) ?? ""
-            ollamaAPIKey = ChatAPIKeyStore.key(for: .ollama) ?? ""
             openAICompatibleAPIKey = ChatAPIKeyStore.key(for: .openAICompatible) ?? ""
             dobbsToken = ChatAPIKeyStore.key(for: .dobbs) ?? ""
             linearAPIKey = ChatAPIKeyStore.key(for: .linear) ?? ""
@@ -149,12 +148,12 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                     }
 
-                    Text("Ollama API key")
+                    Text("SearXNG endpoint")
                         .font(.subheadline.weight(.medium))
                         .padding(.top, 3)
-                    SecureField("Paste your ollama.com API key", text: $ollamaAPIKey)
+                    TextField("http://localhost:8888", text: $searxngEndpoint)
                         .textFieldStyle(.roundedBorder)
-                    Text("The Ollama key is used only for hosted web search; local Ollama chat remains keyless.")
+                    Text("Local SearXNG instance used for the web_search tool. Leave blank to disable web search.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -554,10 +553,8 @@ struct SettingsView: View {
     private func saveAPIKeys() {
         do {
             try ChatAPIKeyStore.setKey(geminiAPIKey, for: .gemini)
-            try ChatAPIKeyStore.setKey(ollamaAPIKey, for: .ollama)
             try ChatAPIKeyStore.setKey(openAICompatibleAPIKey, for: .openAICompatible)
             geminiAPIKey = ChatAPIKeyStore.key(for: .gemini) ?? ""
-            ollamaAPIKey = ChatAPIKeyStore.key(for: .ollama) ?? ""
             openAICompatibleAPIKey = ChatAPIKeyStore.key(for: .openAICompatible) ?? ""
             apiKeySaveFailed = false
             apiKeyMessage = "Saved in macOS Keychain. Clear a field and save to remove its key."

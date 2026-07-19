@@ -37,6 +37,15 @@ enum UserPreferences {
         trimmed(defaults.string(forKey: dobbsWorkspaceKey))
     }
 
+    // MARK: SearXNG (web_search backend)
+
+    nonisolated static let searxngEndpointKey = "searxngEndpoint"
+
+    /// The SearXNG base URL from Settings, or nil when unset/blank (web search disabled).
+    nonisolated static func searxngEndpoint(in defaults: UserDefaults = .standard) -> String? {
+        trimmed(defaults.string(forKey: searxngEndpointKey))
+    }
+
     // MARK: Gemini model (picked in Settings)
 
     nonisolated static let geminiModelKey = "geminiModel"

@@ -52,23 +52,6 @@ struct OllamaClientTests {
         }
     }
 
-    @Test func missingWebSearchKeyKeepsTheSettingsError() async {
-        let transport = StubChatHTTPTransport([
-            .init(lines: [#"{"message":{"content":"","tool_calls":[{"function":{"name":"web_search","arguments":{"query":"news"}}}]},"done":true}"#]),
-        ])
-        let client = OllamaClient(transport: transport)
-
-        await #expect(throws: ChatProviderError.missingAPIKey(.ollama)) {
-            try await client.streamChat(
-                history: [],
-                onToolCall: { _ in
-                    .error("Web search needs an ollama.com API key. Add it in Electragne Settings.")
-                },
-                onToken: { _ in }
-            )
-        }
-    }
-
     @Test func streamPropagatesCancellation() async {
         let client = OllamaClient(transport: StubChatHTTPTransport([
             .init(error: CancellationError()),
@@ -240,50 +223,63 @@ struct OllamaClientTests {
               {"title":"Second","url":"https://example.com/b","content":"\(longContent)"}
             ]}
             """
-        let text = OllamaWebSearch.formatResults(from: Data(payload.utf8))
+        let text = SearXNGSearch.formatResults(from: Data(payload.utf8))
 
         #expect(text.contains("Result 1: First"))
         #expect(text.contains("URL: https://example.com/a"))
         #expect(text.contains("short answer"))
         #expect(text.contains("Result 2: Second"))
-        #expect(text.count < 2500 + longContent.count - OllamaWebSearch.maxResultCharacters)
+        #expect(text.count < 2500 + longContent.count - SearXNGSearch.maxResultCharacters)
+    }
+
+    @Test func formatsOnlyTheFirstMaxResults() throws {
+        let results = (1...10).map {
+            #"{"title":"T\#($0)","url":"https://example.com/\#($0)","content":"c"}"#
+        }.joined(separator: ",")
+        let text = SearXNGSearch.formatResults(from: Data(#"{"results":[\#(results)]}"#.utf8))
+
+        #expect(text.contains("Result \(SearXNGSearch.maxResults): T\(SearXNGSearch.maxResults)"))
+        #expect(!text.contains("T\(SearXNGSearch.maxResults + 1)"))
+    }
+
+    @Test func searchURLAppendsSearchPathAndQuery() {
+        let url = SearXNGSearch.searchURL(endpoint: "http://localhost:8888", query: "hello world")
+        #expect(url?.absoluteString == "http://localhost:8888/search?q=hello%20world&format=json")
+        #expect(SearXNGSearch.searchURL(endpoint: "", query: "x") == nil)
     }
 
     @Test func emptyOrMalformedSearchResponsesReadAsNoResults() {
-        #expect(OllamaWebSearch.formatResults(from: Data(#"{"results":[]}"#.utf8)) == "No results found.")
-        #expect(OllamaWebSearch.formatResults(from: Data("garbage".utf8)) == "No results found.")
+        #expect(SearXNGSearch.formatResults(from: Data(#"{"results":[]}"#.utf8)) == "No results found.")
+        #expect(SearXNGSearch.formatResults(from: Data("garbage".utf8)) == "No results found.")
     }
 
     @Test func apiKeyComesFromEnvironmentFirstThenFile() throws {
         #expect(
             ChatAPIKeyStore.load(
-                for: .ollama,
+                for: .gemini,
                 keychainKey: nil,
-                environment: ["OLLAMA_API_KEY": " key-from-env\n"],
+                environment: ["GEMINI_API_KEY": " key-from-env\n"],
                 homeDirectory: "/nonexistent"
             ) == "key-from-env"
         )
 
         let home = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ollama-key-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(
-            at: home.appendingPathComponent(".ollama"),
-            withIntermediateDirectories: true
-        )
+            .appendingPathComponent("gemini-key-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try "key-from-file\n".write(
-            to: home.appendingPathComponent(".ollama/api_key"),
+            to: home.appendingPathComponent(".gemini.api.key"),
             atomically: true,
             encoding: .utf8
         )
         defer { try? FileManager.default.removeItem(at: home) }
 
-        #expect(ChatAPIKeyStore.load(for: .ollama, keychainKey: nil, environment: [:], homeDirectory: home.path) == "key-from-file")
-        #expect(ChatAPIKeyStore.load(for: .ollama, keychainKey: nil, environment: [:], homeDirectory: "/nonexistent") == nil)
+        #expect(ChatAPIKeyStore.load(for: .gemini, keychainKey: nil, environment: [:], homeDirectory: home.path) == "key-from-file")
+        #expect(ChatAPIKeyStore.load(for: .gemini, keychainKey: nil, environment: [:], homeDirectory: "/nonexistent") == nil)
         #expect(
             ChatAPIKeyStore.load(
-                for: .ollama,
+                for: .gemini,
                 keychainKey: " key-from-keychain ",
-                environment: ["OLLAMA_API_KEY": "key-from-env"],
+                environment: ["GEMINI_API_KEY": "key-from-env"],
                 homeDirectory: home.path
             ) == "key-from-keychain"
         )
