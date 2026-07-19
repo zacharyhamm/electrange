@@ -232,17 +232,26 @@ nonisolated enum ChatAPIKeyStore {
     }
 
     #if DEBUG
+    /// True when XCTest is loaded into the process, i.e. we're the test host.
+    /// The unsigned test build can never match the keychain item's ACL, so any
+    /// real keychain access under test triggers a password prompt.
+    private static let isTestRun = NSClassFromString("XCTestCase") != nil
     /// Test-only: when non-nil, readCombined/writeCombined use this dictionary
-    /// instead of the Keychain. Only touched under `lock` (the public accessor
-    /// takes it; the boundary functions are already inside it).
-    nonisolated(unsafe) private static var inMemoryBacking: [String: String]?
+    /// instead of the Keychain. Defaults to in-memory for the whole test run
+    /// (covers AppDelegate's warm() in the test host and tests that don't set
+    /// the flag). Only touched under `lock` (the public accessor takes it; the
+    /// boundary functions are already inside it).
+    nonisolated(unsafe) private static var inMemoryBacking: [String: String]? =
+        isTestRun ? [:] : nil
     /// Test-only: toggling in either direction resets both the backing store
     /// and the cache, so a test can't poison state for later real writes.
+    /// During a test run, `false` still keeps an (empty) in-memory store so a
+    /// toggle-off can never fall through to the real keychain.
     static var useInMemoryStoreForTesting: Bool {
         get { lock.withLock { inMemoryBacking != nil } }
         set {
             lock.withLock {
-                inMemoryBacking = newValue ? [:] : nil
+                inMemoryBacking = newValue || isTestRun ? [:] : nil
                 cached = nil
             }
         }
