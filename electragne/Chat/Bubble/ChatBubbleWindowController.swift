@@ -29,7 +29,17 @@ final class ChatBubbleWindowController {
     private let memoryEngine: MemoryEngine
     private var currentChat: StoredChat
     private var activeStreamID: UUID?
+    /// The chat the in-flight stream belongs to. Survives dismiss/new/switch
+    /// so the stream can finish against the right transcript.
+    private var streamingChatID: UUID?
+    /// Accumulated partial text of the in-flight stream, kept outside the
+    /// view model because the model is rebuilt on re-present and switch.
+    private var streamedBuffer = ""
     private var pendingCalendarEvents: [CalendarEventDetails] = []
+
+    /// Whether the in-flight stream's chat is the one on screen; gates every
+    /// view-model mutation the stream makes.
+    private var streamIsForeground: Bool { streamingChatID == currentChat.id }
 
     private var history: [ChatMessage] {
         get { currentChat.messages }
@@ -76,6 +86,7 @@ final class ChatBubbleWindowController {
             model.entries = history.map { turn in
                 ChatBubbleEntry(role: turn.role == "user" ? .user : .assistant, text: turn.content)
             }
+            attachStreamIfActive()
             let bubbleView = ChatBubbleView(
                 model: model,
                 onDismiss: { [weak self] in self?.dismiss(notify: true) },
@@ -105,7 +116,10 @@ final class ChatBubbleWindowController {
         guard panel != nil else { return }
         let callback = notify ? onDismiss : nil
 
-        teardownStream()
+        // The stream (if any) keeps running; its chat is still current, so
+        // tokens keep landing in the buffer and the next present() reattaches.
+        resolveToolConfirmation(approved: false)
+        pendingCalendarEvents.removeAll()
         removeEventMonitors()
         removeWindowObservers()
         panel?.orderOut(nil)
@@ -163,6 +177,15 @@ final class ChatBubbleWindowController {
         openURLAfterResponse: URL? = nil
     ) {
         resolveToolConfirmation(approved: false)
+        if let backgroundID = streamingChatID, backgroundID != currentChat.id {
+            // A stream is still running for another chat; record its partial
+            // progress there before this chat takes over.
+            // ponytail: one in-flight stream; a per-chat task map if parallel
+            // streams ever matter.
+            streamTask?.cancel()
+            activeStreamID = nil
+            finalizeBackgroundExchange(chatID: backgroundID, streamed: streamedBuffer)
+        }
         streamTask?.cancel()
 
         model.text = ""
@@ -181,7 +204,6 @@ final class ChatBubbleWindowController {
         case .gemini: geminiClient
         case .openAICompatible: openAICompatibleClient
         }
-        let model = model
         var messages = history
         if let memories = memoryEngine.contextBlock(for: userMessage) {
             // Injected into the outgoing request only, right before the new
@@ -192,70 +214,88 @@ final class ChatBubbleWindowController {
             )
         }
         let streamID = UUID()
+        let chatID = currentChat.id
         activeStreamID = streamID
+        streamingChatID = chatID
+        streamedBuffer = ""
 
         streamTask = Task { [weak self] in
-            var streamed = ""
+            guard let self else { return }
             do {
                 try await client.streamChat(
                     history: messages,
-                    onStatus: { status in model.status = status },
-                    onToolCall: { [weak self] call in
-                        guard let self else { return .error("The chat was closed.") }
+                    onStatus: { status in
+                        guard self.activeStreamID == streamID, self.streamIsForeground else { return }
+                        self.model.status = status
+                    },
+                    onToolCall: { call in
                         guard toolsEnabled else {
                             return .error("Tools are disabled while summarizing a calendar event.")
                         }
                         return await self.executeToolCall(call)
                     },
                     onToken: { token in
-                        streamed += token
-                        model.status = ""
-                        model.appendToken(token)
+                        guard self.activeStreamID == streamID else { return }
+                        self.streamedBuffer += token
+                        guard self.streamIsForeground else { return }
+                        self.model.status = ""
+                        self.model.appendToken(token)
                     }
                 )
-                model.phase = .idle
+                if self.activeStreamID == streamID, self.streamIsForeground {
+                    self.model.phase = .idle
+                }
             } catch is CancellationError {
-                // Bubble dismissed or a new message superseded this stream.
+                // A new message superseded this stream.
             } catch let error as URLError where error.code == .cancelled {
                 // URLSession reports Task cancellation as URLError.cancelled.
             } catch {
-                model.phase = .failed(
-                    error is URLError
-                        ? "\(provider.displayName) not reachable"
-                        : error.localizedDescription
-                )
+                if self.activeStreamID == streamID, self.streamIsForeground {
+                    self.model.phase = .failed(
+                        error is URLError
+                            ? "\(provider.displayName) not reachable"
+                            : error.localizedDescription
+                    )
+                }
             }
 
             // Record the exchange, unless a newer stream has taken over the
             // history bookkeeping since.
-            guard let self, self.activeStreamID == streamID else { return }
-            if streamed.isEmpty, openURLAfterResponse == nil {
-                // Nothing came back (error or cancelled early); drop the
-                // question so a retry doesn't duplicate it, and the empty
-                // answer placeholder from the transcript.
-                self.history.removeLast()
-                if model.entries.last?.role == .assistant, model.entries.last?.text.isEmpty == true {
-                    model.entries.removeLast()
+            guard self.activeStreamID == streamID else { return }
+            let streamed = self.streamedBuffer
+            if self.currentChat.id == chatID {
+                if streamed.isEmpty, openURLAfterResponse == nil {
+                    // Nothing came back (error or cancelled early); drop the
+                    // question so a retry doesn't duplicate it, and the empty
+                    // answer placeholder from the transcript.
+                    self.history.removeLast()
+                    if self.model.entries.last?.role == .assistant,
+                       self.model.entries.last?.text.isEmpty == true {
+                        self.model.entries.removeLast()
+                    }
+                } else {
+                    if !streamed.isEmpty {
+                        self.history.append(ChatMessage(role: "assistant", content: streamed))
+                    }
+                    self.persistCurrentChat()
                 }
             } else {
-                if !streamed.isEmpty {
-                    self.history.append(ChatMessage(role: "assistant", content: streamed))
-                }
-                self.persistCurrentChat()
-                if toolsEnabled, !streamed.isEmpty {
-                    // Form a memory from the completed exchange. Proactive
-                    // calendar summaries (toolsEnabled == false) are excluded:
-                    // repetitive machine traffic would silt the graph.
-                    let chatID = self.currentChat.id
-                    Task {
-                        await self.memoryEngine.ingest(
-                            userText: userMessage,
-                            assistantText: streamed,
-                            chatID: chatID,
-                            context: extractionContext,
-                            client: Self.memoryClient(fallback: client)
-                        )
-                    }
+                // The user moved on to another chat mid-stream; finish the
+                // exchange against the persisted copy instead.
+                self.finalizeBackgroundExchange(chatID: chatID, streamed: streamed)
+            }
+            if toolsEnabled, !streamed.isEmpty {
+                // Form a memory from the completed exchange. Proactive
+                // calendar summaries (toolsEnabled == false) are excluded:
+                // repetitive machine traffic would silt the graph.
+                Task {
+                    await self.memoryEngine.ingest(
+                        userText: userMessage,
+                        assistantText: streamed,
+                        chatID: chatID,
+                        context: extractionContext,
+                        client: Self.memoryClient(fallback: client)
+                    )
                 }
             }
 
@@ -270,6 +310,7 @@ final class ChatBubbleWindowController {
             guard self.activeStreamID == streamID else { return }
             self.streamTask = nil
             self.activeStreamID = nil
+            self.streamingChatID = nil
             self.startNextCalendarEventConversation()
         }
     }
@@ -281,11 +322,16 @@ final class ChatBubbleWindowController {
                 guard let self else { return false }
                 return await self.requestConfirmation(details)
             },
-            onStatus: { [weak self] status in self?.model.status = status }
+            onStatus: { [weak self] status in
+                guard let self, self.streamIsForeground else { return }
+                self.model.status = status
+            }
         )
     }
 
     private func requestConfirmation(_ details: ToolConfirmationDetails) async -> Bool {
+        // A backgrounded stream has no UI to ask in; deny rather than hang.
+        guard streamIsForeground else { return false }
         let id = UUID()
         model.pendingToolConfirmation = PendingToolConfirmation(
             id: id,
@@ -304,27 +350,34 @@ final class ChatBubbleWindowController {
         confirmationBroker.resolve(approved: approved)
     }
 
-    /// Cancels any in-flight stream and does the exchange bookkeeping its
-    /// task would have done, synchronously — clearing `activeStreamID` here
-    /// makes the cancelled task's own cleanup block bail out, so it must
-    /// happen now or the unanswered user turn stays in the transcript.
-    private func teardownStream() {
-        resolveToolConfirmation(approved: false)
-        pendingCalendarEvents.removeAll()
-        streamTask?.cancel()
-        if activeStreamID != nil {
-            if model.entries.last?.role == .assistant, model.entries.last?.text.isEmpty == true {
-                // Nothing streamed; drop the question so a retry doesn't
-                // duplicate it, and the empty answer placeholder.
-                model.entries.removeLast()
-                if history.last?.role == "user" { history.removeLast() }
-            } else if let partial = model.entries.last, partial.role == .assistant {
-                history.append(ChatMessage(role: "assistant", content: partial.text))
-                persistCurrentChat()
-            }
+    /// Records the outcome of a stream whose chat is no longer on screen,
+    /// directly against the persisted copy: append the (partial) answer, or
+    /// drop the unanswered question so a retry doesn't duplicate it. The chat
+    /// is guaranteed on disk because leaving it (new/switch) saved it.
+    private func finalizeBackgroundExchange(chatID: UUID, streamed: String) {
+        guard var chat = chatStore.load(id: chatID) else { return }
+        if streamed.isEmpty {
+            if chat.messages.last?.role == "user" { chat.messages.removeLast() }
+        } else {
+            chat.messages.append(ChatMessage(role: "assistant", content: streamed))
         }
-        streamTask = nil
-        activeStreamID = nil
+        chat.updatedAt = Date()
+        if chat.messages.isEmpty {
+            chatStore.delete(id: chatID)
+        } else {
+            chatStore.save(chat)
+        }
+        refreshChatList()
+    }
+
+    /// If the in-flight stream belongs to the chat now on screen, splice its
+    /// partial output back into the freshly rebuilt transcript so tokens
+    /// continue appending live.
+    private func attachStreamIfActive() {
+        guard streamIsForeground, streamTask != nil else { return }
+        model.entries.append(ChatBubbleEntry(role: .assistant, text: streamedBuffer))
+        model.phase = .streaming
+        model.status = streamedBuffer.isEmpty ? "Thinking…" : ""
     }
 
     private func persistCurrentChat() {
@@ -407,7 +460,7 @@ final class ChatBubbleWindowController {
     }
 
     private func startNewChat() {
-        teardownStream()
+        resolveToolConfirmation(approved: false)
         chatStore.save(currentChat)
         currentChat = StoredChat()
         model.text = ""
@@ -418,13 +471,14 @@ final class ChatBubbleWindowController {
 
     private func switchToChat(id: UUID) {
         guard id != currentChat.id, let chat = chatStore.load(id: id) else { return }
-        teardownStream()
+        resolveToolConfirmation(approved: false)
         chatStore.save(currentChat)
         currentChat = chat
         model.phase = .idle
         model.entries = chat.messages.map { turn in
             ChatBubbleEntry(role: turn.role == "user" ? .user : .assistant, text: turn.content)
         }
+        attachStreamIfActive()
         refreshChatList()
         setExpanded(true)
     }
@@ -488,8 +542,7 @@ final class ChatBubbleWindowController {
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
             DispatchQueue.main.async {
-                guard let self, !self.model.isStreaming else { return }
-                self.dismiss(notify: true)
+                self?.dismiss(notify: true)
             }
         }
 
@@ -503,7 +556,6 @@ final class ChatBubbleWindowController {
                 return event
             }
             DispatchQueue.main.async {
-                guard !self.model.isStreaming else { return }
                 self.dismiss(notify: true)
             }
             return event

@@ -84,6 +84,12 @@ struct ChatStore {
         try? data.write(to: fileURL(for: chat.id), options: .atomic)
     }
 
+    /// Removes a chat file; used when an abandoned stream leaves a chat with
+    /// no messages, which `save` would otherwise leave stale on disk.
+    func delete(id: UUID) {
+        try? FileManager.default.removeItem(at: fileURL(for: id))
+    }
+
     private func fileURL(for id: UUID) -> URL {
         directory.appendingPathComponent("\(id.uuidString).json")
     }
