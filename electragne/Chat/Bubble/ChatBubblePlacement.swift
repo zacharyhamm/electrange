@@ -6,7 +6,7 @@
 import CoreGraphics
 import Foundation
 
-enum ChatBubbleTailEdge: Equatable {
+nonisolated enum ChatBubbleTailEdge: Equatable {
     case top
     case bottom
 }

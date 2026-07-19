@@ -105,7 +105,7 @@ enum MemoryExtractor {
             .first
     }
 
-    private static func decode(_ json: String) -> Extraction? {
+    nonisolated private static func decode(_ json: String) -> Extraction? {
         try? JSONDecoder().decode(Extraction.self, from: Data(json.utf8))
     }
 
