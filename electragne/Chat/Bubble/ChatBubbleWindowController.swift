@@ -331,7 +331,8 @@ final class ChatBubbleWindowController {
     }
 
     private func executeToolCall(_ call: ChatToolCall) async -> ChatToolResult {
-        await toolRouter.execute(
+        let verboseEntryID = appendVerboseToolEntry(for: call)
+        let result = await toolRouter.execute(
             call,
             confirm: { [weak self] details in
                 guard let self else { return false }
@@ -342,6 +343,42 @@ final class ChatBubbleWindowController {
                 self.model.status = status
             }
         )
+        if let verboseEntryID {
+            finishVerboseToolEntry(verboseEntryID, with: result)
+        }
+        return result
+    }
+
+    /// When verbose mode is on, inserts a transcript row for the call and
+    /// returns its id. Inserted before the trailing empty assistant entry so
+    /// appendToken keeps writing to the assistant entry.
+    private func appendVerboseToolEntry(for call: ChatToolCall) -> UUID? {
+        guard UserPreferences.verboseToolCalls(), streamIsForeground else { return nil }
+        let entry = ChatBubbleEntry(
+            role: .tool,
+            text: "⚙ \(call.name) \(Self.compactJSON(call.arguments, limit: 200))"
+        )
+        if model.entries.last?.role == .assistant, model.entries.last?.text.isEmpty == true {
+            model.entries.insert(entry, at: model.entries.count - 1)
+        } else {
+            model.entries.append(entry)
+            model.entries.append(ChatBubbleEntry(role: .assistant, text: ""))
+        }
+        return entry.id
+    }
+
+    private func finishVerboseToolEntry(_ id: UUID, with result: ChatToolResult) {
+        guard streamIsForeground,
+              let index = model.entries.firstIndex(where: { $0.id == id }) else { return }
+        model.entries[index].text += "\n→ \(Self.compactJSON(result.response, limit: 500))"
+    }
+
+    private static func compactJSON(_ values: [String: ChatToolValue], limit: Int) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let json = (try? encoder.encode(values))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        return json.count > limit ? String(json.prefix(limit)) + "…" : json
     }
 
     private func requestConfirmation(_ details: ToolConfirmationDetails) async -> Bool {
@@ -541,7 +578,7 @@ final class ChatBubbleWindowController {
         panel.isReleasedWhenClosed = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.level = .floating
         PetWindowPresentation.enforce(on: panel)
         panel.isMovable = false

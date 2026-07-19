@@ -30,7 +30,7 @@ struct ChatBubbleView: View {
                 .fill(Color(nsColor: .windowBackgroundColor))
                 .overlay {
                     ChatBubbleShape(edge: model.tailEdge, tailOffset: model.tailOffset)
-                        .stroke(Color.primary.opacity(0.7), lineWidth: 1.5)
+                        .stroke(Color.primary.opacity(0.85), lineWidth: 3)
                 }
                 .shadow(color: .black.opacity(0.16), radius: 4, y: 2)
 
@@ -126,9 +126,9 @@ struct ChatBubbleView: View {
                     )
                 }
             }
-            .padding(.top, model.tailEdge == .top ? 19 : 12)
-            .padding(.bottom, model.tailEdge == .bottom ? 19 : 12)
-            .padding(.horizontal, 14)
+            .padding(.top, model.tailEdge == .top ? 24 : 14)
+            .padding(.bottom, model.tailEdge == .bottom ? 24 : 14)
+            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .onExitCommand(perform: onDismiss)
@@ -295,6 +295,12 @@ private struct ChatTranscriptView: View {
                 LinkedText(text: entry.text, fontSize: model.fontSize)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+        case .tool:
+            Text(entry.text)
+                .font(.system(size: max(model.fontSize - 2, 9), design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -303,10 +309,12 @@ private struct ChatBubbleShape: Shape {
     let edge: ChatBubbleTailEdge
     let tailOffset: CGFloat
 
-    private let tailHeight: CGFloat = 10
-    private let tailHalfWidth: CGFloat = 9
-    private let cornerRadius: CGFloat = 13
+    private let tailHeight: CGFloat = 14
+    private let tailHalfWidth: CGFloat = 12
+    private let cornerRadius: CGFloat = 18
 
+    // One continuous subpath: the tail is a detour along the tail-side edge,
+    // so a stroke never crosses the tail's base.
     func path(in rect: CGRect) -> Path {
         let bodyRect: CGRect
         switch edge {
@@ -326,20 +334,29 @@ private struct ChatBubbleShape: Shape {
             )
         }
 
-        var path = Path(roundedRect: bodyRect, cornerRadius: cornerRadius)
-        var tail = Path()
-        switch edge {
-        case .top:
-            tail.move(to: CGPoint(x: tailOffset - tailHalfWidth, y: bodyRect.minY + 1))
-            tail.addLine(to: CGPoint(x: tailOffset, y: rect.minY))
-            tail.addLine(to: CGPoint(x: tailOffset + tailHalfWidth, y: bodyRect.minY + 1))
-        case .bottom:
-            tail.move(to: CGPoint(x: tailOffset - tailHalfWidth, y: bodyRect.maxY - 1))
-            tail.addLine(to: CGPoint(x: tailOffset, y: rect.maxY))
-            tail.addLine(to: CGPoint(x: tailOffset + tailHalfWidth, y: bodyRect.maxY - 1))
+        let r = cornerRadius
+        let topLeft = CGPoint(x: bodyRect.minX, y: bodyRect.minY)
+        let topRight = CGPoint(x: bodyRect.maxX, y: bodyRect.minY)
+        let bottomRight = CGPoint(x: bodyRect.maxX, y: bodyRect.maxY)
+        let bottomLeft = CGPoint(x: bodyRect.minX, y: bodyRect.maxY)
+
+        var path = Path()
+        path.move(to: CGPoint(x: bodyRect.minX + r, y: bodyRect.minY))
+        if edge == .top {
+            path.addLine(to: CGPoint(x: tailOffset - tailHalfWidth, y: bodyRect.minY))
+            path.addLine(to: CGPoint(x: tailOffset, y: rect.minY))
+            path.addLine(to: CGPoint(x: tailOffset + tailHalfWidth, y: bodyRect.minY))
         }
-        tail.closeSubpath()
-        path.addPath(tail)
+        path.addArc(tangent1End: topRight, tangent2End: bottomRight, radius: r)
+        path.addArc(tangent1End: bottomRight, tangent2End: bottomLeft, radius: r)
+        if edge == .bottom {
+            path.addLine(to: CGPoint(x: tailOffset + tailHalfWidth, y: bodyRect.maxY))
+            path.addLine(to: CGPoint(x: tailOffset, y: rect.maxY))
+            path.addLine(to: CGPoint(x: tailOffset - tailHalfWidth, y: bodyRect.maxY))
+        }
+        path.addArc(tangent1End: bottomLeft, tangent2End: topLeft, radius: r)
+        path.addArc(tangent1End: topLeft, tangent2End: topRight, radius: r)
+        path.closeSubpath()
         return path
     }
 }

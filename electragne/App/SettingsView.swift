@@ -23,6 +23,8 @@ struct SettingsView: View {
     private var openAICompatibleModel = ChatConfig.default.openAICompatibleModel
     @AppStorage(UserPreferences.deepSeekThinkingKey)
     private var deepSeekThinking = ChatConfig.default.deepSeekThinking
+    @AppStorage(UserPreferences.verboseToolCallsKey)
+    private var verboseToolCalls = false
     @State private var availableOpenAICompatibleModels: [OpenAICompatibleClient.Model] = []
     @State private var openAICompatibleModelError: String?
     @State private var apiKeyMessage: String?
@@ -87,6 +89,11 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 320)
                     Text("The pet uses this name when chatting. Leave it blank to use your macOS account name.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("Show tool calls in chat", isOn: $verboseToolCalls)
+                        .padding(.top, 3)
+                    Text("Verbose mode: each tool call's name, arguments, and result appear inline in the transcript.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

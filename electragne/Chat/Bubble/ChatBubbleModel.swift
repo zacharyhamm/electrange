@@ -19,6 +19,7 @@ struct ChatBubbleEntry: Equatable, Identifiable {
     enum Role {
         case user
         case assistant
+        case tool
     }
 
     let id = UUID()

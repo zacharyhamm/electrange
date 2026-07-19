@@ -77,6 +77,14 @@ enum UserPreferences {
             : defaults.bool(forKey: deepSeekThinkingKey)
     }
 
+    // MARK: Verbose tool calls (shown inline in the chat transcript)
+
+    nonisolated static let verboseToolCallsKey = "verboseToolCalls"
+
+    nonisolated static func verboseToolCalls(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: verboseToolCallsKey)
+    }
+
     // MARK: MCP servers (managed in Settings; tokens live in Keychain)
 
     nonisolated static let mcpServersKey = "mcpServers"
