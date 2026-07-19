@@ -132,7 +132,7 @@ nonisolated enum ChatAPIKeyStore {
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         lock.lock()
         defer { lock.unlock() }
-        var keys = allKeysLocked()
+        var keys = try allKeysLocked()
         keys[key] = value.isEmpty ? nil : value
         try writeCombined(keys)
         cached = keys
@@ -146,21 +146,26 @@ nonisolated enum ChatAPIKeyStore {
     private static func allKeys() -> [String: String] {
         lock.lock()
         defer { lock.unlock() }
-        return allKeysLocked()
+        // Unreadable keychain reads as "no keys" here; the cache stays empty
+        // so the next access retries, and load() falls back to env/key files.
+        return (try? allKeysLocked()) ?? [:]
     }
 
-    private static func allKeysLocked() -> [String: String] {
+    private static func allKeysLocked() throws -> [String: String] {
         if let keys = cached { return keys }
-        let keys = readCombined() ?? migrateLegacyItems()
+        let keys = try readCombined() ?? migrateLegacyItems()
         cached = keys
         return keys
     }
 
-    private static func readCombined() -> [String: String]? {
+    /// nil means the combined item was never created (pre-migration install).
+    /// Throws when the keychain couldn't be read, so a denied authorization
+    /// prompt can never trigger the migration's destructive rewrite.
+    private static func readCombined() throws -> [String: String]? {
         #if DEBUG
         if let backing = inMemoryBacking { return backing }
         #endif
-        guard let data = readData(account: combinedAccount) else { return nil }
+        guard let data = try readData(account: combinedAccount) else { return nil }
         return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
     }
 
@@ -170,7 +175,9 @@ nonisolated enum ChatAPIKeyStore {
     private static func migrateLegacyItems() -> [String: String] {
         var keys: [String: String] = [:]
         for provider in ChatAPIProvider.allCases {
-            guard let data = readData(account: provider.rawValue) else { continue }
+            // A failed read (not just not-found) skips the delete below, so a
+            // denied prompt can't destroy a legacy key we never captured.
+            guard let data = ((try? readData(account: provider.rawValue)) ?? nil) else { continue }
             if let value = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
                !value.isEmpty {
@@ -182,16 +189,21 @@ nonisolated enum ChatAPIKeyStore {
         return keys
     }
 
-    private static func readData(account: String) -> Data? {
+    /// nil means the item doesn't exist. Any other failure (authorization
+    /// denied after a rebuild, keychain locked) throws so callers can't
+    /// mistake an unreadable store for an empty one.
+    private static func readData(account: String) throws -> Data? {
         var query = baseQuery(account: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else {
-            return nil
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        switch status {
+        case errSecSuccess: return item as? Data
+        case errSecItemNotFound: return nil
+        default: throw ChatAPIKeyStoreError.keychain(status)
         }
-        return item as? Data
     }
 
     private static func writeCombined(_ keys: [String: String]) throws {
