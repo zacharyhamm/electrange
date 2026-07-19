@@ -178,9 +178,9 @@ private struct ChatTranscriptView: View {
     private var showsStatusRow: Bool {
         guard model.isStreaming else { return false }
         guard model.pendingToolConfirmation == nil else { return false }
-        // Before the first token, or whenever a web search is in flight.
-        if model.entries.last?.text.isEmpty == true { return true }
-        return model.status.hasPrefix("Searching")
+        // Status is set while waiting, thinking, or running a tool, and
+        // cleared on every content token.
+        return !model.status.isEmpty
     }
 
     var body: some View {

@@ -96,6 +96,36 @@ struct OpenAICompatibleClientTests {
         #expect(results.compactMap { $0["tool_call_id"] as? String } == ["call_1", "call_2"])
     }
 
+    @Test func reasoningDeltasSurfaceThinkingStatusOncePerRun() async throws {
+        let transport = StubChatHTTPTransport([
+            .init(lines: [
+                #"data: {"choices":[{"delta":{"reasoning_content":"hmm "}}]}"#,
+                #"data: {"choices":[{"delta":{"reasoning_content":"okay"}}]}"#,
+                #"data: {"choices":[{"delta":{"content":"Hi"}}]}"#,
+                #"data: {"choices":[{"delta":{"reasoning_content":"more"}}]}"#,
+                #"data: {"choices":[{"delta":{"content":"!"}}]}"#,
+                "data: [DONE]",
+            ]),
+        ])
+        let client = OpenAICompatibleClient(
+            baseURL: OpenAICompatibleClient.defaultBaseURL,
+            model: "deepseek-v4-pro",
+            thinking: true,
+            transport: transport,
+            apiKey: { "secret" }
+        )
+        var statuses: [String] = []
+        var output = ""
+        try await client.streamChat(
+            history: [ChatMessage(role: "user", content: "hi")],
+            onStatus: { statuses.append($0) },
+            onToken: { output += $0 }
+        )
+
+        #expect(output == "Hi!")
+        #expect(statuses == ["Thinking…", "Thinking…"])
+    }
+
     @Test func decodesDoneTextAndFragments() throws {
         #expect(OpenAICompatibleClient.decodeChunk(fromLine: "data: [DONE]")?.done == true)
         let chunk = try #require(OpenAICompatibleClient.decodeChunk(fromLine:

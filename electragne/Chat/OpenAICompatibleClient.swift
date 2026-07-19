@@ -244,10 +244,18 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
             let task = Task {
                 do {
                     var reasoning = ""
+                    var thinkingAloud = false
                     var fragments: [Int: OpenAICompatibleChunk.ToolCall] = [:]
                     for try await line in lines {
                         guard let chunk = Self.decodeChunk(fromLine: line), !chunk.done else { continue }
-                        if !chunk.content.isEmpty { continuation.yield(.token(chunk.content)) }
+                        if !chunk.content.isEmpty {
+                            thinkingAloud = false
+                            continuation.yield(.token(chunk.content))
+                        }
+                        if !chunk.reasoningContent.isEmpty, !thinkingAloud {
+                            thinkingAloud = true
+                            continuation.yield(.status("Thinking…"))
+                        }
                         reasoning += chunk.reasoningContent
                         for fragment in chunk.toolCalls {
                             var call = fragments[fragment.index] ?? .init(index: fragment.index)

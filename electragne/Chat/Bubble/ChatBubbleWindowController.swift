@@ -209,6 +209,7 @@ final class ChatBubbleWindowController {
                     },
                     onToken: { token in
                         streamed += token
+                        model.status = ""
                         model.appendToken(token)
                     }
                 )
