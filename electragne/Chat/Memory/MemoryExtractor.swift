@@ -73,6 +73,7 @@ enum MemoryExtractor {
                     history: [ChatMessage(role: "user", content: prompt)],
                     onStatus: { _ in },
                     onToolCall: { _ in .error("Tools are unavailable while forming memories.") },
+                    onImages: { _ in },
                     onToken: { streamed += $0 }
                 )
             } catch {

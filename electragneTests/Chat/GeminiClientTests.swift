@@ -138,8 +138,9 @@ struct GeminiClientTests {
         #expect(tools.count == 2)
         #expect(tools[0]["googleSearch"] != nil)
         let functions = try #require(tools[1]["functionDeclarations"] as? [[String: Any]])
-        #expect(functions.count == 39)
+        #expect(functions.count == 40)
         #expect(Set(functions.compactMap { $0["name"] as? String }) == [
+            "image_search",
             "create_reminder", "list_reminders", "update_reminder", "delete_reminder",
             "list_notes", "search_notes", "create_note", "update_note", "append_to_note", "delete_note",
             "open_app", "open_url", "find_files", "reveal_in_finder",
@@ -195,6 +196,23 @@ struct GeminiClientTests {
         let properties = try #require(parameters["properties"] as? [String: Any])
         let filters = try #require(properties["filters"] as? [String: Any])
         #expect((filters["properties"] as? [String: Any])?.keys.contains("tag") == true)
+    }
+
+    @Test func imageSearchToolRequiresConfiguredSearXNG() throws {
+        func names(available: Bool) throws -> [String] {
+            let body = try GeminiClient.makeRequestBody(
+                history: [],
+                imageSearchAvailable: available,
+                mcpTools: []
+            )
+            let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let tools = try #require(json["tools"] as? [[String: Any]])
+            let functions = try #require(tools[1]["functionDeclarations"] as? [[String: Any]])
+            return functions.compactMap { $0["name"] as? String }
+        }
+
+        #expect(try !names(available: false).contains("image_search"))
+        #expect(try names(available: true).contains("image_search"))
     }
 
     @Test func decodesFunctionCallAndPreservesOpaqueModelParts() throws {

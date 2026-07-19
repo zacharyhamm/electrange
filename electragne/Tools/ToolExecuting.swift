@@ -165,14 +165,18 @@ final class WebSearchExecutor: ToolExecuting {
 
     func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
         let query = call.arguments["query"]?.stringValue ?? ""
+        let category: SearXNGSearch.Category = call.name == "image_search" ? .images : .general
         let webSearch = webSearch
         return PreparedToolAction(confirmation: nil, execute: {
             do {
-                let text = try await webSearch.resultsText(query: query)
+                let output = try await webSearch.results(query: query, category: category)
                 return ChatToolResult(response: [
                     "status": .string("ok"),
-                    "results": .string(text),
-                ])
+                    "results": .string(output.text),
+                ], imageBatch: ChatImageBatch(
+                    images: output.images,
+                    presentation: category == .images ? .gallery : .thumbnails
+                ))
             } catch ChatProviderError.invalidEndpoint {
                 return .error("Web search needs a SearXNG endpoint. Set it in Electragne Settings.")
             } catch {

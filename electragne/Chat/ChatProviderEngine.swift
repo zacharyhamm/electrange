@@ -3,6 +3,7 @@ import Foundation
 nonisolated enum ProviderEvent: Sendable {
     case status(String)
     case token(String)
+    case images(ChatImageBatch)
     case toolCall(ChatToolCall)
 }
 
@@ -62,6 +63,7 @@ struct ChatProviderEngine: ChatClient {
         onToolCall: (ChatToolCall) async -> ChatToolResult = { _ in
             .error("This chat provider does not support that tool.")
         },
+        onImages: (ChatImageBatch) -> Void = { _ in },
         onToken: (String) -> Void
     ) async throws {
         var messages = Array(history.suffix(backend.config.maxHistoryMessages))
@@ -77,6 +79,8 @@ struct ChatProviderEngine: ChatClient {
                 case .token(let token):
                     content += token
                     onToken(token)
+                case .images(let batch):
+                    onImages(batch)
                 case .toolCall(let call):
                     if !toolCalls.contains(call) {
                         toolCalls.append(call)
@@ -93,6 +97,7 @@ struct ChatProviderEngine: ChatClient {
             for call in toolCalls {
                 onStatus(Self.initialStatus(for: call.name))
                 let result = await onToolCall(call)
+                if let batch = result.imageBatch { onImages(batch) }
                 backend.appendToolResult(result, for: call, to: &messages)
             }
             onStatus("Thinking…")
@@ -116,12 +121,14 @@ extension ChatProviderBackend {
         onToolCall: (ChatToolCall) async -> ChatToolResult = { _ in
             .error("This chat provider does not support that tool.")
         },
+        onImages: (ChatImageBatch) -> Void = { _ in },
         onToken: (String) -> Void
     ) async throws {
         try await ChatProviderEngine(backend: self).streamChat(
             history: history,
             onStatus: onStatus,
             onToolCall: onToolCall,
+            onImages: onImages,
             onToken: onToken
         )
     }

@@ -20,7 +20,12 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
     static let defaultBaseURL = URL(string: ChatConfig.default.openAICompatibleBaseURL)!
     static let defaultModels = ["deepseek-v4-flash", "deepseek-v4-pro"]
     static let systemPrompt = ChatSystemPrompt.make(providerDetails: """
-        Markdown formatting is welcome. You can manage Apple Reminders and Notes, +        manage countdown timers, open apps and websites, search approved folders +        by file name, reveal search results in Finder, and search or read Gmail, +        Google Calendar, Slack, and Linear. Use tools only when the owner asks. +        Never claim an action succeeded until its tool reports success.
+        Markdown formatting is welcome. You can manage Apple Reminders and Notes, \
+        manage countdown timers, open apps and websites, search approved folders \
+        by file name, reveal search results in Finder, and search or read Gmail, \
+        Google Calendar, Slack, and Linear. Use image_search when the owner asks \
+        to find or show images. Use tools only when the owner asks. \
+        Never claim an action succeeded until its tool reports success.
         """)
 
     let baseURLOverride: URL?

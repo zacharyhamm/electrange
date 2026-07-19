@@ -299,9 +299,41 @@ private struct ChatTranscriptView: View {
                 )
                 .frame(maxWidth: .infinity, alignment: .trailing)
         case .assistant:
-            if !entry.text.isEmpty {
-                LinkedText(text: entry.text, fontSize: model.fontSize)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if !entry.text.isEmpty || !entry.images.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    if !entry.text.isEmpty {
+                        LinkedText(text: entry.text, fontSize: model.fontSize)
+                    }
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 96, maximum: 160))],
+                        spacing: 7
+                    ) {
+                        ForEach(entry.images) { result in
+                            if let imageURL = ChatImage.webURL(result.url),
+                               let sourceURL = ChatImage.webURL(result.sourceURL) {
+                                Link(destination: sourceURL) {
+                                    AsyncImage(url: imageURL) { phase in
+                                        switch phase {
+                                        case .success(let image):
+                                            image.resizable().scaledToFill()
+                                        case .failure:
+                                            Image(systemName: "photo")
+                                                .foregroundStyle(.secondary)
+                                        default:
+                                            ProgressView().controlSize(.small)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 88, maxHeight: 88)
+                                    .background(Color.secondary.opacity(0.08))
+                                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(result.title)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .tool:
             Text(entry.text)

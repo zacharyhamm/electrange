@@ -10,6 +10,12 @@ struct ChatProviderEngineTests {
             [.token("Done")],
         ])
         var output = ""
+        var imageBatches: [ChatImageBatch] = []
+        let image = try #require(ChatImage(
+            url: "https://images.example/sheep.jpg",
+            sourceURL: "https://example.com/sheep",
+            title: "Sheep"
+        ))
 
         try await ChatProviderEngine(backend: backend).streamChat(
             history: [
@@ -17,13 +23,18 @@ struct ChatProviderEngineTests {
                 ChatMessage(role: "assistant", content: "keep me"),
                 ChatMessage(role: "user", content: "run it"),
             ],
-            onToolCall: { _ in .make(status: "ok", message: "listed") },
+            onToolCall: { _ in ChatToolResult(
+                response: ["status": .string("ok")],
+                imageBatch: ChatImageBatch(images: [image], presentation: .gallery)
+            ) },
+            onImages: { imageBatches.append($0) },
             onToken: { output += $0 }
         )
 
         #expect(output == "Done")
         #expect(backend.histories.first?.map(\.content) == ["keep me", "run it"])
         #expect(backend.histories.last?.suffix(2).map(\.role) == ["assistant", "tool"])
+        #expect(imageBatches.first?.images == [image])
     }
 }
 

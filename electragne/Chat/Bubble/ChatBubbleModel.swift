@@ -25,6 +25,7 @@ struct ChatBubbleEntry: Equatable, Identifiable {
     let id = UUID()
     let role: Role
     var text: String
+    var images: [ChatImage] = []
 }
 
 struct PendingToolConfirmation: Equatable, Identifiable {

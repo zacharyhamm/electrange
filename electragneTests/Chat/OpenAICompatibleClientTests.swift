@@ -45,7 +45,9 @@ struct OpenAICompatibleClientTests {
         }
 
         #expect(try !toolNames(webSearchAvailable: false).contains("web_search"))
+        #expect(try !toolNames(webSearchAvailable: false).contains("image_search"))
         #expect(try toolNames(webSearchAvailable: true).contains("web_search"))
+        #expect(try toolNames(webSearchAvailable: true).contains("image_search"))
     }
 
     @Test func streamAssemblesParallelCallsAndReplaysReasoningAndIDs() async throws {

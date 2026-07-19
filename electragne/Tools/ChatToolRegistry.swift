@@ -52,6 +52,13 @@ nonisolated enum ChatToolRegistry {
             initialStatus: "Searching the web…", executionStatus: "Searching the web…"
         ),
         definition(
+            "image_search", family: .webSearch,
+            description: "Search the web for images to display in the chat response.",
+            properties: ["query": property(.string, "The image search query")],
+            required: ["query"], providers: [.gemini, .ollama, .openAICompatible],
+            initialStatus: "Searching for images…", executionStatus: "Searching for images…"
+        ),
+        definition(
             "create_reminder", family: .reminders,
             description: "Create one reminder in Apple Reminders after the owner confirms it.",
             properties: [

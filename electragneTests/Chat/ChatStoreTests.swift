@@ -17,7 +17,15 @@ struct ChatStoreTests {
             title: "Sheep talk",
             messages: [
                 ChatMessage(role: "user", content: "hello"),
-                ChatMessage(role: "assistant", content: "Baa! **Hi** there."),
+                ChatMessage(
+                    role: "assistant",
+                    content: "Baa! **Hi** there.",
+                    images: [try #require(ChatImage(
+                        url: "https://images.example/sheep.jpg",
+                        sourceURL: "https://example.com/sheep",
+                        title: "Sheep"
+                    ))]
+                ),
             ]
         )
         store.save(chat)
@@ -27,6 +35,7 @@ struct ChatStoreTests {
         #expect(loaded?.title == "Sheep talk")
         #expect(loaded?.messages == chat.messages)
         #expect(loaded?.messages.first?.toolCalls == nil)
+        #expect(loaded?.messages.last?.images?.first?.title == "Sheep")
     }
 
     @Test func legacyStoredChatFixtureIsJSONCompatible() throws {

@@ -37,7 +37,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         search approved folders by file name, reveal search results in Finder, and search or read \
         Gmail and Google Calendar from connected Google accounts. Gmail draft creation and sending \
         are separate actions that each require owner confirmation; Calendar event creation also \
-        requires owner confirmation. Use these tools only \
+        requires owner confirmation. Use image_search when the owner asks to find or show images. Use these tools only \
         when the owner asks. Never claim an action succeeded until its tool \
         reports success.
         """)
@@ -47,6 +47,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
     var baseURL: URL
     let modelOverride: String?
     let transport: any ChatHTTPTransport
+    let imageSearch: SearXNGSearch
     let config: ChatConfig
     let apiKey: @Sendable () -> String?
     var userName: String? { UserPreferences.resolvedUserName() }
@@ -57,12 +58,14 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         baseURL: URL = defaultBaseURL,
         model: String? = nil,
         transport: any ChatHTTPTransport = LoggingTransport(),
+        imageSearch: SearXNGSearch = SearXNGSearch(),
         config: ChatConfig = .default,
         apiKey: @escaping @Sendable () -> String? = { ChatAPIKeyStore.load(for: .gemini) }
     ) {
         self.baseURL = baseURL
         self.modelOverride = model
         self.transport = transport
+        self.imageSearch = imageSearch
         self.config = config
         self.apiKey = apiKey
     }
@@ -151,9 +154,6 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         let candidates: [Candidate]?
     }
 
-    private nonisolated static let functionDeclarations =
-        ChatToolRegistry.definitions(for: .gemini).map(GenerateRequest.FunctionDeclaration.init)
-
     nonisolated static func makeSystemPrompt(
         userName: String?,
         now: Date = Date(),
@@ -179,6 +179,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         userName: String? = nil,
         now: Date = Date(),
         timeZone: TimeZone = .current,
+        imageSearchAvailable: Bool = true,
         mcpTools: [MCPToolDescriptor]? = nil
     ) throws -> Data {
         try makeRequestBody(
@@ -186,6 +187,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
             userName: userName,
             now: now,
             timeZone: timeZone,
+            imageSearchAvailable: imageSearchAvailable,
             mcpTools: mcpTools
         )
     }
@@ -228,11 +230,15 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         userName: String? = nil,
         now: Date = Date(),
         timeZone: TimeZone = .current,
+        imageSearchAvailable: Bool = true,
         mcpTools: [MCPToolDescriptor]? = nil
     ) throws -> Data {
         // Resolved per request, like the model name, so Settings changes and
         // newly connected MCP servers apply without restart.
         let mcpDeclarations = (mcpTools ?? MCPToolCatalog.offeredTools())
+            .map(GenerateRequest.FunctionDeclaration.init)
+        let functionDeclarations = ChatToolRegistry.definitions(for: .gemini)
+            .filter { $0.name != "image_search" || imageSearchAvailable }
             .map(GenerateRequest.FunctionDeclaration.init)
         let request = GenerateRequest(
             systemInstruction: GenerateRequest.SystemInstruction(
@@ -314,7 +320,8 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
             contents: Self.contents(from: messages),
             userName: userName,
             now: requestNow,
-            timeZone: requestTimeZone
+            timeZone: requestTimeZone,
+            imageSearchAvailable: UserPreferences.searxngEndpoint() != nil
         )
 
         let (lines, response) = try await transport.lines(for: request)
@@ -325,6 +332,8 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         }
 
         return AsyncThrowingStream { continuation in
+            let imageQuery = messages.last(where: { $0.role == "user" })?.content
+            let imageSearch = imageSearch
             let task = Task {
                 do {
                     var sources: [GeminiSource] = []
@@ -338,6 +347,17 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
                     }
                     let sourceText = Self.formatSources(sources)
                     if !sourceText.isEmpty { continuation.yield(.token(sourceText)) }
+                    if !sources.isEmpty, let imageQuery,
+                       let output = try? await imageSearch.results(
+                           query: imageQuery,
+                           category: .images,
+                           imageLimit: SearXNGSearch.maxThumbnails
+                       ), !output.images.isEmpty {
+                        continuation.yield(.images(ChatImageBatch(
+                            images: output.images,
+                            presentation: .thumbnails
+                        )))
+                    }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)

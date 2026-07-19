@@ -11,7 +11,19 @@ nonisolated struct OllamaChatChunk: Equatable {
 nonisolated struct SearXNGSearch {
     static let maxResults = 4
     static let maxResultCharacters = 1500
+    static let maxThumbnails = 3
+    static let maxGalleryImages = 6
     let transport: any ChatHTTPTransport
+
+    enum Category: Equatable {
+        case general
+        case images
+    }
+
+    struct Output: Equatable {
+        let text: String
+        let images: [ChatImage]
+    }
 
     init(transport: any ChatHTTPTransport = LoggingTransport()) {
         self.transport = transport
@@ -22,13 +34,26 @@ nonisolated struct SearXNGSearch {
             let title: String?
             let url: String?
             let content: String?
+            let thumbnail: String?
+            let thumbnailSrc: String?
+            let imageSrc: String?
+
+            enum CodingKeys: String, CodingKey {
+                case title, url, content, thumbnail
+                case thumbnailSrc = "thumbnail_src"
+                case imageSrc = "img_src"
+            }
         }
 
         let results: [Result]
     }
 
     /// GET {endpoint}/search?q={query}&format=json for the configured endpoint.
-    nonisolated static func searchURL(endpoint: String, query: String) -> URL? {
+    nonisolated static func searchURL(
+        endpoint: String,
+        query: String,
+        category: Category = .general
+    ) -> URL? {
         guard var components = URLComponents(string: endpoint) else { return nil }
         components.path = components.path.hasSuffix("/search")
             ? components.path : components.path + "/search"
@@ -36,12 +61,19 @@ nonisolated struct SearXNGSearch {
             URLQueryItem(name: "q", value: query),
             URLQueryItem(name: "format", value: "json"),
         ]
+        if category == .images {
+            components.queryItems?.append(URLQueryItem(name: "categories", value: "images"))
+        }
         return components.url.flatMap { $0.scheme == nil ? nil : $0 }
     }
 
-    func resultsText(query: String) async throws -> String {
+    func results(
+        query: String,
+        category: Category = .general,
+        imageLimit: Int? = nil
+    ) async throws -> Output {
         guard let endpoint = UserPreferences.searxngEndpoint(),
-              let url = Self.searchURL(endpoint: endpoint, query: query) else {
+              let url = Self.searchURL(endpoint: endpoint, query: query, category: category) else {
             throw ChatProviderError.invalidEndpoint
         }
 
@@ -49,15 +81,29 @@ nonisolated struct SearXNGSearch {
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw ChatProviderError.badStatus(http.statusCode)
         }
-        return Self.formatResults(from: data)
+        return Self.formatOutput(from: data, category: category, imageLimit: imageLimit)
+    }
+
+    func resultsText(query: String) async throws -> String {
+        try await results(query: query).text
     }
 
     nonisolated static func formatResults(from data: Data) -> String {
+        formatOutput(from: data).text
+    }
+
+    nonisolated static func formatOutput(
+        from data: Data,
+        category: Category = .general,
+        imageLimit: Int? = nil
+    ) -> Output {
         guard let decoded = try? JSONDecoder().decode(SearchResponse.self, from: data),
               !decoded.results.isEmpty else {
-            return "No results found."
+            return Output(text: "No results found.", images: [])
         }
-        return decoded.results.prefix(maxResults).enumerated().map { index, result in
+        let resultLimit = category == .images ? maxGalleryImages : maxResults
+        let results = decoded.results.prefix(resultLimit)
+        let text = results.enumerated().map { index, result in
             let content = String((result.content ?? "").prefix(maxResultCharacters))
             return """
                 Result \(index + 1): \(result.title ?? "Untitled")
@@ -65,6 +111,16 @@ nonisolated struct SearXNGSearch {
                 \(content)
                 """
         }.joined(separator: "\n\n")
+        let limit = imageLimit ?? (category == .images ? maxGalleryImages : maxThumbnails)
+        var seen = Set<String>()
+        let images = results.compactMap { result in
+            ChatImage(
+                url: result.thumbnailSrc ?? result.thumbnail ?? result.imageSrc,
+                sourceURL: result.url,
+                title: result.title
+            )
+        }.filter { seen.insert($0.url).inserted }.prefix(limit)
+        return Output(text: text, images: Array(images))
     }
 }
 
@@ -83,7 +139,8 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
         Use web_search when asked to search, or for \
         current events and facts you are not sure about. When you answer \
         from web search results, always share links to the sources you used \
-        (markdown [title](url) links are fine). Use timer tools only when the \
+        (markdown [title](url) links are fine). Use image_search when the owner asks \
+        to find or show images. Use timer tools only when the \
         owner asks, and never claim an action succeeded until the tool reports success.
         """)
 
@@ -221,15 +278,24 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
         model: String,
         history: [ChatMessage],
         userName: String? = nil,
-        contextWindowTokens: Int = ChatConfig.default.contextWindowTokens
+        contextWindowTokens: Int = ChatConfig.default.contextWindowTokens,
+        webSearchAvailable: Bool = true
     ) throws -> Data {
+        let definitions = ChatToolRegistry.definitions(for: .ollama).filter {
+            $0.family != .webSearch || webSearchAvailable
+        }
+        let wireHistory = history.map { message in
+            var message = message
+            message.images = nil
+            return message
+        }
         let request = ChatRequest(
             model: model,
             messages: [ChatMessage(role: "system", content: makeSystemPrompt(userName: userName))]
-                + history,
+                + wireHistory,
             stream: true,
             options: ChatRequest.Options(numCtx: contextWindowTokens),
-            tools: ChatToolRegistry.definitions(for: .ollama).map(ChatRequest.ToolDefinition.init)
+            tools: definitions.map(ChatRequest.ToolDefinition.init)
         )
         return try JSONEncoder().encode(request)
     }
@@ -258,7 +324,8 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
             model: model,
             history: messages,
             userName: userName,
-            contextWindowTokens: config.contextWindowTokens
+            contextWindowTokens: config.contextWindowTokens,
+            webSearchAvailable: UserPreferences.searxngEndpoint() != nil
         )
 
         let (lines, response) = try await transport.lines(for: request)

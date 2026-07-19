@@ -172,7 +172,7 @@ struct OllamaClientTests {
             try JSONSerialization.jsonObject(with: body) as? [String: Any]
         )
         let tools = try #require(json["tools"] as? [[String: Any]])
-        #expect(tools.count == 40)
+        #expect(tools.count == ChatToolRegistry.definitions(for: .ollama).count)
         let function = try #require(tools[0]["function"] as? [String: Any])
         #expect(function["name"] as? String == "web_search")
         let parameters = try #require(function["parameters"] as? [String: Any])
@@ -215,6 +215,27 @@ struct OllamaClientTests {
         #expect(messages[0]["tool_name"] == nil)
     }
 
+    @Test func requestOmitsUnavailableSearchToolsAndStoredImages() throws {
+        let image = try #require(ChatImage(
+            url: "https://images.example/sheep.jpg",
+            sourceURL: "https://example.com/sheep",
+            title: "Sheep"
+        ))
+        let body = try OllamaClient.makeRequestBody(
+            model: "gemma4:latest",
+            history: [ChatMessage(role: "assistant", content: "Baa", images: [image])],
+            webSearchAvailable: false
+        )
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let tools = try #require(json["tools"] as? [[String: Any]])
+        let names = tools.compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
+        let messages = try #require(json["messages"] as? [[String: Any]])
+
+        #expect(!names.contains("web_search"))
+        #expect(!names.contains("image_search"))
+        #expect(messages[1]["images"] == nil)
+    }
+
     @Test func formatsSearchResultsWithTruncation() throws {
         let longContent = String(repeating: "x", count: 5000)
         let payload = """
@@ -232,6 +253,23 @@ struct OllamaClientTests {
         #expect(text.count < 2500 + longContent.count - SearXNGSearch.maxResultCharacters)
     }
 
+    @Test func extractsValidatedSearchImagesWithModeLimits() throws {
+        let results = (1...8).map {
+            #"{"title":"T\#($0)","url":"https://example.com/\#($0)","thumbnail_src":"https://img.example.com/\#($0).jpg","content":"c"}"#
+        }.joined(separator: ",")
+        let data = Data(#"{"results":[\#(results)]}"#.utf8)
+
+        let thumbnails = SearXNGSearch.formatOutput(from: data)
+        let gallery = SearXNGSearch.formatOutput(from: data, category: .images)
+
+        #expect(thumbnails.images.count == SearXNGSearch.maxThumbnails)
+        #expect(gallery.images.count == SearXNGSearch.maxGalleryImages)
+        #expect(gallery.images.first?.sourceURL == "https://example.com/1")
+
+        let invalid = Data(#"{"results":[{"title":"bad","url":"file:///tmp/page","img_src":"file:///tmp/image"}]}"#.utf8)
+        #expect(SearXNGSearch.formatOutput(from: invalid).images.isEmpty)
+    }
+
     @Test func formatsOnlyTheFirstMaxResults() throws {
         let results = (1...10).map {
             #"{"title":"T\#($0)","url":"https://example.com/\#($0)","content":"c"}"#
@@ -246,6 +284,14 @@ struct OllamaClientTests {
         let url = SearXNGSearch.searchURL(endpoint: "http://localhost:8888", query: "hello world")
         #expect(url?.absoluteString == "http://localhost:8888/search?q=hello%20world&format=json")
         #expect(SearXNGSearch.searchURL(endpoint: "", query: "x") == nil)
+        #expect(
+            SearXNGSearch.searchURL(
+                endpoint: "http://localhost:8888",
+                query: "sheep",
+                category: .images
+            )?.absoluteString
+                == "http://localhost:8888/search?q=sheep&format=json&categories=images"
+        )
     }
 
     @Test func emptyOrMalformedSearchResponsesReadAsNoResults() {

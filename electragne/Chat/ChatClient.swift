@@ -115,8 +115,43 @@ nonisolated struct ChatToolCall: Equatable, Codable, Sendable {
     }
 }
 
+nonisolated struct ChatImage: Equatable, Codable, Sendable, Identifiable {
+    let url: String
+    let sourceURL: String
+    let title: String
+
+    var id: String { url }
+
+    init?(url: String?, sourceURL: String?, title: String?) {
+        guard let url, Self.webURL(url) != nil,
+              let sourceURL, Self.webURL(sourceURL) != nil else { return nil }
+        self.url = url
+        self.sourceURL = sourceURL
+        let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.title = trimmedTitle.isEmpty ? "Search result image" : trimmedTitle
+    }
+
+    static func webURL(_ string: String) -> URL? {
+        guard let url = URL(string: string),
+              ["http", "https"].contains(url.scheme?.lowercased()),
+              url.host?.isEmpty == false else { return nil }
+        return url
+    }
+}
+
+nonisolated enum ChatImagePresentation: Equatable, Sendable {
+    case thumbnails
+    case gallery
+}
+
+nonisolated struct ChatImageBatch: Equatable, Sendable {
+    let images: [ChatImage]
+    let presentation: ChatImagePresentation
+}
+
 nonisolated struct ChatToolResult: Equatable, Sendable {
     let response: [String: ChatToolValue]
+    var imageBatch: ChatImageBatch? = nil
 
     static func error(_ message: String) -> ChatToolResult {
         ChatToolResult(response: [
@@ -139,6 +174,7 @@ nonisolated struct ChatToolResult: Equatable, Sendable {
 nonisolated struct ChatMessage: Equatable, Codable, Sendable {
     var role: String
     var content: String
+    var images: [ChatImage]? = nil
     var toolName: String? = nil
     var toolCallID: String? = nil
     var toolCalls: [ChatToolCall]? = nil
@@ -146,6 +182,7 @@ nonisolated struct ChatMessage: Equatable, Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case role
         case content
+        case images
         case toolName = "tool_name"
         case toolCallID = "tool_call_id"
         case toolCalls = "tool_calls"
@@ -169,6 +206,7 @@ protocol ChatClient {
         history: [ChatMessage],
         onStatus: (String) -> Void,
         onToolCall: (ChatToolCall) async -> ChatToolResult,
+        onImages: (ChatImageBatch) -> Void,
         onToken: (String) -> Void
     ) async throws
 }

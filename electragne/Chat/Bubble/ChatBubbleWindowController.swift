@@ -35,6 +35,8 @@ final class ChatBubbleWindowController {
     /// Accumulated partial text of the in-flight stream, kept outside the
     /// view model because the model is rebuilt on re-present and switch.
     private var streamedBuffer = ""
+    private var streamedImages: [ChatImage] = []
+    private var streamedImagePresentation: ChatImagePresentation = .thumbnails
     private var pendingCalendarEvents: [CalendarEventDetails] = []
 
     /// Whether the in-flight stream's chat is the one on screen; gates every
@@ -84,7 +86,11 @@ final class ChatBubbleWindowController {
         if panel == nil {
             model = ChatBubbleModel()
             model.entries = history.map { turn in
-                ChatBubbleEntry(role: turn.role == "user" ? .user : .assistant, text: turn.content)
+                ChatBubbleEntry(
+                    role: turn.role == "user" ? .user : .assistant,
+                    text: turn.content,
+                    images: turn.images ?? []
+                )
             }
             attachStreamIfActive()
             let bubbleView = ChatBubbleView(
@@ -199,7 +205,11 @@ final class ChatBubbleWindowController {
             // streams ever matter.
             streamTask?.cancel()
             activeStreamID = nil
-            finalizeBackgroundExchange(chatID: backgroundID, streamed: streamedBuffer)
+            finalizeBackgroundExchange(
+                chatID: backgroundID,
+                streamed: streamedBuffer,
+                images: streamedImages
+            )
         }
         streamTask?.cancel()
 
@@ -233,6 +243,8 @@ final class ChatBubbleWindowController {
         activeStreamID = streamID
         streamingChatID = chatID
         streamedBuffer = ""
+        streamedImages = []
+        streamedImagePresentation = .thumbnails
 
         streamTask = Task { [weak self] in
             guard let self else { return }
@@ -248,6 +260,10 @@ final class ChatBubbleWindowController {
                             return .error("Tools are disabled while summarizing a calendar event.")
                         }
                         return await self.executeToolCall(call)
+                    },
+                    onImages: { batch in
+                        guard self.activeStreamID == streamID else { return }
+                        self.receiveImages(batch)
                     },
                     onToken: { token in
                         guard self.activeStreamID == streamID else { return }
@@ -278,8 +294,9 @@ final class ChatBubbleWindowController {
             // history bookkeeping since.
             guard self.activeStreamID == streamID else { return }
             let streamed = self.streamedBuffer
+            let images = self.streamedImages
             if self.currentChat.id == chatID {
-                if streamed.isEmpty, openURLAfterResponse == nil {
+                if streamed.isEmpty, images.isEmpty, openURLAfterResponse == nil {
                     // Nothing came back (error or cancelled early); drop the
                     // question so a retry doesn't duplicate it, and the empty
                     // answer placeholder from the transcript.
@@ -289,15 +306,19 @@ final class ChatBubbleWindowController {
                         self.model.entries.removeLast()
                     }
                 } else {
-                    if !streamed.isEmpty {
-                        self.history.append(ChatMessage(role: "assistant", content: streamed))
+                    if !streamed.isEmpty || !images.isEmpty {
+                        self.history.append(ChatMessage(
+                            role: "assistant",
+                            content: streamed,
+                            images: images.isEmpty ? nil : images
+                        ))
                     }
                     self.persistCurrentChat()
                 }
             } else {
                 // The user moved on to another chat mid-stream; finish the
                 // exchange against the persisted copy instead.
-                self.finalizeBackgroundExchange(chatID: chatID, streamed: streamed)
+                self.finalizeBackgroundExchange(chatID: chatID, streamed: streamed, images: images)
             }
             if toolsEnabled, !streamed.isEmpty {
                 // Form a memory from the completed exchange. Proactive
@@ -328,6 +349,17 @@ final class ChatBubbleWindowController {
             self.streamingChatID = nil
             self.startNextCalendarEventConversation()
         }
+    }
+
+    private func receiveImages(_ batch: ChatImageBatch) {
+        guard !batch.images.isEmpty else { return }
+        // A requested gallery wins over Gemini's later three-image grounding lookup.
+        guard streamedImagePresentation != .gallery || batch.presentation == .gallery else { return }
+        streamedImages = batch.images
+        streamedImagePresentation = batch.presentation
+        guard streamIsForeground,
+              let index = model.entries.lastIndex(where: { $0.role == .assistant }) else { return }
+        model.entries[index].images = batch.images
     }
 
     private func executeToolCall(_ call: ChatToolCall) async -> ChatToolResult {
@@ -406,12 +438,20 @@ final class ChatBubbleWindowController {
     /// directly against the persisted copy: append the (partial) answer, or
     /// drop the unanswered question so a retry doesn't duplicate it. The chat
     /// is guaranteed on disk because leaving it (new/switch) saved it.
-    private func finalizeBackgroundExchange(chatID: UUID, streamed: String) {
+    private func finalizeBackgroundExchange(
+        chatID: UUID,
+        streamed: String,
+        images: [ChatImage]
+    ) {
         guard var chat = chatStore.load(id: chatID) else { return }
-        if streamed.isEmpty {
+        if streamed.isEmpty, images.isEmpty {
             if chat.messages.last?.role == "user" { chat.messages.removeLast() }
         } else {
-            chat.messages.append(ChatMessage(role: "assistant", content: streamed))
+            chat.messages.append(ChatMessage(
+                role: "assistant",
+                content: streamed,
+                images: images.isEmpty ? nil : images
+            ))
         }
         chat.updatedAt = Date()
         if chat.messages.isEmpty {
@@ -427,7 +467,11 @@ final class ChatBubbleWindowController {
     /// continue appending live.
     private func attachStreamIfActive() {
         guard streamIsForeground, streamTask != nil else { return }
-        model.entries.append(ChatBubbleEntry(role: .assistant, text: streamedBuffer))
+        model.entries.append(ChatBubbleEntry(
+            role: .assistant,
+            text: streamedBuffer,
+            images: streamedImages
+        ))
         model.phase = .streaming
         model.status = streamedBuffer.isEmpty ? "Thinking…" : ""
     }
@@ -528,7 +572,11 @@ final class ChatBubbleWindowController {
         currentChat = chat
         model.phase = .idle
         model.entries = chat.messages.map { turn in
-            ChatBubbleEntry(role: turn.role == "user" ? .user : .assistant, text: turn.content)
+            ChatBubbleEntry(
+                role: turn.role == "user" ? .user : .assistant,
+                text: turn.content,
+                images: turn.images ?? []
+            )
         }
         attachStreamIfActive()
         refreshChatList()

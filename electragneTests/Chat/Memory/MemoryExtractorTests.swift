@@ -128,6 +128,7 @@ final class CannedChatClient: ChatClient {
         history: [ChatMessage],
         onStatus: (String) -> Void,
         onToolCall: (ChatToolCall) async -> ChatToolResult,
+        onImages: (ChatImageBatch) -> Void,
         onToken: (String) -> Void
     ) async throws {
         histories.append(history)
