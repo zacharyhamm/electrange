@@ -56,7 +56,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
     init(
         baseURL: URL = defaultBaseURL,
         model: String? = nil,
-        transport: any ChatHTTPTransport = URLSessionTransport(session: .shared),
+        transport: any ChatHTTPTransport = LoggingTransport(),
         config: ChatConfig = .default,
         apiKey: @escaping @Sendable () -> String? = { ChatAPIKeyStore.load(for: .gemini) }
     ) {
@@ -369,7 +369,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
     static func listModels(
         baseURL: URL = defaultBaseURL,
         apiKey: String,
-        transport: any ChatHTTPTransport = URLSessionTransport(session: .shared)
+        transport: any ChatHTTPTransport = LoggingTransport()
     ) async throws -> [GeminiModel] {
         var models: [GeminiModel] = []
         var pageToken: String?

@@ -55,6 +55,20 @@ final class ChatToolRouter {
         confirm: (ToolConfirmationDetails) async -> Bool,
         onStatus: (String) -> Void
     ) async -> ChatToolResult {
+        let result = await perform(call, confirm: confirm, onStatus: onStatus)
+        await LLMLog.shared.append(kind: "tool", [
+            "name": .string(call.name),
+            "arguments": .object(call.arguments),
+            "response": .object(result.response),
+        ])
+        return result
+    }
+
+    private func perform(
+        _ call: ChatToolCall,
+        confirm: (ToolConfirmationDetails) async -> Bool,
+        onStatus: (String) -> Void
+    ) async -> ChatToolResult {
         let executor: any ToolExecuting
         let executionStatus: String
         if call.name.hasPrefix("mcp__") {

@@ -33,6 +33,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private var collectionBehaviorObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Hosted unit tests: skip launch work. warm() would hit the real
+        // keychain (unsigned test build → password prompt every run), and
+        // connectAll() would spawn real MCP servers.
+        if NSClassFromString("XCTestCase") != nil { return }
+
         UNUserNotificationCenter.current().delegate = self
 
         // Connect configured MCP servers so their tools are available to chat.

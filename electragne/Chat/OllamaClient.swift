@@ -14,7 +14,7 @@ nonisolated struct OllamaWebSearch {
     static let maxResultCharacters = 1500
     let transport: any ChatHTTPTransport
 
-    init(transport: any ChatHTTPTransport = URLSessionTransport(session: .shared)) {
+    init(transport: any ChatHTTPTransport = LoggingTransport()) {
         self.transport = transport
     }
 
@@ -126,7 +126,7 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
     init(
         baseURL: URL = defaultBaseURL,
         model: String? = nil,
-        transport: any ChatHTTPTransport = URLSessionTransport(session: .shared),
+        transport: any ChatHTTPTransport = LoggingTransport(),
         config: ChatConfig = .default
     ) {
         self.baseURL = baseURL
@@ -143,7 +143,7 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
     /// The models pulled into the local Ollama server, via GET api/tags.
     static func listModels(
         baseURL: URL = defaultBaseURL,
-        transport: any ChatHTTPTransport = URLSessionTransport(session: .shared)
+        transport: any ChatHTTPTransport = LoggingTransport()
     ) async throws -> [String] {
         let request = URLRequest(url: baseURL.appendingPathComponent("api/tags"))
         let (data, response) = try await transport.data(for: request)

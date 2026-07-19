@@ -26,4 +26,6 @@ nonisolated enum Log {
     static let mcp = Logger(subsystem: subsystem, category: "mcp")
     /// Long-term memory formation and retrieval (MemoryEngine, MemoryExtractor).
     static let memory = Logger(subsystem: subsystem, category: "memory")
+    /// Full-fidelity LLM/tool interaction logging (LLMLog).
+    static let llm = Logger(subsystem: subsystem, category: "llm")
 }

@@ -40,7 +40,7 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
         baseURL: URL? = nil,
         model: String? = nil,
         thinking: Bool? = nil,
-        transport: any ChatHTTPTransport = URLSessionTransport(session: .shared),
+        transport: any ChatHTTPTransport = LoggingTransport(),
         config: ChatConfig = .default,
         apiKey: (@Sendable () -> String?)? = nil
     ) {
@@ -303,7 +303,7 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
     static func listModels(
         baseURL: URL,
         apiKey: String,
-        transport: any ChatHTTPTransport = URLSessionTransport(session: .shared)
+        transport: any ChatHTTPTransport = LoggingTransport()
     ) async throws -> [Model] {
         guard baseURL.scheme != nil, baseURL.host != nil else { throw ChatProviderError.invalidEndpoint }
         var request = URLRequest(url: baseURL.appendingPathComponent("models"))
