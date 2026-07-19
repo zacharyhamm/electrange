@@ -23,6 +23,28 @@ struct MemoryExtractorTests {
         #expect(MemoryExtractor.parse("{broken") == nil)
     }
 
+    @Test func parseSurvivesLeakedProseWithBraces() {
+        let text = """
+        Thinking: the shape is {"summary": ...} but incomplete, so {oops.
+        {"ownerMemory": {"summary": "Owner likes tea"}, "assistantOutcome": null}
+        And a stray } afterwards.
+        """
+        #expect(MemoryExtractor.parse(text)?.ownerMemory?.summary == "Owner likes tea")
+    }
+
+    @Test func parsePicksTheDecodableObjectAmongSeveral() {
+        let text = """
+        {"not": ["an extraction", 1]}
+        {"ownerMemory": null, "assistantOutcome": {"summary": "Booked flights"}}
+        """
+        #expect(MemoryExtractor.parse(text)?.assistantOutcome?.summary == "Booked flights")
+    }
+
+    @Test func parseIgnoresBracesInsideStringLiterals() {
+        let text = #"{"ownerMemory": {"summary": "Owner said {hi}"}, "assistantOutcome": null} trailing {"#
+        #expect(MemoryExtractor.parse(text)?.ownerMemory?.summary == "Owner said {hi}")
+    }
+
     @Test func extractStreamsThroughTheClientAndParses() async {
         let client = CannedChatClient(
             reply: #"{"ownerMemory": null, "assistantOutcome": null}"#
@@ -39,6 +61,20 @@ struct MemoryExtractorTests {
         #expect(prompt.contains("Owner text: hi"))
         #expect(prompt.contains("Assistant text: hello!"))
         #expect(prompt.contains("repeat known context"))
+    }
+
+    @Test func extractRetriesOnceAfterUnparseableOutput() async {
+        let client = CannedChatClient(replies: [
+            "definitely not json",
+            #"{"ownerMemory": null, "assistantOutcome": {"summary": "Named the fix"}}"#,
+        ])
+        let extraction = await MemoryExtractor.extract(
+            userText: "hi",
+            assistantText: "hello!",
+            client: client
+        )
+        #expect(client.histories.count == 2)
+        #expect(extraction?.assistantOutcome?.summary == "Named the fix")
     }
 
     @Test func extractReturnsNilOnClientFailure() async {
@@ -73,14 +109,18 @@ struct MemoryExtractorTests {
     }
 }
 
-/// Replays one canned reply for extraction tests.
+/// Replays canned replies, one per call (the last repeats), for extraction tests.
 final class CannedChatClient: ChatClient {
-    private let reply: String
+    private let replies: [String]
     private let throwError: Bool
     var histories: [[ChatMessage]] = []
 
-    init(reply: String, throwError: Bool = false) {
-        self.reply = reply
+    convenience init(reply: String, throwError: Bool = false) {
+        self.init(replies: [reply], throwError: throwError)
+    }
+
+    init(replies: [String], throwError: Bool = false) {
+        self.replies = replies
         self.throwError = throwError
     }
 
@@ -92,6 +132,6 @@ final class CannedChatClient: ChatClient {
     ) async throws {
         histories.append(history)
         if throwError { throw URLError(.notConnectedToInternet) }
-        onToken(reply)
+        onToken(replies[min(histories.count - 1, replies.count - 1)])
     }
 }

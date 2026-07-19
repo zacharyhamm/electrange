@@ -109,6 +109,17 @@ nonisolated enum ChatAPIKeyStore {
         try setValue(rawValue, forKey: "mcp-oauth:\(id.uuidString)")
     }
 
+    // MARK: - Google OAuth credentials (same combined item, keyed by account id)
+
+    static func googleCredential(forAccount id: String) -> Data? {
+        value(forKey: "google:\(id)").flatMap { Data(base64Encoded: $0) }
+    }
+
+    /// `nil` deletes the credential.
+    static func setGoogleCredential(_ data: Data?, forAccount id: String) throws {
+        try setValue(data?.base64EncodedString() ?? "", forKey: "google:\(id)")
+    }
+
     // MARK: - Shared accessors
 
     private static func value(forKey key: String) -> String? {

@@ -279,42 +279,48 @@ nonisolated protocol GoogleCredentialStoring: Sendable {
     func delete(accountID: String) throws
 }
 
+/// Stores Google credentials inside ChatAPIKeyStore's single combined keychain
+/// item, so an unsigned rebuild triggers one authorization prompt total instead
+/// of one per Google account.
 nonisolated struct KeychainGoogleCredentialStore: GoogleCredentialStoring {
-    private let service = "org.impolexg.electragne.google-oauth"
+    private static let legacyService = "org.impolexg.electragne.google-oauth"
 
     func save(_ data: Data, accountID: String) throws {
-        let query = baseQuery(accountID: accountID)
-        let status = SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary)
-        if status == errSecSuccess { return }
-        if status != errSecItemNotFound { throw GoogleOAuthError.keychain(status) }
-        var add = query
-        add[kSecValueData as String] = data
-        let addStatus = SecItemAdd(add as CFDictionary, nil)
-        guard addStatus == errSecSuccess else { throw GoogleOAuthError.keychain(addStatus) }
+        try ChatAPIKeyStore.setGoogleCredential(data, forAccount: accountID)
     }
 
     func load(accountID: String) throws -> Data? {
-        var query = baseQuery(accountID: accountID)
+        if let data = ChatAPIKeyStore.googleCredential(forAccount: accountID) { return data }
+        return try migrateLegacyItem(accountID: accountID)
+    }
+
+    func delete(accountID: String) throws {
+        try ChatAPIKeyStore.setGoogleCredential(nil, forAccount: accountID)
+        SecItemDelete(Self.legacyQuery(accountID: accountID) as CFDictionary)
+    }
+
+    /// One-time migration from the old one-item-per-account service: read the
+    /// legacy item (the last multi-prompt launch), fold it into the combined
+    /// item, and delete the legacy item.
+    private func migrateLegacyItem(accountID: String) throws -> Data? {
+        var query = Self.legacyQuery(accountID: accountID)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess else { throw GoogleOAuthError.keychain(status) }
-        return item as? Data
-    }
-
-    func delete(accountID: String) throws {
-        let status = SecItemDelete(baseQuery(accountID: accountID) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
+        guard status == errSecSuccess, let data = item as? Data else {
             throw GoogleOAuthError.keychain(status)
         }
+        try ChatAPIKeyStore.setGoogleCredential(data, forAccount: accountID)
+        SecItemDelete(Self.legacyQuery(accountID: accountID) as CFDictionary)
+        return data
     }
 
-    private func baseQuery(accountID: String) -> [String: Any] {
+    private static func legacyQuery(accountID: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
+            kSecAttrService as String: legacyService,
             kSecAttrAccount as String: accountID,
         ]
     }

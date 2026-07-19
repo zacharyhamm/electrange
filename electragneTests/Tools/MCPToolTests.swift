@@ -343,6 +343,21 @@ private final class UnusedTimerExecutor: TimerToolExecuting {
         #expect(ChatAPIKeyStore.mcpToken(forServer: id) == nil)
     }
 
+    // Lives here (not GoogleOAuthTests) because it toggles the process-global
+    // in-memory-store flag, which only this serialized suite may touch.
+    @Test func googleCredentialRoundTripsThroughCombinedStore() throws {
+        ChatAPIKeyStore.useInMemoryStoreForTesting = true
+        defer { ChatAPIKeyStore.useInMemoryStoreForTesting = false }
+        let store = KeychainGoogleCredentialStore()
+        let blob = Data([0x00, 0xFF, 0x10, 0x42])
+
+        try store.save(blob, accountID: "acct-1")
+        #expect(try store.load(accountID: "acct-1") == blob)
+
+        try store.delete(accountID: "acct-1")
+        #expect(try store.load(accountID: "acct-1") == nil)
+    }
+
     @Test func oauthTokenRoundTripsThroughStorage() throws {
         ChatAPIKeyStore.useInMemoryStoreForTesting = true
         defer { ChatAPIKeyStore.useInMemoryStoreForTesting = false }

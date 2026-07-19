@@ -342,14 +342,22 @@ final class ChatBubbleWindowController {
     }
 
     /// The client memory extraction uses: the chat client, unless Settings
-    /// picked a dedicated memory provider (and optionally model).
+    /// picked a dedicated memory provider (and optionally model). Thinking is
+    /// disabled for OpenAI-compatible extraction: parsing one exchange into
+    /// JSON needs no deliberation, and slow extraction loses memories when the
+    /// app quits before the fire-and-forget ingest task finishes.
     private static func memoryClient(fallback: any ChatClient) -> any ChatClient {
-        guard let provider = MemoryProviderPreference.selected else { return fallback }
+        guard let provider = MemoryProviderPreference.selected else {
+            if ChatProviderPreference.selected == .openAICompatible {
+                return OpenAICompatibleClient(thinking: false)
+            }
+            return fallback
+        }
         let model = MemoryProviderPreference.model
         return switch provider {
         case .ollama: OllamaClient(model: model)
         case .gemini: GeminiClient(model: model)
-        case .openAICompatible: OpenAICompatibleClient(model: model)
+        case .openAICompatible: OpenAICompatibleClient(model: model, thinking: false)
         }
     }
 
