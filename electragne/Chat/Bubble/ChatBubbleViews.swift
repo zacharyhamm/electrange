@@ -19,20 +19,28 @@ struct ChatBubbleView: View {
     let onCancelTool: () -> Void
 
     @FocusState private var inputIsFocused: Bool
+    @AppStorage(UserPreferences.chatOpacityKey)
+    private var chatOpacity = UserPreferences.defaultChatOpacity
 
     private var trimmedText: String {
         model.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var bubbleOpacity: Double {
+        chatOpacity > 0
+            ? chatOpacity.clamped(to: UserPreferences.chatOpacityRange)
+            : UserPreferences.defaultChatOpacity
+    }
+
     var body: some View {
         ZStack {
             ChatBubbleShape(edge: model.tailEdge, tailOffset: model.tailOffset)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(bubbleOpacity))
                 .overlay {
                     ChatBubbleShape(edge: model.tailEdge, tailOffset: model.tailOffset)
                         .stroke(Color.primary.opacity(0.85), lineWidth: 3)
                 }
-                .shadow(color: .black.opacity(0.16), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.16 * bubbleOpacity), radius: 4, y: 2)
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center) {

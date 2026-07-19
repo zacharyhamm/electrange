@@ -25,6 +25,8 @@ struct SettingsView: View {
     private var deepSeekThinking = ChatConfig.default.deepSeekThinking
     @AppStorage(UserPreferences.verboseToolCallsKey)
     private var verboseToolCalls = false
+    @AppStorage(UserPreferences.chatOpacityKey)
+    private var chatOpacity = UserPreferences.defaultChatOpacity
     @State private var availableOpenAICompatibleModels: [OpenAICompatibleClient.Model] = []
     @State private var openAICompatibleModelError: String?
     @State private var apiKeyMessage: String?
@@ -94,6 +96,21 @@ struct SettingsView: View {
                     Toggle("Show tool calls in chat", isOn: $verboseToolCalls)
                         .padding(.top, 3)
                     Text("Verbose mode: each tool call's name, arguments, and result appear inline in the transcript.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Chat window opacity")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.top, 3)
+                    Slider(value: $chatOpacity, in: UserPreferences.chatOpacityRange) {
+                        Text("Chat window opacity")
+                    } minimumValueLabel: {
+                        Image(systemName: "circle.dotted")
+                    } maximumValueLabel: {
+                        Image(systemName: "circle.fill")
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 320)
+                    Text("How see-through the chat bubble's background is. Text stays fully visible.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

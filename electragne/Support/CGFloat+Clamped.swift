@@ -5,8 +5,8 @@
 
 import Foundation
 
-extension CGFloat {
-    nonisolated func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+extension Comparable {
+    nonisolated func clamped(to range: ClosedRange<Self>) -> Self {
         Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }

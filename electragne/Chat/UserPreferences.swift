@@ -121,4 +121,16 @@ enum UserPreferences {
     static func setChatFontSize(_ size: CGFloat, in defaults: UserDefaults = .standard) {
         defaults.set(Double(size.clamped(to: chatFontSizeRange)), forKey: chatFontSizeKey)
     }
+
+    // MARK: Chat bubble opacity (slider in Settings)
+
+    nonisolated static let chatOpacityKey = "chatOpacity"
+    nonisolated static let defaultChatOpacity: Double = 1.0
+    nonisolated static let chatOpacityRange: ClosedRange<Double> = 0.2...1.0
+
+    nonisolated static func chatOpacity(in defaults: UserDefaults = .standard) -> Double {
+        let stored = defaults.double(forKey: chatOpacityKey)
+        guard stored > 0 else { return defaultChatOpacity }
+        return stored.clamped(to: chatOpacityRange)
+    }
 }
