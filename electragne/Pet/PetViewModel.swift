@@ -100,7 +100,6 @@ class PetViewModel {
             surface: surface,
             environment: environment,
             animator: animationManager,
-            transition: { [weak self] state in self?.enter(state) },
             updateState: { [weak self] state in self?.state = state },
             coordinator: self
         )

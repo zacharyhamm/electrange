@@ -84,10 +84,6 @@ nonisolated struct SearXNGSearch {
         return Self.formatOutput(from: data, category: category, imageLimit: imageLimit)
     }
 
-    func resultsText(query: String) async throws -> String {
-        try await results(query: query).text
-    }
-
     nonisolated static func formatResults(from data: Data) -> String {
         formatOutput(from: data).text
     }
@@ -127,7 +123,6 @@ nonisolated struct SearXNGSearch {
 /// Minimal streaming client for a local Ollama server.
 nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
     nonisolated static let defaultBaseURL = URL(string: "http://localhost:11434")!
-    nonisolated static let defaultModel = ChatConfig.default.ollamaModel
     nonisolated static let systemPrompt = ChatSystemPrompt.make(providerDetails: """
         Markdown formatting is welcome: bold, italics, [title](url) links, \
         bullet lists using "-", headings, and tables; avoid code blocks. \
@@ -165,11 +160,6 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
         let shortName = NSUserName().trimmingCharacters(in: .whitespacesAndNewlines)
         return shortName.isEmpty ? nil : shortName
     }
-    /// Ollama defaults num_ctx to a few thousand tokens; raise it so long
-    /// conversations keep their earlier turns in context.
-    nonisolated static let contextWindowTokens = ChatConfig.default.contextWindowTokens
-    /// Bound on search → answer round-trips per user message.
-    nonisolated static let maxToolRounds = ChatConfig.default.maxToolRounds
 
     let baseURLOverride: URL?
     let modelOverride: String?

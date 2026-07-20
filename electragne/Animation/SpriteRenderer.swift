@@ -12,7 +12,7 @@ import os
 /// Pure tile-grid math for a sprite sheet laid out as `tilesX` × `tilesY` cells.
 /// Extracted from SpriteRenderer so the frame→(col,row) mapping can be tested
 /// without a real bitmap, and so a degenerate grid can't trap on `% 0` / `/ 0`.
-struct SpriteGrid: Equatable {
+nonisolated struct SpriteGrid: Equatable {
     let tilesX: Int
     let tilesY: Int
 

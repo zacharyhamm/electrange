@@ -26,20 +26,6 @@ nonisolated enum FileSearchEngine {
     static let defaultMaxResults = 12
     static let maxVisitedItemsPerRoot = 50_000
 
-    static func search(
-        query: String,
-        roots: [URL],
-        maxResults: Int = defaultMaxResults,
-        visitLimitPerRoot: Int = maxVisitedItemsPerRoot
-    ) -> [FileSearchMatch] {
-        searchWithDiagnostics(
-            query: query,
-            roots: roots,
-            maxResults: maxResults,
-            visitLimitPerRoot: visitLimitPerRoot
-        ).matches
-    }
-
     static func searchWithDiagnostics(
         query: String,
         roots: [URL],

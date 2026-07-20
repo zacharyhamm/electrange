@@ -20,9 +20,7 @@ private func makeAnimation(
         repeatFrom: repeatFrom,
         offsetY: 0,
         startMoveX: 2, startMoveY: 0, endMoveX: 6, endMoveY: 0,
-        nextAnimations: [],
-        borderTransitions: [],
-        gravityTransitions: []
+        nextAnimations: []
     )
 }
 

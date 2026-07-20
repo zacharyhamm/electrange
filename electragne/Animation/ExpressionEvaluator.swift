@@ -13,7 +13,7 @@ import Foundation
 /// malformed input simply returns nil. Variables are resolved from a dictionary
 /// rather than substituted into the string, so negative values and scientific
 /// notation can't produce malformed expressions.
-enum ExpressionEvaluator {
+nonisolated enum ExpressionEvaluator {
 
     static func evaluate(_ expression: String, variables: [String: Double]) -> Double? {
         guard let tokens = tokenize(expression) else { return nil }

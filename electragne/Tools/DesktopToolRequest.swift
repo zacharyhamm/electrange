@@ -71,10 +71,6 @@ nonisolated enum DesktopToolRequest: Equatable, Sendable {
         }
     }
 
-    var isFileSearch: Bool {
-        guard case .findFiles = self else { return false }
-        return true
-    }
 }
 
 nonisolated enum DesktopToolError: LocalizedError, Equatable {

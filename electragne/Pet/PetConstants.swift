@@ -56,7 +56,7 @@ nonisolated enum BehaviorConstants {
 }
 
 /// Pet window size constants
-enum PetSizeConstants {
+nonisolated enum PetSizeConstants {
     static let storageKey = "petSize"
     static let defaultSize: Double = 40
     static let minimumSize: Double = 20

@@ -26,7 +26,6 @@ nonisolated struct GeminiContent: Equatable, Codable, Sendable {
 /// stored chat history remains provider-neutral user/model text.
 nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
     nonisolated static let defaultBaseURL = URL(string: "https://generativelanguage.googleapis.com")!
-    nonisolated static let defaultModel = ChatConfig.default.geminiModel
     nonisolated static let systemPrompt = ChatSystemPrompt.make(providerDetails: """
         Markdown formatting is welcome: bold, italics, [title](url) links, \
         bullet lists using "-", headings, tables, and inline math using $...$ or \\(...\\); \
@@ -42,7 +41,6 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         reports success.
         """)
     nonisolated static let maxSourceLinks = 3
-    nonisolated static let maxToolRounds = ChatConfig.default.maxToolRounds
 
     var baseURL: URL
     let modelOverride: String?

@@ -22,40 +22,34 @@ private func makeAnimation(
         repeatFrom: repeatFrom,
         offsetY: 0,
         startMoveX: 0, startMoveY: 0, endMoveX: 0, endMoveY: 0,
-        nextAnimations: next,
-        borderTransitions: [],
-        gravityTransitions: []
+        nextAnimations: next
     )
 }
 
 @MainActor
 struct AnimationLogicTests {
 
-    // MARK: - calculateTotalFrames
+    // MARK: - totalFrames
 
     @Test func totalFramesWithoutRepeatFrom() {
-        let mgr = AnimationManager()
         let anim = makeAnimation(frameCount: 5, repeatFrom: 0)
-        #expect(mgr.calculateTotalFrames(animation: anim, repeatCount: 2) == 15)  // 5 + 5*2
+        #expect(AnimationPlayback.totalFrames(animation: anim, repeatCount: 2) == 15)  // 5 + 5*2
     }
 
     @Test func totalFramesWithRepeatFrom() {
-        let mgr = AnimationManager()
         let anim = makeAnimation(frameCount: 5, repeatFrom: 3)
-        #expect(mgr.calculateTotalFrames(animation: anim, repeatCount: 2) == 9)   // 5 + 2*2
+        #expect(AnimationPlayback.totalFrames(animation: anim, repeatCount: 2) == 9)   // 5 + 2*2
     }
 
     @Test func totalFramesNoRepeats() {
-        let mgr = AnimationManager()
         let anim = makeAnimation(frameCount: 5, repeatFrom: 0)
-        #expect(mgr.calculateTotalFrames(animation: anim, repeatCount: 0) == 5)
+        #expect(AnimationPlayback.totalFrames(animation: anim, repeatCount: 0) == 5)
     }
 
     @Test func repeatFromPastFrameCountDoesNotGoNegative() {
-        let mgr = AnimationManager()
         let anim = makeAnimation(frameCount: 5, repeatFrom: 7)  // repeatFrom > frames.count
         // Without the max(0,...) guard this would be 5 + (5-7)*4 = -3.
-        #expect(mgr.calculateTotalFrames(animation: anim, repeatCount: 4) == 5)
+        #expect(AnimationPlayback.totalFrames(animation: anim, repeatCount: 4) == 5)
     }
 
     // MARK: - weightedNextAnimation

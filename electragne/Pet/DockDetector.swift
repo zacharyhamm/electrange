@@ -22,16 +22,6 @@ nonisolated struct DockInfo: Equatable {
     let position: DockPosition
     let frame: NSRect
 
-    /// The Y coordinate of the top of the dock (for bottom dock)
-    /// or the X coordinate of the inner edge (for left/right dock)
-    var topEdge: CGFloat {
-        switch position {
-        case .bottom: return frame.maxY
-        case .left: return frame.maxX
-        case .right: return frame.minX
-        }
-    }
-
     /// Check if a point is within the dock's horizontal bounds (for bottom dock)
     func containsX(_ x: CGFloat, petWidth: CGFloat) -> Bool {
         switch position {
@@ -78,89 +68,42 @@ class DockDetector {
         }
 
         // Fallback: estimate dock bounds based on screen geometry
-        // CGWindowList doesn't work in sandboxed apps without Screen Recording permission
-        let position = inferDockPosition(screen: screen)
-        return estimateDockBounds(screen: screen, position: position)
+        // CGWindowList doesn't work in sandboxed apps without Screen Recording permission.
+        // Only a bottom dock is estimated — every consumer ignores left/right docks.
+        return estimateBottomDockBounds(screen: screen)
     }
 
     /// Estimate dock bounds when we can't read the actual window
     /// Uses the dock height and estimates width based on typical icon counts
-    private func estimateDockBounds(screen: NSScreen, position: DockPosition) -> DockInfo? {
+    private func estimateBottomDockBounds(screen: NSScreen) -> DockInfo? {
         let fullFrame = screen.frame
         let visibleFrame = screen.visibleFrame
 
-        switch position {
-        case .bottom:
-            let dockHeight = visibleFrame.origin.y - fullFrame.origin.y
-            guard dockHeight > 10 else { return nil }
+        let dockHeight = visibleFrame.origin.y - fullFrame.origin.y
+        guard dockHeight > 10 else { return nil }
 
-            // Estimate dock width conservatively
-            // Dock icons are roughly square, estimate ~10 icons
-            // This tends to underestimate rather than overestimate
-            let estimatedIconSize = dockHeight * 0.75
-            let estimatedIconCount: CGFloat = 10
-            let estimatedWidth = min(
-                estimatedIconSize * estimatedIconCount,
-                fullFrame.width * 0.4  // cap at 40% of screen width
+        // Estimate dock width conservatively
+        // Dock icons are roughly square, estimate ~10 icons
+        // This tends to underestimate rather than overestimate
+        let estimatedIconSize = dockHeight * 0.75
+        let estimatedIconCount: CGFloat = 10
+        let estimatedWidth = min(
+            estimatedIconSize * estimatedIconCount,
+            fullFrame.width * 0.4  // cap at 40% of screen width
+        )
+
+        // Center the dock on screen
+        let dockX = fullFrame.origin.x + (fullFrame.width - estimatedWidth) / 2
+
+        return DockInfo(
+            position: .bottom,
+            frame: NSRect(
+                x: dockX,
+                y: fullFrame.origin.y,
+                width: estimatedWidth,
+                height: dockHeight
             )
-
-            // Center the dock on screen
-            let dockX = fullFrame.origin.x + (fullFrame.width - estimatedWidth) / 2
-
-            return DockInfo(
-                position: .bottom,
-                frame: NSRect(
-                    x: dockX,
-                    y: fullFrame.origin.y,
-                    width: estimatedWidth,
-                    height: dockHeight
-                )
-            )
-
-        case .left:
-            let dockWidth = visibleFrame.origin.x - fullFrame.origin.x
-            guard dockWidth > 10 else { return nil }
-
-            let estimatedIconSize = dockWidth * 0.75
-            let estimatedIconCount: CGFloat = 10
-            let estimatedHeight = min(
-                estimatedIconSize * estimatedIconCount,
-                fullFrame.height * 0.4
-            )
-            let dockY = fullFrame.origin.y + (fullFrame.height - estimatedHeight) / 2
-
-            return DockInfo(
-                position: .left,
-                frame: NSRect(
-                    x: fullFrame.origin.x,
-                    y: dockY,
-                    width: dockWidth,
-                    height: estimatedHeight
-                )
-            )
-
-        case .right:
-            let dockWidth = fullFrame.maxX - visibleFrame.maxX
-            guard dockWidth > 10 else { return nil }
-
-            let estimatedIconSize = dockWidth * 0.75
-            let estimatedIconCount: CGFloat = 10
-            let estimatedHeight = min(
-                estimatedIconSize * estimatedIconCount,
-                fullFrame.height * 0.4
-            )
-            let dockY = fullFrame.origin.y + (fullFrame.height - estimatedHeight) / 2
-
-            return DockInfo(
-                position: .right,
-                frame: NSRect(
-                    x: visibleFrame.maxX,
-                    y: dockY,
-                    width: dockWidth,
-                    height: estimatedHeight
-                )
-            )
-        }
+        )
     }
 
     /// Find the Dock application's window frame on the given screen using CGWindowList
@@ -232,25 +175,5 @@ class DockDetector {
         }
 
         return best
-    }
-
-    /// Infer dock position from screen geometry
-    private func inferDockPosition(screen: NSScreen) -> DockPosition {
-        let fullFrame = screen.frame
-        let visibleFrame = screen.visibleFrame
-
-        let bottomDiff = visibleFrame.origin.y - fullFrame.origin.y
-        let leftDiff = visibleFrame.origin.x - fullFrame.origin.x
-        let rightDiff = fullFrame.maxX - visibleFrame.maxX
-
-        if bottomDiff >= leftDiff && bottomDiff >= rightDiff && bottomDiff > 0 {
-            return .bottom
-        } else if leftDiff > rightDiff && leftDiff > 0 {
-            return .left
-        } else if rightDiff > 0 {
-            return .right
-        }
-
-        return .bottom
     }
 }

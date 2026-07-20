@@ -91,12 +91,12 @@ struct AnimationParserTests {
         #expect(anim.repeatCount.evaluate() == 2)
     }
 
-    @Test func routesTransitionsToTheRightBuckets() throws {
+    @Test func keepsOnlySequenceTransitions() throws {
         let (_, animations) = try parseFixture()
         let anim = try #require(animations.first)
+        // The fixture's border/gravity <next> elements must be skipped, not
+        // mixed into the sequence transitions.
         #expect(anim.nextAnimations.map(\.animationID) == ["2", "3"])
         #expect(anim.nextAnimations.map(\.probability) == [50, 50])
-        #expect(anim.gravityTransitions.map(\.animationID) == ["5"])
-        #expect(anim.borderTransitions.map(\.animationID) == ["3"])
     }
 }

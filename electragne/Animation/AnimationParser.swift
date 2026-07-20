@@ -11,7 +11,7 @@ import os
 
 // MARK: - Animation Models
 
-struct PetAnimation: Identifiable {
+nonisolated struct PetAnimation: Identifiable {
     let id: String
     let name: String
     let frames: [Int] // Frame numbers from sprite sheet
@@ -29,22 +29,16 @@ struct PetAnimation: Identifiable {
 
     // Next animation transitions (probability-based)
     let nextAnimations: [NextAnimation]
-
-    // Border-triggered transitions (when hitting screen edges)
-    let borderTransitions: [NextAnimation]
-
-    // Gravity-triggered transitions (when landing)
-    let gravityTransitions: [NextAnimation]
 }
 
-struct NextAnimation {
+nonisolated struct NextAnimation {
     let animationID: String
     let probability: Int // 1-100 weight
     let only: String // "none", "taskbar", etc.
 }
 
 // Child spawn definition - spawns a separate window when parent animation plays
-struct ChildSpawn {
+nonisolated struct ChildSpawn {
     let parentAnimationID: String  // Animation that triggers the spawn
     let xExpression: String        // Position expression (e.g., "imageX-imageW*0.9")
     let yExpression: String
@@ -99,7 +93,7 @@ struct ChildSpawn {
 }
 
 // Represents either a static repeat count or a dynamic expression
-enum RepeatValue {
+nonisolated enum RepeatValue {
     case fixed(Int)
     case random(divisor: Int, offset: Int) // random/divisor+offset
     case randomMultiplied(multiplier: Int) // random*multiplier
@@ -108,7 +102,8 @@ enum RepeatValue {
     // Upper bound keeps a bad value from overflowing downstream frame-count math
     private static let maxRepeatCount = 100_000
 
-    func evaluate() -> Int {
+    // Reads NSScreen/UserDefaults, so this one member stays main-actor.
+    @MainActor func evaluate() -> Int {
         let value: Int
         switch self {
         case .fixed(let fixed):
@@ -127,7 +122,7 @@ enum RepeatValue {
         return Swift.min(Swift.max(0, value), Self.maxRepeatCount)
     }
 
-    private static func evaluateRepeatExpression(_ expr: String) -> Int {
+    @MainActor private static func evaluateRepeatExpression(_ expr: String) -> Int {
         // Translate desktopPet's C# "Convert(x,System.Int32)" int-cast into plain parentheses
         var translated = expr.replacingOccurrences(of: "Convert(", with: "(")
         translated = translated.replacingOccurrences(of: ",System.Int32)", with: ")")
@@ -198,7 +193,7 @@ enum RepeatValue {
 
 // MARK: - XML Parser
 
-class AnimationParser: NSObject, XMLParserDelegate {
+nonisolated class AnimationParser: NSObject, XMLParserDelegate {
     private var animations: [PetAnimation] = []
     private var currentAnimationID = ""
     private var currentAnimationName = ""
@@ -216,7 +211,6 @@ class AnimationParser: NSObject, XMLParserDelegate {
     private var endMoveX: CGFloat = 0
     private var endMoveY: CGFloat = 0
     private var endInterval: TimeInterval = 200
-    private var endOffsetY: CGFloat = 0
 
     // Sequence attributes
     private var repeatValue: RepeatValue = .fixed(1)
@@ -224,8 +218,6 @@ class AnimationParser: NSObject, XMLParserDelegate {
 
     // Next animation transitions
     private var nextAnimations: [NextAnimation] = []
-    private var borderTransitions: [NextAnimation] = []
-    private var gravityTransitions: [NextAnimation] = []
     private var currentNextProbability: Int = 0
     private var currentNextOnly: String = "none"
 
@@ -233,8 +225,6 @@ class AnimationParser: NSObject, XMLParserDelegate {
     private var inStartBlock = false
     private var inEndBlock = false
     private var inSequenceBlock = false
-    private var inBorderBlock = false
-    private var inGravityBlock = false
 
     // Image info
     var tilesX = 16
@@ -275,12 +265,9 @@ class AnimationParser: NSObject, XMLParserDelegate {
             startInterval = 200
             endInterval = 200
             startOffsetY = 0
-            endOffsetY = 0
             repeatValue = .fixed(1)
             repeatFrom = 0
             nextAnimations = []
-            borderTransitions = []
-            gravityTransitions = []
 
         case "start":
             inStartBlock = true
@@ -304,12 +291,6 @@ class AnimationParser: NSObject, XMLParserDelegate {
             // Parse next animation transition
             currentNextProbability = Int(attributeDict["probability"] ?? "0") ?? 0
             currentNextOnly = attributeDict["only"] ?? "none"
-
-        case "border":
-            inBorderBlock = true
-
-        case "gravity":
-            inGravityBlock = true
 
         case "childs":
             inChildsBlock = true
@@ -361,11 +342,8 @@ class AnimationParser: NSObject, XMLParserDelegate {
             }
 
         case "offsety":
-            let value = CGFloat(Double(currentText) ?? 0)
             if inStartBlock {
-                startOffsetY = value
-            } else if inEndBlock {
-                endOffsetY = value
+                startOffsetY = CGFloat(Double(currentText) ?? 0)
             }
 
         case "frame":
@@ -377,18 +355,13 @@ class AnimationParser: NSObject, XMLParserDelegate {
             if inChildBlock {
                 currentChildNext = currentText
             } else if !currentText.isEmpty {
-                let next = NextAnimation(
-                    animationID: currentText,
-                    probability: currentNextProbability,
-                    only: currentNextOnly
-                )
-                // Store in appropriate array based on current block
-                if inBorderBlock {
-                    borderTransitions.append(next)
-                } else if inGravityBlock {
-                    gravityTransitions.append(next)
-                } else if inSequenceBlock {
-                    nextAnimations.append(next)
+                // Border/gravity-block transitions are parsed past but unused
+                if inSequenceBlock {
+                    nextAnimations.append(NextAnimation(
+                        animationID: currentText,
+                        probability: currentNextProbability,
+                        only: currentNextOnly
+                    ))
                 }
             }
 
@@ -400,12 +373,6 @@ class AnimationParser: NSObject, XMLParserDelegate {
 
         case "sequence":
             inSequenceBlock = false
-
-        case "border":
-            inBorderBlock = false
-
-        case "gravity":
-            inGravityBlock = false
 
         case "animation":
             if !currentAnimationID.isEmpty && !currentFrames.isEmpty {
@@ -427,9 +394,7 @@ class AnimationParser: NSObject, XMLParserDelegate {
                     startMoveY: startMoveY,
                     endMoveX: finalEndMoveX,
                     endMoveY: finalEndMoveY,
-                    nextAnimations: nextAnimations,
-                    borderTransitions: borderTransitions,
-                    gravityTransitions: gravityTransitions
+                    nextAnimations: nextAnimations
                 )
                 animations.append(animation)
             }

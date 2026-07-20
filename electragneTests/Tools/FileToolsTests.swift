@@ -60,7 +60,7 @@ struct FileToolsTests {
         try Data().write(to: reports.appendingPathComponent("quarterly report notes.txt"))
         try Data().write(to: root.appendingPathComponent(".quarterly report secret.txt"))
 
-        let matches = FileSearchEngine.search(query: "quarterly report", roots: [root])
+        let matches = FileSearchEngine.searchWithDiagnostics(query: "quarterly report", roots: [root]).matches
 
         #expect(matches.map(\.relativePath) == [
             "quarterly report.pdf",
@@ -79,7 +79,7 @@ struct FileToolsTests {
         try Data().write(to: invoices.appendingPathComponent("Acme.pdf"))
         try Data().write(to: invoices.appendingPathComponent("Other.pdf"))
 
-        let matches = FileSearchEngine.search(query: "invoices Acme", roots: [root], maxResults: 1)
+        let matches = FileSearchEngine.searchWithDiagnostics(query: "invoices Acme", roots: [root], maxResults: 1).matches
 
         #expect(matches.count == 1)
         #expect(matches.first?.relativePath == "Invoices 2026/Acme.pdf")

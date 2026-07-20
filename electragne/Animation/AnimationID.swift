@@ -6,7 +6,7 @@
 import Foundation
 
 /// Type-safe animation identifiers to replace magic strings
-enum AnimationID: String {
+nonisolated enum AnimationID: String {
     // Basic movements
     case walk = "1"
     case rotate1a = "2"

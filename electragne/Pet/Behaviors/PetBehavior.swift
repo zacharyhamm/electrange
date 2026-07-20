@@ -14,7 +14,6 @@ nonisolated struct TimerNeeds: OptionSet, Equatable {
     let surface: PetSurfaceMoving
     let environment: PetEnvironmentSensing
     let animator: AnimationManager
-    let transition: (PetState) -> Void
     let updateState: (PetState) -> Void
     unowned let coordinator: PetViewModel
 }

@@ -123,8 +123,8 @@ struct OllamaClientTests {
             try JSONSerialization.jsonObject(with: body) as? [String: Any]
         )
         let options = try #require(json["options"] as? [String: Any])
-        #expect(options["num_ctx"] as? Int == OllamaClient.contextWindowTokens)
-        #expect(OllamaClient.contextWindowTokens >= 32768)
+        #expect(options["num_ctx"] as? Int == ChatConfig.default.contextWindowTokens)
+        #expect(ChatConfig.default.contextWindowTokens >= 32768)
     }
 
     @Test func requestBodyPreservesConversationHistoryOrder() throws {

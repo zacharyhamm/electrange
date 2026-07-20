@@ -69,7 +69,7 @@ class AnimationManager {
     }
 
     // Check if current animation has children to spawn
-    func getChildSpawnsForCurrentAnimation() -> [ChildSpawn] {
+    private func getChildSpawnsForCurrentAnimation() -> [ChildSpawn] {
         guard let animation = currentAnimation else { return [] }
         return childSpawns[animation.id] ?? []
     }
@@ -80,10 +80,6 @@ class AnimationManager {
 
     func playAnimationOnce(_ animationID: String, completion: @escaping () -> Void) {
         startPlayback(animationID, loop: false, completion: completion)
-    }
-
-    func playAnimationLooping(_ animationID: String) {
-        startPlayback(animationID, loop: true, completion: nil)
     }
 
     private func startPlayback(_ animationID: String, loop: Bool, completion: (() -> Void)?) {
@@ -190,9 +186,5 @@ class AnimationManager {
                 onAnimationComplete?()
             }
         }
-    }
-
-    func calculateTotalFrames(animation: PetAnimation, repeatCount: Int) -> Int {
-        AnimationPlayback.totalFrames(animation: animation, repeatCount: repeatCount)
     }
 }
