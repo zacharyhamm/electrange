@@ -45,7 +45,8 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
         baseURL: URL? = nil,
         model: String? = nil,
         thinking: Bool? = nil,
-        transport: any ChatHTTPTransport = LoggingTransport(),
+        transport: any ChatHTTPTransport = LoggingTransport(
+            proxied: UserPreferences.openAICompatibleUseProxy()),
         config: ChatConfig = .default,
         apiKey: (@Sendable () -> String?)? = nil
     ) {
@@ -164,7 +165,9 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
             ))
         }
         let historyMessages = try history.map(message(from:))
-        let messages = [RequestBody.Message(role: "system", content: systemPrompt)]
+        let messages = [
+            RequestBody.Message(role: "system", content: systemPrompt + ChatSystemPrompt.dateLine())
+        ]
             + historyMessages
         return try JSONEncoder().encode(RequestBody(
             model: model,
@@ -316,7 +319,8 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
     static func listModels(
         baseURL: URL,
         apiKey: String,
-        transport: any ChatHTTPTransport = LoggingTransport()
+        transport: any ChatHTTPTransport = LoggingTransport(
+            proxied: UserPreferences.openAICompatibleUseProxy())
     ) async throws -> [Model] {
         guard baseURL.scheme != nil, baseURL.host != nil else { throw ChatProviderError.invalidEndpoint }
         var request = URLRequest(url: baseURL.appendingPathComponent("models"))

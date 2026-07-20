@@ -109,7 +109,9 @@ struct OllamaClientTests {
         let messages = try #require(json["messages"] as? [[String: Any]])
         #expect(messages.count == 2)
         #expect(messages[0]["role"] as? String == "system")
-        #expect(messages[0]["content"] as? String == OllamaClient.systemPrompt)
+        let systemContent = try #require(messages[0]["content"] as? String)
+        #expect(systemContent.hasPrefix(OllamaClient.systemPrompt))
+        #expect(systemContent.contains("current local date and time"))
         #expect(messages[1]["role"] as? String == "user")
         #expect(messages[1]["content"] as? String == "Hello, sheep!")
     }
@@ -146,8 +148,8 @@ struct OllamaClientTests {
     }
 
     @Test func systemPromptIncludesUserNameWhenKnown() throws {
-        #expect(OllamaClient.makeSystemPrompt(userName: nil) == OllamaClient.systemPrompt)
-        #expect(OllamaClient.makeSystemPrompt(userName: "") == OllamaClient.systemPrompt)
+        #expect(OllamaClient.makeSystemPrompt(userName: nil).hasPrefix(OllamaClient.systemPrompt))
+        #expect(!OllamaClient.makeSystemPrompt(userName: "").contains("named"))
 
         let personalized = OllamaClient.makeSystemPrompt(userName: "Zachary Hamm")
         #expect(personalized.hasPrefix(OllamaClient.systemPrompt))
@@ -329,5 +331,18 @@ struct OllamaClientTests {
                 homeDirectory: home.path
             ) == "key-from-keychain"
         )
+    }
+}
+
+struct ChatSystemPromptTests {
+    @Test func dateLineFormatsLocalTimeWithZone() throws {
+        let zone = try #require(TimeZone(identifier: "America/Denver"))
+        let line = ChatSystemPrompt.dateLine(
+            now: Date(timeIntervalSince1970: 1_784_581_200),  // 2026-07-20 21:00 UTC
+            timeZone: zone
+        )
+        #expect(line == " The owner's current local date and time is "
+            + "Monday, July 20, 2026 at 3:00 PM -06:00 (America/Denver). "
+            + "Use this when resolving relative dates and times.")
     }
 }

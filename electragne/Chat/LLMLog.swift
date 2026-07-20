@@ -72,6 +72,11 @@ nonisolated struct LoggingTransport: ChatHTTPTransport {
         self.log = log
     }
 
+    /// Transport routed through the Tailscale SOCKS5 proxy when `proxied`.
+    init(proxied: Bool) {
+        self.init(base: URLSessionTransport(session: SOCKSProxy.urlSession(proxied: proxied)))
+    }
+
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         let id = UUID().uuidString
         await log.append(kind: "request", Self.requestFields(id: id, request: request))

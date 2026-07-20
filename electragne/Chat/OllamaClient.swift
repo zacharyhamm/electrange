@@ -25,7 +25,7 @@ nonisolated struct SearXNGSearch {
         let images: [ChatImage]
     }
 
-    init(transport: any ChatHTTPTransport = LoggingTransport()) {
+    init(transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.searxngUseProxy())) {
         self.transport = transport
     }
 
@@ -145,11 +145,17 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
         """)
 
     /// The full system prompt, personalized with the owner's name when known.
-    nonisolated static func makeSystemPrompt(userName: String?) -> String {
-        guard let userName, !userName.isEmpty else { return systemPrompt }
-        return systemPrompt
-            + " The owner you are chatting with is named \(userName), but there "
-            + "is no need to keep repeating their name — use it sparingly."
+    nonisolated static func makeSystemPrompt(
+        userName: String?,
+        now: Date = Date(),
+        timeZone: TimeZone = .current
+    ) -> String {
+        var prompt = systemPrompt + ChatSystemPrompt.dateLine(now: now, timeZone: timeZone)
+        if let userName, !userName.isEmpty {
+            prompt += " The owner you are chatting with is named \(userName), but there "
+                + "is no need to keep repeating their name — use it sparingly."
+        }
+        return prompt
     }
 
     /// The owner's name from macOS account info, for the system prompt.
@@ -165,22 +171,29 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
     /// Bound on search → answer round-trips per user message.
     nonisolated static let maxToolRounds = ChatConfig.default.maxToolRounds
 
-    var baseURL: URL
+    let baseURLOverride: URL?
     let modelOverride: String?
     let transport: any ChatHTTPTransport
     let config: ChatConfig
+    /// Resolved per request so Settings changes apply immediately.
+    var baseURL: URL { baseURLOverride ?? Self.resolvedBaseURL }
     /// Resolved per request so model-picker/Settings changes apply immediately.
     var model: String { modelOverride ?? UserPreferences.ollamaModel() }
     /// Resolved per request so Settings changes apply immediately.
     var userName: String? { UserPreferences.resolvedUserName() }
 
+    /// The base URL from Settings, or the localhost default.
+    nonisolated static var resolvedBaseURL: URL {
+        UserPreferences.ollamaBaseURL().flatMap { URL(string: $0) } ?? defaultBaseURL
+    }
+
     init(
-        baseURL: URL = defaultBaseURL,
+        baseURL: URL? = nil,
         model: String? = nil,
-        transport: any ChatHTTPTransport = LoggingTransport(),
+        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.ollamaUseProxy()),
         config: ChatConfig = .default
     ) {
-        self.baseURL = baseURL
+        self.baseURLOverride = baseURL
         self.modelOverride = model
         self.transport = transport
         self.config = config
@@ -193,9 +206,10 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
 
     /// The models pulled into the local Ollama server, via GET api/tags.
     static func listModels(
-        baseURL: URL = defaultBaseURL,
-        transport: any ChatHTTPTransport = LoggingTransport()
+        baseURL: URL? = nil,
+        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.ollamaUseProxy())
     ) async throws -> [String] {
+        let baseURL = baseURL ?? resolvedBaseURL
         let request = URLRequest(url: baseURL.appendingPathComponent("api/tags"))
         let (data, response) = try await transport.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {

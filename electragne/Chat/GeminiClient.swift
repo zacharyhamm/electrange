@@ -57,7 +57,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
     init(
         baseURL: URL = defaultBaseURL,
         model: String? = nil,
-        transport: any ChatHTTPTransport = LoggingTransport(),
+        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.geminiUseProxy()),
         imageSearch: SearXNGSearch = SearXNGSearch(),
         config: ChatConfig = .default,
         apiKey: @escaping @Sendable () -> String? = { ChatAPIKeyStore.load(for: .gemini) }
@@ -159,14 +159,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         now: Date = Date(),
         timeZone: TimeZone = .current
     ) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a XXXXX"
-
-        var prompt = systemPrompt
-            + " The owner's current local date and time is \(formatter.string(from: now))"
-            + " (\(timeZone.identifier)). Use this when resolving relative reminder dates."
+        var prompt = systemPrompt + ChatSystemPrompt.dateLine(now: now, timeZone: timeZone)
         if let userName, !userName.isEmpty {
             prompt += " The owner you are chatting with is named \(userName), but there "
                 + "is no need to keep repeating their name — use it sparingly."
@@ -389,7 +382,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
     static func listModels(
         baseURL: URL = defaultBaseURL,
         apiKey: String,
-        transport: any ChatHTTPTransport = LoggingTransport()
+        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.geminiUseProxy())
     ) async throws -> [GeminiModel] {
         var models: [GeminiModel] = []
         var pageToken: String?

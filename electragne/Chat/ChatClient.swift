@@ -198,6 +198,17 @@ nonisolated enum ChatSystemPrompt {
         \(providerDetails)
         """
     }
+
+    /// The owner's current local date and time, formatted per request so it is
+    /// never stale, for resolving relative dates like "tomorrow".
+    static func dateLine(now: Date = Date(), timeZone: TimeZone = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a XXXXX"
+        return " The owner's current local date and time is \(formatter.string(from: now))"
+            + " (\(timeZone.identifier)). Use this when resolving relative dates and times."
+    }
 }
 
 /// A chat backend the bubble can stream a reply from.

@@ -338,7 +338,13 @@ nonisolated private final class DobbsConnection: @unchecked Sendable {
               case let host = String(endpoint[..<colon]), !host.isEmpty else {
             throw DobbsError.badEndpoint(endpoint)
         }
-        let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
+        let parameters = NWParameters.tcp
+        if UserPreferences.dobbsUseProxy() {
+            let context = NWParameters.PrivacyContext(description: "dobbs-socks5")
+            context.proxyConfigurations = SOCKSProxy.proxyConfigurations()
+            parameters.setPrivacyContext(context)
+        }
+        let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: parameters)
         let wrapper = DobbsConnection(connection: connection)
         let resumed = ResumeOnce()
         try await withTaskCancellationHandler {

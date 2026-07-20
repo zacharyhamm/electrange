@@ -38,6 +38,14 @@ struct SettingsView: View {
     @State private var googleClientSecret = ""
     @State private var fileSearchScopes: [FileSearchScope] = []
     @State private var fileSearchError: String?
+    @AppStorage(UserPreferences.socksProxyEndpointKey)
+    private var socksProxyEndpoint = UserPreferences.defaultSOCKSProxyEndpoint
+    @AppStorage(UserPreferences.ollamaBaseURLKey) private var ollamaBaseURL = ""
+    @AppStorage(UserPreferences.ollamaUseProxyKey) private var ollamaUseProxy = false
+    @AppStorage(UserPreferences.geminiUseProxyKey) private var geminiUseProxy = false
+    @AppStorage(UserPreferences.openAICompatibleUseProxyKey) private var openAICompatibleUseProxy = false
+    @AppStorage(UserPreferences.searxngUseProxyKey) private var searxngUseProxy = false
+    @AppStorage(UserPreferences.dobbsUseProxyKey) private var dobbsUseProxy = false
     @AppStorage(UserPreferences.dobbsEndpointKey) private var dobbsEndpoint = ""
     @AppStorage(UserPreferences.dobbsWorkspaceKey) private var dobbsWorkspace = ""
     @State private var dobbsToken = ""
@@ -147,6 +155,18 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
+                    Toggle("Route Gemini via Tailscale proxy", isOn: $geminiUseProxy)
+                        .padding(.top, 3)
+
+                    Text("Ollama base URL")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.top, 3)
+                    TextField("http://localhost:11434", text: $ollamaBaseURL)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Point at a local or tailnet Ollama server. Leave blank for localhost.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("Route Ollama via Tailscale proxy", isOn: $ollamaUseProxy)
 
                     Text("SearXNG endpoint")
                         .font(.subheadline.weight(.medium))
@@ -156,6 +176,7 @@ struct SettingsView: View {
                     Text("Local SearXNG instance used for the web_search tool. Leave blank to disable web search.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Toggle("Route SearXNG via Tailscale proxy", isOn: $searxngUseProxy)
 
                     Text("OpenAI-compatible API key")
                         .font(.subheadline.weight(.medium))
@@ -167,6 +188,7 @@ struct SettingsView: View {
                         .font(.subheadline.weight(.medium))
                     TextField("https://api.deepseek.com", text: $openAICompatibleBaseURL)
                         .textFieldStyle(.roundedBorder)
+                    Toggle("Route via Tailscale proxy", isOn: $openAICompatibleUseProxy)
 
                     HStack {
                         Text("Model")
@@ -257,6 +279,19 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 9) {
+                    Text("Tailscale SOCKS5 proxy")
+                        .font(.headline)
+                    Text("The sidecar tailscaled's SOCKS5 proxy. Endpoints with \"Route via Tailscale proxy\" enabled connect through it to reach tailnet devices.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField(UserPreferences.defaultSOCKSProxyEndpoint, text: $socksProxyEndpoint)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 320)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 9) {
                     HStack {
                         Text("Slack (dobbs)")
                             .font(.headline)
@@ -272,6 +307,7 @@ struct SettingsView: View {
                     TextField("host:port, e.g. 127.0.0.1:7355", text: $dobbsEndpoint)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 320)
+                    Toggle("Route via Tailscale proxy", isOn: $dobbsUseProxy)
 
                     Text("Workspace")
                         .font(.subheadline.weight(.medium))

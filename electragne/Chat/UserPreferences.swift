@@ -110,6 +110,51 @@ enum UserPreferences {
         defaults.set(try? JSONEncoder().encode(servers), forKey: mcpServersKey)
     }
 
+    // MARK: Tailscale sidecar SOCKS5 proxy (per-endpoint opt-in)
+
+    nonisolated static let socksProxyEndpointKey = "socksProxyEndpoint"
+    nonisolated static let defaultSOCKSProxyEndpoint = "127.0.0.1:1055"
+
+    nonisolated static let ollamaUseProxyKey = "ollamaUseProxy"
+    nonisolated static let geminiUseProxyKey = "geminiUseProxy"
+    nonisolated static let openAICompatibleUseProxyKey = "openAICompatibleUseProxy"
+    nonisolated static let searxngUseProxyKey = "searxngUseProxy"
+    nonisolated static let dobbsUseProxyKey = "dobbsUseProxy"
+
+    /// The SOCKS5 proxy host:port, defaulting to the local tsidecar proxy.
+    nonisolated static func socksProxyEndpoint(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: socksProxyEndpointKey)) ?? defaultSOCKSProxyEndpoint
+    }
+
+    nonisolated static func ollamaUseProxy(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: ollamaUseProxyKey)
+    }
+
+    nonisolated static func geminiUseProxy(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: geminiUseProxyKey)
+    }
+
+    nonisolated static func openAICompatibleUseProxy(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: openAICompatibleUseProxyKey)
+    }
+
+    nonisolated static func searxngUseProxy(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: searxngUseProxyKey)
+    }
+
+    nonisolated static func dobbsUseProxy(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: dobbsUseProxyKey)
+    }
+
+    // MARK: Ollama base URL (points at a local or tailnet Ollama server)
+
+    nonisolated static let ollamaBaseURLKey = "ollamaBaseURL"
+
+    /// The Ollama base URL from Settings, or nil when unset/blank (use the default).
+    nonisolated static func ollamaBaseURL(in defaults: UserDefaults = .standard) -> String? {
+        trimmed(defaults.string(forKey: ollamaBaseURLKey))
+    }
+
     nonisolated private static func trimmed(_ raw: String?) -> String? {
         let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
         return value?.isEmpty == false ? value : nil
