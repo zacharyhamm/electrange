@@ -30,12 +30,10 @@ nonisolated enum SlackToolRequest: Equatable, Sendable {
 
         switch toolCall.name {
         case "search_slack":
-            let rawLimit = args.number("limit") ?? 20
-            guard rawLimit.isFinite, rawLimit.rounded() == rawLimit,
-                  rawLimit >= 1, rawLimit <= 50 else {
-                throw SlackToolError.invalidLimit
-            }
-            self = .search(query: try required("query"), limit: Int(rawLimit))
+            self = .search(
+                query: try required("query"),
+                limit: try args.limit(default: 20, onInvalid: SlackToolError.invalidLimit)
+            )
         case "get_slack_messages":
             let from = try args.string("from").map { try Self.day($0, calendar: calendar) }
             let to = try args.string("to").map {
@@ -62,11 +60,8 @@ nonisolated enum SlackToolRequest: Equatable, Sendable {
 
     /// Parses a YYYY-MM-DD day into its local start-of-day.
     private static func day(_ raw: String, calendar: Calendar) throws -> Date {
-        let parts = raw.split(separator: "-")
-        guard parts.count == 3,
-              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
-              (1...12).contains(month), (1...31).contains(day),
-              let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) else {
+        guard let components = ToolDate.dayComponents(raw, calendar: calendar),
+              let date = calendar.date(from: components) else {
             throw SlackToolError.invalidDate(raw)
         }
         return calendar.startOfDay(for: date)

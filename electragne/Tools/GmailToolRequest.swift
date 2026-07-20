@@ -26,12 +26,11 @@ nonisolated enum GmailToolRequest: Equatable, Sendable {
         case "list_google_accounts":
             self = .listAccounts
         case "search_gmail":
-            let rawLimit = args.number("limit") ?? 10
-            guard rawLimit.isFinite, rawLimit.rounded() == rawLimit,
-                  rawLimit >= 1, rawLimit <= 25 else {
-                throw GmailToolError.invalidLimit
-            }
-            self = .search(query: try required("query"), accountID: accountID, limit: Int(rawLimit))
+            self = .search(
+                query: try required("query"),
+                accountID: accountID,
+                limit: try args.limit(default: 10, max: 25, onInvalid: GmailToolError.invalidLimit)
+            )
         case "read_gmail_message":
             self = .read(messageID: try required("messageID"), accountID: accountID)
         case "create_gmail_draft":

@@ -23,135 +23,35 @@ protocol ToolExecuting: AnyObject {
     func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction
 }
 
-// MARK: - Local tool adapters
-
+/// The one adapter between the router's ToolExecuting contract and a tool
+/// family's executor; the family-specific parse/confirm/execute wiring is
+/// supplied as closures (see ChatToolRouter).
 @MainActor
-final class ReminderToolAdapter: ToolExecuting {
-    private let executor: any ReminderToolExecuting
-    init(_ executor: any ReminderToolExecuting) { self.executor = executor }
+final class ToolAdapter: ToolExecuting {
+    private let prepareCall: @MainActor (ChatToolCall) async throws -> PreparedToolAction
 
-    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
-        let request = try ReminderToolRequest(toolCall: call)
-        let executor = executor
-        return PreparedToolAction(
-            confirmation: executor.confirmationDetails(for: request),
-            execute: { await executor.execute(request) }
-        )
+    init(_ prepare: @escaping @MainActor (ChatToolCall) async throws -> PreparedToolAction) {
+        prepareCall = prepare
     }
-}
 
-@MainActor
-final class NotesToolAdapter: ToolExecuting {
-    private let executor: any NotesToolExecuting
-    init(_ executor: any NotesToolExecuting) { self.executor = executor }
-
-    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
-        let request = try NoteToolRequest(toolCall: call)
-        let executor = executor
-        return PreparedToolAction(
-            confirmation: executor.confirmationDetails(for: request),
-            execute: { await executor.execute(request) }
-        )
+    /// A family whose prepare is synchronous: parse the request, ask the
+    /// executor for a confirmation, and run it.
+    static func sync<Request>(
+        parse: @escaping @MainActor (ChatToolCall) throws -> Request,
+        confirm: @escaping @MainActor (Request) -> ToolConfirmationDetails?,
+        execute: @escaping @MainActor (Request) async -> ChatToolResult
+    ) -> ToolAdapter {
+        ToolAdapter { call in
+            let request = try parse(call)
+            return PreparedToolAction(
+                confirmation: confirm(request),
+                execute: { await execute(request) }
+            )
+        }
     }
-}
-
-@MainActor
-final class DesktopToolAdapter: ToolExecuting {
-    private let executor: any DesktopToolExecuting
-    init(_ executor: any DesktopToolExecuting) { self.executor = executor }
 
     func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
-        let request = try DesktopToolRequest(toolCall: call)
-        let executor = executor
-        return PreparedToolAction(
-            confirmation: executor.confirmationDetails(for: request),
-            execute: { await executor.execute(request) }
-        )
-    }
-}
-
-@MainActor
-final class TimerToolAdapter: ToolExecuting {
-    private let executor: any TimerToolExecuting
-    init(_ executor: any TimerToolExecuting) { self.executor = executor }
-
-    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
-        let request = try TimerToolRequest(toolCall: call)
-        let executor = executor
-        return PreparedToolAction(
-            confirmation: executor.confirmationDetails(for: request),
-            execute: { await executor.execute(request) }
-        )
-    }
-}
-
-// MARK: - Google tool adapters (async prepare: confirmation may need a fetch)
-
-@MainActor
-final class GmailToolAdapter: ToolExecuting {
-    private let executor: any GmailToolExecuting
-    init(_ executor: any GmailToolExecuting) { self.executor = executor }
-
-    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
-        let prepared = try await executor.prepare(GmailToolRequest(toolCall: call))
-        let executor = executor
-        return PreparedToolAction(
-            confirmation: prepared.confirmation,
-            execute: { await executor.execute(prepared) }
-        )
-    }
-}
-
-@MainActor
-final class CalendarToolAdapter: ToolExecuting {
-    private let executor: any CalendarToolExecuting
-    init(_ executor: any CalendarToolExecuting) { self.executor = executor }
-
-    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
-        let prepared = try await executor.prepare(CalendarToolRequest(toolCall: call))
-        let executor = executor
-        return PreparedToolAction(
-            confirmation: prepared.confirmation,
-            execute: { await executor.execute(prepared) }
-        )
-    }
-}
-
-// MARK: - Slack (dobbs)
-
-/// Slack access through a dobbs daemon. Reads run unconfirmed; sending a
-/// message is the one outbound write and always confirms.
-@MainActor
-final class SlackToolAdapter: ToolExecuting {
-    private let executor: any SlackToolExecuting
-    init(_ executor: any SlackToolExecuting) { self.executor = executor }
-
-    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
-        let request = try SlackToolRequest(toolCall: call)
-        let executor = executor
-        return PreparedToolAction(
-            confirmation: executor.confirmationDetails(for: request),
-            execute: { await executor.execute(request) }
-        )
-    }
-}
-
-// MARK: - Linear
-
-/// Linear access through the linear.app GraphQL API. Reads run unconfirmed;
-/// creating an issue is the one write and always confirms.
-@MainActor
-final class LinearToolAdapter: ToolExecuting {
-    private let executor: any LinearToolExecuting
-    init(_ executor: any LinearToolExecuting) { self.executor = executor }
-
-    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
-        let request = try LinearToolRequest(toolCall: call)
-        let executor = executor
-        return PreparedToolAction(
-            confirmation: executor.confirmationDetails(for: request),
-            execute: { await executor.execute(request) }
-        )
+        try await prepareCall(call)
     }
 }
 

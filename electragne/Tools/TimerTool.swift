@@ -13,11 +13,8 @@ nonisolated enum TimerToolRequest: Equatable, Sendable {
     case cancel(timerID: String)
 
     init(toolCall: ChatToolCall) throws {
-        func trimmed(_ key: String) -> String? {
-            guard let value = toolCall.arguments[key]?.stringValue else { return nil }
-            let result = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            return result.isEmpty ? nil : result
-        }
+        let args = ToolCallArguments(toolCall)
+        func trimmed(_ key: String) -> String? { args.string(key) }
 
         switch toolCall.name {
         case "create_timer":

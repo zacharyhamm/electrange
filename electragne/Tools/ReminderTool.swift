@@ -18,19 +18,12 @@ nonisolated struct ReminderRequest: Equatable, Sendable {
         guard toolCall.name == "create_reminder" else {
             throw ReminderRequestError.unsupportedTool(toolCall.name)
         }
-        let title = toolCall.arguments["title"]?.stringValue?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !title.isEmpty else { throw ReminderRequestError.missingTitle }
+        let args = ToolCallArguments(toolCall)
+        guard let title = args.string("title") else { throw ReminderRequestError.missingTitle }
         self.title = title
-        self.notes = Self.trimmed(toolCall.arguments["notes"]?.stringValue)
-        self.listName = Self.trimmed(toolCall.arguments["listName"]?.stringValue)
-        self.due = Self.trimmed(toolCall.arguments["due"]?.stringValue)
-    }
-
-    static func trimmed(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        self.notes = args.string("notes")
+        self.listName = args.string("listName")
+        self.due = args.string("due")
     }
 }
 
@@ -60,39 +53,33 @@ nonisolated enum ReminderToolRequest: Equatable, Sendable {
     case delete(identifier: String)
 
     init(toolCall: ChatToolCall) throws {
+        let args = ToolCallArguments(toolCall)
         func required(_ key: String) throws -> String {
-            guard let value = ReminderRequest.trimmed(toolCall.arguments[key]?.stringValue) else {
-                throw ReminderRequestError.missingArgument(key)
-            }
-            return value
+            try args.required(key, onMissing: ReminderRequestError.missingArgument)
         }
         switch toolCall.name {
         case "create_reminder":
             self = .create(try ReminderRequest(toolCall: toolCall))
         case "list_reminders":
-            let rawCompletion = ReminderRequest.trimmed(toolCall.arguments["completion"]?.stringValue)?
-                .lowercased() ?? "incomplete"
+            let rawCompletion = args.string("completion")?.lowercased() ?? "incomplete"
             guard let completion = ReminderListRequest.Completion(rawValue: rawCompletion) else {
                 throw ReminderRequestError.invalidCompletion(rawCompletion)
             }
-            // Clamp on the Double: Int(_:) traps on non-finite or huge values.
-            let rawLimit = toolCall.arguments["limit"]?.numberValue ?? 20
-            let limit = rawLimit.isFinite ? Int(min(max(rawLimit.rounded(), 1), 50)) : 20
             self = .list(ReminderListRequest(
-                query: ReminderRequest.trimmed(toolCall.arguments["query"]?.stringValue),
-                listName: ReminderRequest.trimmed(toolCall.arguments["listName"]?.stringValue),
+                query: args.string("query"),
+                listName: args.string("listName"),
                 completion: completion,
-                limit: limit
+                limit: try args.limit(default: 20, onInvalid: ReminderRequestError.invalidLimit)
             ))
         case "update_reminder":
             let identifier = try required("identifier")
             let request = ReminderUpdateRequest(
                 identifier: identifier,
-                title: ReminderRequest.trimmed(toolCall.arguments["title"]?.stringValue),
-                notes: ReminderRequest.trimmed(toolCall.arguments["notes"]?.stringValue),
+                title: args.string("title"),
+                notes: args.string("notes"),
                 clearNotes: toolCall.arguments["clearNotes"]?.boolValue ?? false,
-                listName: ReminderRequest.trimmed(toolCall.arguments["listName"]?.stringValue),
-                due: ReminderRequest.trimmed(toolCall.arguments["due"]?.stringValue),
+                listName: args.string("listName"),
+                due: args.string("due"),
                 clearDue: toolCall.arguments["clearDue"]?.boolValue ?? false,
                 completed: toolCall.arguments["completed"]?.boolValue
             )
@@ -115,6 +102,7 @@ nonisolated enum ReminderRequestError: LocalizedError, Equatable {
     case missingTitle
     case missingArgument(String)
     case invalidCompletion(String)
+    case invalidLimit
     case noChanges
 
     var errorDescription: String? {
@@ -124,6 +112,7 @@ nonisolated enum ReminderRequestError: LocalizedError, Equatable {
         case .unsupportedTool, .missingTitle: "That reminder request was invalid."
         case .missingArgument(let name): "The ‘\(name)’ argument is required."
         case .invalidCompletion: "Reminder completion must be incomplete, completed, or all."
+        case .invalidLimit: "Reminder result limit must be a whole number from 1 to 50."
         case .noChanges: "At least one reminder change is required."
         }
     }
@@ -136,25 +125,13 @@ nonisolated enum ParsedReminderDue: Equatable, Sendable {
 
 nonisolated enum ReminderDateParser {
     static func parse(_ value: String, timeZone: TimeZone = .current) -> ParsedReminderDue? {
-        let pieces = value.split(separator: "-", omittingEmptySubsequences: false)
-        if pieces.count == 3, pieces[0].count == 4, pieces[1].count == 2,
-           pieces[2].count == 2, let year = Int(pieces[0]), let month = Int(pieces[1]),
-           let day = Int(pieces[2]) {
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = timeZone
-            let components = DateComponents(year: year, month: month, day: day)
-            guard let date = calendar.date(from: components) else { return nil }
-            let checked = calendar.dateComponents([.year, .month, .day], from: date)
-            guard checked.year == year, checked.month == month, checked.day == day else { return nil }
-            return .allDay(components)
-        }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        guard let date = fractional.date(from: value) ?? standard.date(from: value) else { return nil }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
+        if value.split(separator: "-", omittingEmptySubsequences: false).count == 3,
+           !value.contains("T") {
+            return ToolDate.dayComponents(value, calendar: calendar).map { .allDay($0) }
+        }
+        guard let date = ToolDate.timestamp(value) else { return nil }
         var components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
         components.timeZone = timeZone
         return .timed(components)

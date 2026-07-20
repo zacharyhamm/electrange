@@ -25,11 +25,7 @@ nonisolated enum LinearToolRequest: Equatable, Sendable {
             try args.required(key, onMissing: LinearToolError.missingArgument)
         }
         func limit(default defaultLimit: Int) throws -> Int {
-            let raw = args.number("limit") ?? Double(defaultLimit)
-            guard raw.isFinite, raw.rounded() == raw, raw >= 1, raw <= 50 else {
-                throw LinearToolError.invalidLimit
-            }
-            return Int(raw)
+            try args.limit(default: defaultLimit, onInvalid: LinearToolError.invalidLimit)
         }
 
         switch toolCall.name {

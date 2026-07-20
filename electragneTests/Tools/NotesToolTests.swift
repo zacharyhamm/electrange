@@ -4,7 +4,11 @@ import Testing
 
 struct NotesToolTests {
     @Test func parsesReadAndMutationRequests() throws {
-        #expect(try NoteToolRequest(toolCall: call("list_notes", ["limit": .number(80)])) == .list(folderName: nil, limit: 50))
+        #expect(try NoteToolRequest(toolCall: call("list_notes", ["limit": .number(50)])) == .list(folderName: nil, limit: 50))
+        // Out-of-range limits throw instead of silently clamping.
+        #expect(throws: NoteToolError.invalidLimit) {
+            try NoteToolRequest(toolCall: call("list_notes", ["limit": .number(80)]))
+        }
         #expect(try NoteToolRequest(toolCall: call("search_notes", ["query": .string(" sheep ")])) == .search(query: "sheep", folderName: nil, limit: 20))
         #expect(try NoteToolRequest(toolCall: call("create_note", ["title": .string(" Ideas "), "body": .string("One")])) == .create(title: "Ideas", body: "One", folderName: nil))
         #expect(try NoteToolRequest(toolCall: call("append_to_note", ["noteID": .string("n1"), "text": .string("More")])) == .append(noteID: "n1", text: "More"))

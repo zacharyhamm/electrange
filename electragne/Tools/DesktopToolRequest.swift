@@ -15,11 +15,9 @@ nonisolated enum DesktopToolRequest: Equatable, Sendable {
     case revealInFinder(fileID: String)
 
     init(toolCall: ChatToolCall) throws {
+        let args = ToolCallArguments(toolCall)
         func requiredString(_ key: String) throws -> String {
-            let value = toolCall.arguments[key]?.stringValue?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !value.isEmpty else { throw DesktopToolError.missingArgument(key) }
-            return value
+            try args.required(key, onMissing: DesktopToolError.missingArgument)
         }
 
         switch toolCall.name {

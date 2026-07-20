@@ -35,15 +35,57 @@ final class ChatToolRouter {
         memoryExecutor: any ToolExecuting
     ) {
         self.mcpExecutor = mcpExecutor ?? MCPToolExecutor()
+        let gmail = gmailExecutor ?? GmailToolService()
+        let calendar = calendarExecutor ?? CalendarToolService()
+        let slack = slackExecutor ?? SlackToolService()
+        let linear = linearExecutor ?? LinearToolService()
         executors = [
-            .reminders: ReminderToolAdapter(reminderExecutor),
-            .notes: NotesToolAdapter(notesExecutor),
-            .desktop: DesktopToolAdapter(desktopExecutor),
-            .timers: TimerToolAdapter(timerExecutor),
-            .gmail: GmailToolAdapter(gmailExecutor ?? GmailToolService()),
-            .calendar: CalendarToolAdapter(calendarExecutor ?? CalendarToolService()),
-            .slack: SlackToolAdapter(slackExecutor ?? SlackToolService()),
-            .linear: LinearToolAdapter(linearExecutor ?? LinearToolService()),
+            .reminders: ToolAdapter.sync(
+                parse: ReminderToolRequest.init(toolCall:),
+                confirm: reminderExecutor.confirmationDetails(for:),
+                execute: reminderExecutor.execute(_:)
+            ),
+            .notes: ToolAdapter.sync(
+                parse: NoteToolRequest.init(toolCall:),
+                confirm: notesExecutor.confirmationDetails(for:),
+                execute: notesExecutor.execute(_:)
+            ),
+            .desktop: ToolAdapter.sync(
+                parse: DesktopToolRequest.init(toolCall:),
+                confirm: desktopExecutor.confirmationDetails(for:),
+                execute: desktopExecutor.execute(_:)
+            ),
+            .timers: ToolAdapter.sync(
+                parse: TimerToolRequest.init(toolCall:),
+                confirm: timerExecutor.confirmationDetails(for:),
+                execute: timerExecutor.execute(_:)
+            ),
+            .slack: ToolAdapter.sync(
+                parse: { try SlackToolRequest(toolCall: $0) },
+                confirm: slack.confirmationDetails(for:),
+                execute: slack.execute(_:)
+            ),
+            .linear: ToolAdapter.sync(
+                parse: LinearToolRequest.init(toolCall:),
+                confirm: linear.confirmationDetails(for:),
+                execute: linear.execute(_:)
+            ),
+            // Google families prepare asynchronously: the confirmation card
+            // may need a fetch first.
+            .gmail: ToolAdapter { call in
+                let prepared = try await gmail.prepare(GmailToolRequest(toolCall: call))
+                return PreparedToolAction(
+                    confirmation: prepared.confirmation,
+                    execute: { await gmail.execute(prepared) }
+                )
+            },
+            .calendar: ToolAdapter { call in
+                let prepared = try await calendar.prepare(CalendarToolRequest(toolCall: call))
+                return PreparedToolAction(
+                    confirmation: prepared.confirmation,
+                    execute: { await calendar.execute(prepared) }
+                )
+            },
             .webSearch: webSearchExecutor ?? WebSearchExecutor(),
             .status: statusExecutor ?? AppStatusExecutor(monitor: calendarMonitor),
             .memory: memoryExecutor,

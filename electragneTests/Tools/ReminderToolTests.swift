@@ -68,9 +68,14 @@ struct ReminderToolTests {
 
     @Test func parsesListUpdateAndDeleteRequests() throws {
         let list = try ReminderToolRequest(toolCall: call("list_reminders", [
-            "query": .string(" bills "), "completion": .string("all"), "limit": .number(500),
+            "query": .string(" bills "), "completion": .string("all"), "limit": .number(50),
         ]))
         #expect(list == .list(ReminderListRequest(query: "bills", listName: nil, completion: .all, limit: 50)))
+
+        // Out-of-range limits throw instead of silently clamping.
+        #expect(throws: ReminderRequestError.invalidLimit) {
+            try ReminderToolRequest(toolCall: call("list_reminders", ["limit": .number(500)]))
+        }
 
         let update = try ReminderToolRequest(toolCall: call("update_reminder", [
             "identifier": .string(" reminder-1 "), "clearDue": .bool(true), "completed": .bool(true),

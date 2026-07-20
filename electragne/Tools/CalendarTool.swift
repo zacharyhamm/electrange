@@ -24,11 +24,7 @@ nonisolated enum CalendarToolRequest: Equatable, Sendable {
         case "list_google_calendars":
             self = .listCalendars(accountID: accountID)
         case "list_calendar_events":
-            let rawLimit = args.number("limit") ?? 20
-            guard rawLimit.isFinite, rawLimit.rounded() == rawLimit,
-                  rawLimit >= 1, rawLimit <= 50 else {
-                throw CalendarToolError.invalidLimit
-            }
+            let limit = try args.limit(default: 20, onInvalid: CalendarToolError.invalidLimit)
             let timeMin = value("timeMin")
             let timeMax = value("timeMax")
             if let timeMin, Self.timestamp(timeMin) == nil { throw CalendarToolError.invalidDateTime("timeMin") }
@@ -40,7 +36,7 @@ nonisolated enum CalendarToolRequest: Equatable, Sendable {
             }
             self = .listEvents(
                 calendarID: calendarID, query: value("query"), timeMin: timeMin,
-                timeMax: timeMax, accountID: accountID, limit: Int(rawLimit)
+                timeMax: timeMax, accountID: accountID, limit: limit
             )
         case "create_calendar_event":
             let start = try required("start")
@@ -79,22 +75,13 @@ nonisolated enum CalendarToolRequest: Equatable, Sendable {
     }
 
     private static func dateOnly(_ value: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.isLenient = false
-        guard let date = formatter.date(from: value), formatter.string(from: date) == value else { return nil }
-        return date
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return ToolDate.dayComponents(value, calendar: calendar).flatMap(calendar.date(from:))
     }
 
     static func timestamp(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: value)
+        ToolDate.timestamp(value)
     }
 }
 

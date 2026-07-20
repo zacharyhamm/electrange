@@ -9,18 +9,12 @@ nonisolated enum NoteToolRequest: Equatable, Sendable {
     case delete(noteID: String)
 
     init(toolCall: ChatToolCall) throws {
-        func trimmed(_ key: String) -> String? {
-            guard let value = toolCall.arguments[key]?.stringValue else { return nil }
-            let result = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            return result.isEmpty ? nil : result
-        }
+        let args = ToolCallArguments(toolCall)
+        func trimmed(_ key: String) -> String? { args.string(key) }
         func required(_ key: String) throws -> String {
-            guard let value = trimmed(key) else { throw NoteToolError.missingArgument(key) }
-            return value
+            try args.required(key, onMissing: NoteToolError.missingArgument)
         }
-        // Clamp on the Double: Int(_:) traps on non-finite or huge values.
-        let rawLimit = toolCall.arguments["limit"]?.numberValue ?? 20
-        let limit = rawLimit.isFinite ? Int(min(max(rawLimit.rounded(), 1), 50)) : 20
+        let limit = try args.limit(default: 20, onInvalid: NoteToolError.invalidLimit)
         switch toolCall.name {
         case "list_notes": self = .list(folderName: trimmed("folderName"), limit: limit)
         case "search_notes": self = .search(query: try required("query"), folderName: trimmed("folderName"), limit: limit)
@@ -39,12 +33,14 @@ nonisolated enum NoteToolRequest: Equatable, Sendable {
 nonisolated enum NoteToolError: LocalizedError, Equatable {
     case unsupportedTool(String)
     case missingArgument(String)
+    case invalidLimit
     case noChanges
 
     var errorDescription: String? {
         switch self {
         case .unsupportedTool: "That Notes request was invalid."
         case .missingArgument(let name): "The ‘\(name)’ argument is required."
+        case .invalidLimit: "Notes result limit must be a whole number from 1 to 50."
         case .noChanges: "At least one note change is required."
         }
     }
