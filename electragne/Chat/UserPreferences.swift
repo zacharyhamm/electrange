@@ -19,7 +19,15 @@ enum UserPreferences {
     /// The name the pet should use: the Settings override when present,
     /// otherwise the macOS account's full name.
     nonisolated static func resolvedUserName() -> String? {
-        preferredName() ?? OllamaClient.detectedUserName()
+        preferredName() ?? detectedUserName()
+    }
+
+    /// The owner's name from macOS account info, for the system prompt.
+    nonisolated static func detectedUserName() -> String? {
+        let fullName = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fullName.isEmpty { return fullName }
+        let shortName = NSUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+        return shortName.isEmpty ? nil : shortName
     }
 
     // MARK: Slack (dobbs) — endpoint + workspace; the token lives in Keychain
@@ -126,16 +134,17 @@ enum UserPreferences {
         trimmed(defaults.string(forKey: socksProxyEndpointKey)) ?? defaultSOCKSProxyEndpoint
     }
 
-    nonisolated static func ollamaUseProxy(in defaults: UserDefaults = .standard) -> Bool {
-        defaults.bool(forKey: ollamaUseProxyKey)
-    }
-
-    nonisolated static func geminiUseProxy(in defaults: UserDefaults = .standard) -> Bool {
-        defaults.bool(forKey: geminiUseProxyKey)
-    }
-
-    nonisolated static func openAICompatibleUseProxy(in defaults: UserDefaults = .standard) -> Bool {
-        defaults.bool(forKey: openAICompatibleUseProxyKey)
+    /// Whether requests to this chat provider route through the SOCKS5 proxy.
+    nonisolated static func useProxy(
+        for provider: ChatProvider,
+        in defaults: UserDefaults = .standard
+    ) -> Bool {
+        let key = switch provider {
+        case .ollama: ollamaUseProxyKey
+        case .gemini: geminiUseProxyKey
+        case .openAICompatible: openAICompatibleUseProxyKey
+        }
+        return defaults.bool(forKey: key)
     }
 
     nonisolated static func searxngUseProxy(in defaults: UserDefaults = .standard) -> Bool {

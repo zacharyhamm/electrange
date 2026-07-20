@@ -20,6 +20,12 @@ nonisolated protocol ChatProviderBackend: Sendable {
 }
 
 nonisolated enum ChatProviderError: LocalizedError, Equatable {
+    /// Throws unless the response is HTTP 200; 429 maps to quotaExceeded.
+    static func checkOK(_ response: URLResponse) throws {
+        guard let http = response as? HTTPURLResponse, http.statusCode != 200 else { return }
+        throw http.statusCode == 429 ? quotaExceeded : badStatus(http.statusCode)
+    }
+
     case badStatus(Int)
     case missingAPIKey(ChatAPIProvider)
     case quotaExceeded

@@ -55,7 +55,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
     init(
         baseURL: URL = defaultBaseURL,
         model: String? = nil,
-        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.geminiUseProxy()),
+        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.useProxy(for: .gemini)),
         imageSearch: SearXNGSearch = SearXNGSearch(),
         config: ChatConfig = .default,
         apiKey: @escaping @Sendable () -> String? = { ChatAPIKeyStore.load(for: .gemini) }
@@ -157,12 +157,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         now: Date = Date(),
         timeZone: TimeZone = .current
     ) -> String {
-        var prompt = systemPrompt + ChatSystemPrompt.dateLine(now: now, timeZone: timeZone)
-        if let userName, !userName.isEmpty {
-            prompt += " The owner you are chatting with is named \(userName), but there "
-                + "is no need to keep repeating their name — use it sparingly."
-        }
-        return prompt
+        ChatSystemPrompt.personalized(systemPrompt, userName: userName, now: now, timeZone: timeZone)
     }
 
     nonisolated static func makeRequestBody(
@@ -316,45 +311,33 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
         )
 
         let (lines, response) = try await transport.lines(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw http.statusCode == 429
-                ? ChatProviderError.quotaExceeded
-                : ChatProviderError.badStatus(http.statusCode)
-        }
+        try ChatProviderError.checkOK(response)
 
-        return AsyncThrowingStream { continuation in
-            let imageQuery = messages.last(where: { $0.role == "user" })?.content
-            let imageSearch = imageSearch
-            let task = Task {
-                do {
-                    var sources: [GeminiSource] = []
-                    for try await line in lines {
-                        guard let chunk = Self.decodeChunk(fromLine: line) else { continue }
-                        if !chunk.text.isEmpty { continuation.yield(.token(chunk.text)) }
-                        chunk.toolCalls.forEach { continuation.yield(.toolCall($0)) }
-                        for source in chunk.sources where !sources.contains(where: { $0.uri == source.uri }) {
-                            sources.append(source)
-                        }
-                    }
-                    let sourceText = Self.formatSources(sources)
-                    if !sourceText.isEmpty { continuation.yield(.token(sourceText)) }
-                    if !sources.isEmpty, let imageQuery,
-                       let output = try? await imageSearch.results(
-                           query: imageQuery,
-                           category: .images,
-                           imageLimit: SearXNGSearch.maxThumbnails
-                       ), !output.images.isEmpty {
-                        continuation.yield(.images(ChatImageBatch(
-                            images: output.images,
-                            presentation: .thumbnails
-                        )))
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
+        let imageQuery = messages.last(where: { $0.role == "user" })?.content
+        let imageSearch = imageSearch
+        return .fromTask { continuation in
+            var sources: [GeminiSource] = []
+            for try await line in lines {
+                guard let chunk = Self.decodeChunk(fromLine: line) else { continue }
+                if !chunk.text.isEmpty { continuation.yield(.token(chunk.text)) }
+                chunk.toolCalls.forEach { continuation.yield(.toolCall($0)) }
+                for source in chunk.sources where !sources.contains(where: { $0.uri == source.uri }) {
+                    sources.append(source)
                 }
             }
-            continuation.onTermination = { _ in task.cancel() }
+            let sourceText = Self.formatSources(sources)
+            if !sourceText.isEmpty { continuation.yield(.token(sourceText)) }
+            if !sources.isEmpty, let imageQuery,
+               let output = try? await imageSearch.results(
+                   query: imageQuery,
+                   category: .images,
+                   imageLimit: SearXNGSearch.maxThumbnails
+               ), !output.images.isEmpty {
+                continuation.yield(.images(ChatImageBatch(
+                    images: output.images,
+                    presentation: .thumbnails
+                )))
+            }
         }
     }
 
@@ -380,7 +363,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
     static func listModels(
         baseURL: URL = defaultBaseURL,
         apiKey: String,
-        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.geminiUseProxy())
+        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.useProxy(for: .gemini))
     ) async throws -> [GeminiModel] {
         var models: [GeminiModel] = []
         var pageToken: String?
@@ -397,11 +380,7 @@ nonisolated struct GeminiClient: ChatProviderBackend, ChatClient {
             request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
 
             let (data, response) = try await transport.data(for: request)
-            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                throw http.statusCode == 429
-                    ? ChatProviderError.quotaExceeded
-                    : ChatProviderError.badStatus(http.statusCode)
-            }
+            try ChatProviderError.checkOK(response)
             let page = try JSONDecoder().decode(ModelsPage.self, from: data)
             for model in page.models ?? []
             where model.supportedGenerationMethods?.contains("generateContent") == true {

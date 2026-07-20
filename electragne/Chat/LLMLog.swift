@@ -13,6 +13,14 @@ actor LLMLog {
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return encoder
     }()
+    // Formatters are costly to build; actor isolation makes reuse safe.
+    private let timestampFormatter = ISO8601DateFormatter()
+    private let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        return formatter
+    }()
 
     init(directory: URL? = nil) {
         self.directory = directory ?? {
@@ -27,7 +35,7 @@ actor LLMLog {
     func append(kind: String, _ fields: [String: ChatToolValue]) {
         var entry = fields
         entry["kind"] = .string(kind)
-        entry["ts"] = .string(ISO8601DateFormatter().string(from: Date()))
+        entry["ts"] = .string(timestampFormatter.string(from: Date()))
         do {
             try FileManager.default.createDirectory(
                 at: directory,
@@ -50,10 +58,7 @@ actor LLMLog {
     }
 
     func fileURL(for date: Date) -> URL {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = .current
-        return directory.appendingPathComponent("llm-\(formatter.string(from: date)).jsonl")
+        directory.appendingPathComponent("llm-\(dayFormatter.string(from: date)).jsonl")
     }
 }
 
@@ -113,30 +118,26 @@ nonisolated struct LoggingTransport: ChatHTTPTransport {
             throw error
         }
         let log = log
-        let stream = AsyncThrowingStream<String, Error> { continuation in
-            let task = Task {
-                var collected: [String] = []
-                do {
-                    for try await line in inner {
-                        collected.append(line)
-                        continuation.yield(line)
-                    }
-                    await log.append(kind: "response", Self.responseFields(
-                        id: id,
-                        response: response,
-                        body: collected.joined(separator: "\n")
-                    ))
-                    continuation.finish()
-                } catch {
-                    await log.append(kind: "error", [
-                        "id": .string(id),
-                        "message": .string(error.localizedDescription),
-                        "partialBody": .string(collected.joined(separator: "\n")),
-                    ])
-                    continuation.finish(throwing: error)
+        let stream = AsyncThrowingStream<String, Error>.fromTask { continuation in
+            var collected: [String] = []
+            do {
+                for try await line in inner {
+                    collected.append(line)
+                    continuation.yield(line)
                 }
+                await log.append(kind: "response", Self.responseFields(
+                    id: id,
+                    response: response,
+                    body: collected.joined(separator: "\n")
+                ))
+            } catch {
+                await log.append(kind: "error", [
+                    "id": .string(id),
+                    "message": .string(error.localizedDescription),
+                    "partialBody": .string(collected.joined(separator: "\n")),
+                ])
+                throw error
             }
-            continuation.onTermination = { _ in task.cancel() }
         }
         return (stream, response)
     }

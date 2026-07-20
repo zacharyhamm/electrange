@@ -79,9 +79,7 @@ final class MemoryEngine {
         let entities = (candidate.entities ?? []).map { $0.lowercased() }
         let canonicalKey = source == .owner ? candidate.canonicalKey?.lowercased() : nil
         let canonicalValue = source == .owner ? candidate.canonicalValue?.lowercased() : nil
-        let vector = embedder.vector(
-            for: ([summary] + facts).joined(separator: "\n")
-        ) ?? []
+        let vector = embedding(summary: summary, facts: facts)
 
         if let canonicalKey, let canonicalValue,
            let oldIndex = graph.nodes.firstIndex(where: {
@@ -119,9 +117,7 @@ final class MemoryEngine {
             }
             node.canonicalKey = canonicalKey ?? node.canonicalKey
             node.canonicalValue = canonicalValue ?? node.canonicalValue
-            node.embedding = embedder.vector(
-                for: ([node.summary] + node.facts).joined(separator: "\n")
-            ) ?? []
+            node.embedding = embedding(summary: node.summary, facts: node.facts)
             graph.nodes.append(node) // newest again; keeps the timestamp sort
             indexEntities(of: node)
             relinkNode(at: graph.nodes.index(before: graph.nodes.endIndex))
@@ -269,18 +265,27 @@ final class MemoryEngine {
         "which", "who", "why", "with",
     ]
 
-    private func supersedeNode(at index: Int) {
+    private func embedding(summary: String, facts: [String]) -> [Float] {
+        embedder.vector(for: ([summary] + facts).joined(separator: "\n")) ?? []
+    }
+
+    /// Removes every semantic-neighbor edge touching the node at `index`.
+    private func unlinkNeighbors(at index: Int) {
         let id = graph.nodes[index].id
-        graph.nodes[index].supersededAt = Date()
-        for entity in graph.nodes[index].entities { entityIndex[entity]?.remove(id) }
         for i in graph.nodes.indices { graph.nodes[i].semanticNeighbors.removeAll { $0 == id } }
         graph.nodes[index].semanticNeighbors.removeAll()
     }
 
+    private func supersedeNode(at index: Int) {
+        let id = graph.nodes[index].id
+        graph.nodes[index].supersededAt = Date()
+        for entity in graph.nodes[index].entities { entityIndex[entity]?.remove(id) }
+        unlinkNeighbors(at: index)
+    }
+
     private func relinkNode(at index: Int) {
         let id = graph.nodes[index].id
-        for i in graph.nodes.indices { graph.nodes[i].semanticNeighbors.removeAll { $0 == id } }
-        graph.nodes[index].semanticNeighbors.removeAll()
+        unlinkNeighbors(at: index)
         guard !graph.nodes[index].embedding.isEmpty else { return }
         for i in graph.nodes.indices where i != index && graph.nodes[i].supersededAt == nil
             && memoryCosine(graph.nodes[i].embedding, graph.nodes[index].embedding)

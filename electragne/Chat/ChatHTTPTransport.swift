@@ -40,6 +40,27 @@ nonisolated enum SOCKSProxy {
     }
 }
 
+nonisolated extension AsyncThrowingStream where Element: Sendable, Failure == Error {
+    /// A stream driven by a task that is cancelled when the consumer stops
+    /// listening. The task's uncaught error (or normal return) finishes the
+    /// stream.
+    static func fromTask(
+        _ body: @escaping @Sendable (Continuation) async throws -> Void
+    ) -> AsyncThrowingStream {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await body(continuation)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+
 nonisolated protocol ChatHTTPTransport: Sendable {
     func data(for request: URLRequest) async throws -> (Data, URLResponse)
     func lines(for request: URLRequest) async throws
@@ -56,16 +77,8 @@ nonisolated struct URLSessionTransport: ChatHTTPTransport {
     func lines(for request: URLRequest) async throws
         -> (AsyncThrowingStream<String, Error>, URLResponse) {
         let (bytes, response) = try await session.bytes(for: request)
-        let stream = AsyncThrowingStream<String, Error> { continuation in
-            let task = Task {
-                do {
-                    for try await line in bytes.lines { continuation.yield(line) }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
+        let stream = AsyncThrowingStream<String, Error>.fromTask { continuation in
+            for try await line in bytes.lines { continuation.yield(line) }
         }
         return (stream, response)
     }

@@ -2,8 +2,9 @@
 //  ChatBubbleWindowController.swift
 //  electragne
 //
-//  Streaming/persistence orchestrator for the chat bubble and the NSPanel
-//  that hosts it.
+//  Streaming/persistence orchestrator for the chat bubble. The NSPanel
+//  hosting side (monitors, observers, sizing) lives in
+//  ChatBubblePanelHosting.swift.
 //
 
 import AppKit
@@ -12,9 +13,9 @@ import SwiftUI
 /// Owns the auxiliary AppKit panel used for chat. Keeping the bubble separate
 /// preserves the invariant that the pet window is exactly one pet wide/high.
 final class ChatBubbleWindowController {
-    private weak var petWindow: NSWindow?
-    private var panel: ChatBubblePanel?
-    private var model = ChatBubbleModel()
+    weak var petWindow: NSWindow?
+    var panel: ChatBubblePanel?
+    var model = ChatBubbleModel()
     private var onDismiss: (() -> Void)?
     private let ollamaClient: any ChatClient
     private let geminiClient: any ChatClient
@@ -48,9 +49,9 @@ final class ChatBubbleWindowController {
         set { currentChat.messages = newValue }
     }
 
-    private var localMouseMonitor: Any?
-    private var globalMouseMonitor: Any?
-    private var windowObservers: [NSObjectProtocol] = []
+    var localMouseMonitor: Any?
+    var globalMouseMonitor: Any?
+    var windowObservers: [NSObjectProtocol] = []
 
     init(
         ollamaClient: any ChatClient = OllamaClient(),
@@ -85,13 +86,7 @@ final class ChatBubbleWindowController {
 
         if panel == nil {
             model = ChatBubbleModel()
-            model.entries = history.map { turn in
-                ChatBubbleEntry(
-                    role: turn.role == "user" ? .user : .assistant,
-                    text: turn.content,
-                    images: turn.images ?? []
-                )
-            }
+            model.entries = Self.entries(from: history)
             attachStreamIfActive()
             let bubbleView = ChatBubbleView(
                 model: model,
@@ -137,36 +132,27 @@ final class ChatBubbleWindowController {
         callback?()
     }
 
-    func reposition() {
-        guard let panel, let petWindow else { return }
-        let screen = NSScreen.screens.first(where: { $0.frame.intersects(petWindow.frame) })
-            ?? petWindow.screen
-            ?? NSScreen.main
-        guard let visibleFrame = screen?.visibleFrame else { return }
-
-        // Cap the bubble so it fits on screen with the pet below it, and
-        // shrink it now if it's already past the cap (setContentSize is not
-        // constrained by maxSize; only user resizing is).
-        let maxSize = ChatBubblePlacement.maxSize(
-            petFrame: petWindow.frame,
-            visibleFrame: visibleFrame
-        )
-        panel.maxSize = maxSize
-        if panel.frame.width > maxSize.width || panel.frame.height > maxSize.height {
-            panel.setContentSize(CGSize(
-                width: min(panel.frame.width, maxSize.width),
-                height: min(panel.frame.height, maxSize.height)
-            ))
+    /// The transcript rows for a stored history.
+    private static func entries(from history: [ChatMessage]) -> [ChatBubbleEntry] {
+        history.map { turn in
+            ChatBubbleEntry(
+                role: turn.role == "user" ? .user : .assistant,
+                text: turn.content,
+                images: turn.images ?? []
+            )
         }
+    }
 
-        let placement = ChatBubblePlacement.calculate(
-            petFrame: petWindow.frame,
-            visibleFrame: visibleFrame,
-            bubbleSize: panel.frame.size
-        )
-        model.tailEdge = placement.tailEdge
-        model.tailOffset = placement.tailOffset
-        panel.setFrameOrigin(placement.origin)
+    /// Saves the current chat and puts `chat` on screen with a blank
+    /// transcript, cancelling any pending tool confirmation.
+    private func resetTranscript(to chat: StoredChat) {
+        resolveToolConfirmation(approved: false)
+        chatStore.save(currentChat)
+        currentChat = chat
+        model.text = ""
+        model.entries = []
+        model.phase = .idle
+        refreshChatList()
     }
 
     func startCalendarEventConversation(_ event: CalendarEventDetails) {
@@ -177,14 +163,8 @@ final class ChatBubbleWindowController {
     private func startNextCalendarEventConversation() {
         guard streamTask == nil, !pendingCalendarEvents.isEmpty else { return }
         let event = pendingCalendarEvents.removeFirst()
-        resolveToolConfirmation(approved: false)
         activeStreamID = nil
-        chatStore.save(currentChat)
-        currentChat = StoredChat(title: event.summary)
-        model.text = ""
-        model.entries = []
-        model.phase = .idle
-        refreshChatList()
+        resetTranscript(to: StoredChat(title: event.summary))
         startStream(
             userMessage: event.reminderPrompt,
             toolsEnabled: false,
@@ -511,28 +491,11 @@ final class ChatBubbleWindowController {
         }
     }
 
-    /// The current provider's model UserDefaults key; nil to hide the picker.
-    private static func modelKey(for provider: ChatProvider) -> String {
-        switch provider {
-        case .ollama: UserPreferences.ollamaModelKey
-        case .gemini: UserPreferences.geminiModelKey
-        case .openAICompatible: UserPreferences.openAICompatibleModelKey
-        }
-    }
-
-    private static func storedModel(for provider: ChatProvider) -> String {
-        switch provider {
-        case .ollama: UserPreferences.ollamaModel()
-        case .gemini: UserPreferences.geminiModel()
-        case .openAICompatible: UserPreferences.openAICompatibleModel()
-        }
-    }
-
     /// Fetches the active provider's model list so the header picker can
     /// appear when there is more than one to choose from.
     private func refreshModels() {
         let provider = ChatProviderPreference.selected
-        let current = Self.storedModel(for: provider)
+        let current = provider.storedModel()
         model.currentModel = current
         model.availableModels = [current]
 
@@ -551,18 +514,12 @@ final class ChatBubbleWindowController {
 
     private func selectModel(_ id: String) {
         let provider = ChatProviderPreference.selected
-        UserDefaults.standard.set(id, forKey: Self.modelKey(for: provider))
+        UserDefaults.standard.set(id, forKey: provider.modelKey)
         model.currentModel = id
     }
 
     private func startNewChat() {
-        resolveToolConfirmation(approved: false)
-        chatStore.save(currentChat)
-        currentChat = StoredChat()
-        model.text = ""
-        model.entries = []
-        model.phase = .idle
-        refreshChatList()
+        resetTranscript(to: StoredChat())
     }
 
     private func switchToChat(id: UUID) {
@@ -571,154 +528,14 @@ final class ChatBubbleWindowController {
         chatStore.save(currentChat)
         currentChat = chat
         model.phase = .idle
-        model.entries = chat.messages.map { turn in
-            ChatBubbleEntry(
-                role: turn.role == "user" ? .user : .assistant,
-                text: turn.content,
-                images: turn.images ?? []
-            )
-        }
+        model.entries = Self.entries(from: chat.messages)
         attachStreamIfActive()
         refreshChatList()
         setExpanded(true)
-    }
-
-    private static let savedWidthKey = "chatBubbleExpandedWidth"
-    private static let savedHeightKey = "chatBubbleExpandedHeight"
-
-    /// The expanded size, honoring whatever size the user last dragged the
-    /// bubble to.
-    private var expandedSize: CGSize {
-        let defaults = UserDefaults.standard
-        let width = defaults.double(forKey: Self.savedWidthKey)
-        let height = defaults.double(forKey: Self.savedHeightKey)
-        guard width >= ChatBubblePlacement.minPanelSize.width,
-              height >= ChatBubblePlacement.minPanelSize.height else {
-            return ChatBubblePlacement.expandedSize
-        }
-        return CGSize(width: width, height: height)
-    }
-
-    private func persistPanelSize() {
-        guard let panel else { return }
-        let defaults = UserDefaults.standard
-        defaults.set(Double(panel.frame.width), forKey: Self.savedWidthKey)
-        defaults.set(Double(panel.frame.height), forKey: Self.savedHeightKey)
-    }
-
-    private func setExpanded(_ expanded: Bool) {
-        guard let panel else { return }
-        let size = expanded ? expandedSize : ChatBubblePlacement.defaultSize
-        guard panel.frame.size != size else { return }
-        panel.setContentSize(size)
-        reposition()
-    }
-
-    private func makePanel(rootView: ChatBubbleView) -> ChatBubblePanel {
-        let panel = ChatBubblePanel(
-            contentRect: CGRect(origin: .zero, size: ChatBubblePlacement.defaultSize),
-            styleMask: [.borderless, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        panel.minSize = ChatBubblePlacement.minPanelSize
-        panel.maxSize = ChatBubblePlacement.maxPanelSize
-        panel.isReleasedWhenClosed = false
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.level = .floating
-        PetWindowPresentation.enforce(on: panel)
-        panel.isMovable = false
-        panel.hidesOnDeactivate = false
-        panel.contentView = NSHostingView(rootView: rootView)
-        return panel
-    }
-
-    private func installEventMonitors() {
-        removeEventMonitors()
-
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.dismiss(notify: true)
-            }
-        }
-
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] event in
-            guard let self else { return event }
-            // The bubble handles its own controls. The pet handles a second
-            // click itself, avoiding a dismiss-then-reopen race in this monitor.
-            if event.window === self.panel || event.window === self.petWindow {
-                return event
-            }
-            DispatchQueue.main.async {
-                self.dismiss(notify: true)
-            }
-            return event
-        }
-    }
-
-    private func removeEventMonitors() {
-        if let localMouseMonitor {
-            NSEvent.removeMonitor(localMouseMonitor)
-            self.localMouseMonitor = nil
-        }
-        if let globalMouseMonitor {
-            NSEvent.removeMonitor(globalMouseMonitor)
-            self.globalMouseMonitor = nil
-        }
-    }
-
-    private func installWindowObservers(for window: NSWindow) {
-        removeWindowObservers()
-        let center = NotificationCenter.default
-        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
-            let observer = center.addObserver(forName: name, object: window, queue: .main) {
-                [weak self] _ in self?.reposition()
-            }
-            windowObservers.append(observer)
-        }
-        let screenObserver = center.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.reposition()
-        }
-        windowObservers.append(screenObserver)
-
-        // After the user drags the bubble to a new size, remember it and
-        // re-anchor so the tail points back at the pet.
-        if let panel {
-            let resizeObserver = center.addObserver(
-                forName: NSWindow.didEndLiveResizeNotification,
-                object: panel,
-                queue: .main
-            ) { [weak self] _ in
-                self?.persistPanelSize()
-                self?.reposition()
-            }
-            windowObservers.append(resizeObserver)
-        }
-    }
-
-    private func removeWindowObservers() {
-        for observer in windowObservers {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        windowObservers.removeAll()
     }
 
     deinit {
         removeEventMonitors()
         removeWindowObservers()
     }
-}
-private final class ChatBubblePanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
 }

@@ -209,6 +209,22 @@ nonisolated enum ChatSystemPrompt {
         return " The owner's current local date and time is \(formatter.string(from: now))"
             + " (\(timeZone.identifier)). Use this when resolving relative dates and times."
     }
+
+    /// A provider's base prompt plus the date line and, when known, the
+    /// owner's name.
+    static func personalized(
+        _ systemPrompt: String,
+        userName: String?,
+        now: Date = Date(),
+        timeZone: TimeZone = .current
+    ) -> String {
+        var prompt = systemPrompt + dateLine(now: now, timeZone: timeZone)
+        if let userName, !userName.isEmpty {
+            prompt += " The owner you are chatting with is named \(userName), but there "
+                + "is no need to keep repeating their name — use it sparingly."
+        }
+        return prompt
+    }
 }
 
 /// A chat backend the bubble can stream a reply from.
@@ -246,6 +262,24 @@ nonisolated enum ChatProvider: String, CaseIterable, Sendable {
         }
     }
 
+    /// The UserDefaults key holding the model picked for this provider.
+    var modelKey: String {
+        switch self {
+        case .ollama: UserPreferences.ollamaModelKey
+        case .gemini: UserPreferences.geminiModelKey
+        case .openAICompatible: UserPreferences.openAICompatibleModelKey
+        }
+    }
+
+    /// The model picked for this provider, or its ChatConfig default.
+    func storedModel() -> String {
+        switch self {
+        case .ollama: UserPreferences.ollamaModel()
+        case .gemini: UserPreferences.geminiModel()
+        case .openAICompatible: UserPreferences.openAICompatibleModel()
+        }
+    }
+
     /// The provider's live model list, for pickers.
     func listModelIDs() async throws -> [String] {
         switch self {
@@ -277,6 +311,8 @@ enum ChatProviderPreference {
         if let raw = defaults.string(forKey: providerKey), let provider = ChatProvider(rawValue: raw) {
             return provider
         }
+        // Deliberate write-during-read: migrates the legacy useGemini bool to
+        // providerKey the first time the preference is consulted.
         let provider: ChatProvider = defaults.bool(forKey: useGeminiKey) ? .gemini : .ollama
         defaults.set(provider.rawValue, forKey: providerKey)
         return provider

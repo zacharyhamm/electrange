@@ -7,119 +7,6 @@ nonisolated struct OllamaChatChunk: Equatable {
     var toolCalls: [ChatToolCall] = []
 }
 
-/// Client for a self-hosted SearXNG instance's JSON search API.
-nonisolated struct SearXNGSearch {
-    static let maxResults = 4
-    static let maxResultCharacters = 1500
-    static let maxThumbnails = 3
-    static let maxGalleryImages = 6
-    let transport: any ChatHTTPTransport
-
-    enum Category: Equatable {
-        case general
-        case images
-    }
-
-    struct Output: Equatable {
-        let text: String
-        let images: [ChatImage]
-    }
-
-    init(transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.searxngUseProxy())) {
-        self.transport = transport
-    }
-
-    private struct SearchResponse: Decodable {
-        struct Result: Decodable {
-            let title: String?
-            let url: String?
-            let content: String?
-            let thumbnail: String?
-            let thumbnailSrc: String?
-            let imageSrc: String?
-
-            enum CodingKeys: String, CodingKey {
-                case title, url, content, thumbnail
-                case thumbnailSrc = "thumbnail_src"
-                case imageSrc = "img_src"
-            }
-        }
-
-        let results: [Result]
-    }
-
-    /// GET {endpoint}/search?q={query}&format=json for the configured endpoint.
-    nonisolated static func searchURL(
-        endpoint: String,
-        query: String,
-        category: Category = .general
-    ) -> URL? {
-        guard var components = URLComponents(string: endpoint) else { return nil }
-        components.path = components.path.hasSuffix("/search")
-            ? components.path : components.path + "/search"
-        components.queryItems = [
-            URLQueryItem(name: "q", value: query),
-            URLQueryItem(name: "format", value: "json"),
-        ]
-        if category == .images {
-            components.queryItems?.append(URLQueryItem(name: "categories", value: "images"))
-        }
-        return components.url.flatMap { $0.scheme == nil ? nil : $0 }
-    }
-
-    func results(
-        query: String,
-        category: Category = .general,
-        imageLimit: Int? = nil
-    ) async throws -> Output {
-        guard let endpoint = UserPreferences.searxngEndpoint(),
-              let url = Self.searchURL(endpoint: endpoint, query: query, category: category) else {
-            throw ChatProviderError.invalidEndpoint
-        }
-
-        let (data, response) = try await transport.data(for: URLRequest(url: url))
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw ChatProviderError.badStatus(http.statusCode)
-        }
-        return Self.formatOutput(from: data, category: category, imageLimit: imageLimit)
-    }
-
-    nonisolated static func formatResults(from data: Data) -> String {
-        formatOutput(from: data).text
-    }
-
-    nonisolated static func formatOutput(
-        from data: Data,
-        category: Category = .general,
-        imageLimit: Int? = nil
-    ) -> Output {
-        guard let decoded = try? JSONDecoder().decode(SearchResponse.self, from: data),
-              !decoded.results.isEmpty else {
-            return Output(text: "No results found.", images: [])
-        }
-        let resultLimit = category == .images ? maxGalleryImages : maxResults
-        let results = decoded.results.prefix(resultLimit)
-        let text = results.enumerated().map { index, result in
-            let content = String((result.content ?? "").prefix(maxResultCharacters))
-            return """
-                Result \(index + 1): \(result.title ?? "Untitled")
-                URL: \(result.url ?? "unknown")
-                \(content)
-                """
-        }.joined(separator: "\n\n")
-        let limit = imageLimit ?? (category == .images ? maxGalleryImages : maxThumbnails)
-        var seen = Set<String>()
-        let images = results.compactMap { result in
-            ChatImage(
-                url: result.thumbnailSrc ?? result.thumbnail ?? result.imageSrc,
-                sourceURL: result.url,
-                title: result.title
-            )
-        }.filter { seen.insert($0.url).inserted }.prefix(limit)
-        return Output(text: text, images: Array(images))
-    }
-}
-
 /// Minimal streaming client for a local Ollama server.
 nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
     nonisolated static let defaultBaseURL = URL(string: "http://localhost:11434")!
@@ -145,20 +32,7 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
         now: Date = Date(),
         timeZone: TimeZone = .current
     ) -> String {
-        var prompt = systemPrompt + ChatSystemPrompt.dateLine(now: now, timeZone: timeZone)
-        if let userName, !userName.isEmpty {
-            prompt += " The owner you are chatting with is named \(userName), but there "
-                + "is no need to keep repeating their name — use it sparingly."
-        }
-        return prompt
-    }
-
-    /// The owner's name from macOS account info, for the system prompt.
-    nonisolated static func detectedUserName() -> String? {
-        let fullName = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
-        if !fullName.isEmpty { return fullName }
-        let shortName = NSUserName().trimmingCharacters(in: .whitespacesAndNewlines)
-        return shortName.isEmpty ? nil : shortName
+        ChatSystemPrompt.personalized(systemPrompt, userName: userName, now: now, timeZone: timeZone)
     }
 
     let baseURLOverride: URL?
@@ -180,7 +54,7 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
     init(
         baseURL: URL? = nil,
         model: String? = nil,
-        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.ollamaUseProxy()),
+        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.useProxy(for: .ollama)),
         config: ChatConfig = .default
     ) {
         self.baseURLOverride = baseURL
@@ -197,14 +71,12 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
     /// The models pulled into the local Ollama server, via GET api/tags.
     static func listModels(
         baseURL: URL? = nil,
-        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.ollamaUseProxy())
+        transport: any ChatHTTPTransport = LoggingTransport(proxied: UserPreferences.useProxy(for: .ollama))
     ) async throws -> [String] {
         let baseURL = baseURL ?? resolvedBaseURL
         let request = URLRequest(url: baseURL.appendingPathComponent("api/tags"))
         let (data, response) = try await transport.data(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw ChatProviderError.badStatus(http.statusCode)
-        }
+        try ChatProviderError.checkOK(response)
         return try JSONDecoder().decode(TagsResponse.self, from: data).models.map(\.name)
     }
 
@@ -333,25 +205,15 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
         )
 
         let (lines, response) = try await transport.lines(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw ChatProviderError.badStatus(http.statusCode)
-        }
+        try ChatProviderError.checkOK(response)
 
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    for try await line in lines {
-                        guard let chunk = Self.decodeChunk(fromLine: line) else { continue }
-                        if !chunk.content.isEmpty { continuation.yield(.token(chunk.content)) }
-                        chunk.toolCalls.forEach { continuation.yield(.toolCall($0)) }
-                        if chunk.done { break }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
+        return .fromTask { continuation in
+            for try await line in lines {
+                guard let chunk = Self.decodeChunk(fromLine: line) else { continue }
+                if !chunk.content.isEmpty { continuation.yield(.token(chunk.content)) }
+                chunk.toolCalls.forEach { continuation.yield(.toolCall($0)) }
+                if chunk.done { break }
             }
-            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

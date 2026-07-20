@@ -46,7 +46,7 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
         model: String? = nil,
         thinking: Bool? = nil,
         transport: any ChatHTTPTransport = LoggingTransport(
-            proxied: UserPreferences.openAICompatibleUseProxy()),
+            proxied: UserPreferences.useProxy(for: .openAICompatible)),
         config: ChatConfig = .default,
         apiKey: (@Sendable () -> String?)? = nil
     ) {
@@ -244,53 +244,43 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
         )
 
         let (lines, response) = try await transport.lines(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw ChatProviderError.badStatus(http.statusCode)
-        }
+        try ChatProviderError.checkOK(response)
 
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    var reasoning = ""
-                    var thinkingAloud = false
-                    var fragments: [Int: OpenAICompatibleChunk.ToolCall] = [:]
-                    for try await line in lines {
-                        guard let chunk = Self.decodeChunk(fromLine: line), !chunk.done else { continue }
-                        if !chunk.content.isEmpty {
-                            thinkingAloud = false
-                            continuation.yield(.token(chunk.content))
-                        }
-                        if !chunk.reasoningContent.isEmpty, !thinkingAloud {
-                            thinkingAloud = true
-                            continuation.yield(.status("Thinking…"))
-                        }
-                        reasoning += chunk.reasoningContent
-                        for fragment in chunk.toolCalls {
-                            var call = fragments[fragment.index] ?? .init(index: fragment.index)
-                            if let id = fragment.id { call.id = id }
-                            call.name = (call.name ?? "") + (fragment.name ?? "")
-                            call.arguments = (call.arguments ?? "") + (fragment.arguments ?? "")
-                            fragments[fragment.index] = call
-                        }
-                    }
-                    for fragment in fragments.values.sorted(by: { $0.index < $1.index }) {
-                        guard let id = fragment.id, let name = fragment.name,
-                              let data = fragment.arguments?.data(using: .utf8),
-                              let arguments = try? JSONDecoder().decode([String: ChatToolValue].self, from: data)
-                        else { throw ChatProviderError.invalidToolArguments }
-                        continuation.yield(.toolCall(ChatToolCall(
-                            id: id,
-                            name: name,
-                            arguments: arguments,
-                            providerContext: .object(["reasoning_content": .string(reasoning)])
-                        )))
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
+        return .fromTask { continuation in
+            var reasoning = ""
+            var thinkingAloud = false
+            var fragments: [Int: OpenAICompatibleChunk.ToolCall] = [:]
+            for try await line in lines {
+                guard let chunk = Self.decodeChunk(fromLine: line), !chunk.done else { continue }
+                if !chunk.content.isEmpty {
+                    thinkingAloud = false
+                    continuation.yield(.token(chunk.content))
+                }
+                if !chunk.reasoningContent.isEmpty, !thinkingAloud {
+                    thinkingAloud = true
+                    continuation.yield(.status("Thinking…"))
+                }
+                reasoning += chunk.reasoningContent
+                for fragment in chunk.toolCalls {
+                    var call = fragments[fragment.index] ?? .init(index: fragment.index)
+                    if let id = fragment.id { call.id = id }
+                    call.name = (call.name ?? "") + (fragment.name ?? "")
+                    call.arguments = (call.arguments ?? "") + (fragment.arguments ?? "")
+                    fragments[fragment.index] = call
                 }
             }
-            continuation.onTermination = { _ in task.cancel() }
+            for fragment in fragments.values.sorted(by: { $0.index < $1.index }) {
+                guard let id = fragment.id, let name = fragment.name,
+                      let data = fragment.arguments?.data(using: .utf8),
+                      let arguments = try? JSONDecoder().decode([String: ChatToolValue].self, from: data)
+                else { throw ChatProviderError.invalidToolArguments }
+                continuation.yield(.toolCall(ChatToolCall(
+                    id: id,
+                    name: name,
+                    arguments: arguments,
+                    providerContext: .object(["reasoning_content": .string(reasoning)])
+                )))
+            }
         }
     }
 
@@ -320,15 +310,13 @@ nonisolated struct OpenAICompatibleClient: ChatProviderBackend, ChatClient {
         baseURL: URL,
         apiKey: String,
         transport: any ChatHTTPTransport = LoggingTransport(
-            proxied: UserPreferences.openAICompatibleUseProxy())
+            proxied: UserPreferences.useProxy(for: .openAICompatible))
     ) async throws -> [Model] {
         guard baseURL.scheme != nil, baseURL.host != nil else { throw ChatProviderError.invalidEndpoint }
         var request = URLRequest(url: baseURL.appendingPathComponent("models"))
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await transport.data(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw ChatProviderError.badStatus(http.statusCode)
-        }
+        try ChatProviderError.checkOK(response)
         return try JSONDecoder().decode(ModelsResponse.self, from: data).data.map { Model(id: $0.id) }
     }
 
