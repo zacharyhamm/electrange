@@ -260,10 +260,10 @@ struct MCPRouterDispatchTests {
     @Test func mcpPrefixedCallsReachTheMCPExecutor() async {
         let mcp = MockMCPExecutor()
         let router = ChatToolRouter(
-            reminderExecutor: UnusedReminderExecutor(),
-            notesExecutor: UnusedNotesExecutor(),
-            desktopExecutor: UnusedDesktopExecutor(),
-            timerExecutor: UnusedTimerExecutor(),
+            reminderExecutor: MockReminderExecutor(),
+            notesExecutor: MockNotesExecutor(),
+            desktopExecutor: MockDesktopExecutor(),
+            timerExecutor: MockTimerExecutor(),
             mcpExecutor: mcp,
             memoryExecutor: MemoryToolExecutor(engine: MemoryEngine(store: MemoryStore(
                 directory: FileManager.default.temporaryDirectory
@@ -286,41 +286,6 @@ struct MCPRouterDispatchTests {
         )
         #expect(unknown.response["message"] == .string("Unknown tool ‘not_a_tool’."))
     }
-}
-
-@MainActor
-private final class MockMCPExecutor: ToolExecuting {
-    var prepared: [String] = []
-    func prepare(_ call: ChatToolCall) async throws -> PreparedToolAction {
-        prepared.append(call.name)
-        return PreparedToolAction(confirmation: nil) {
-            .make(status: "ok", message: "mcp ran")
-        }
-    }
-}
-
-@MainActor
-private final class UnusedReminderExecutor: ReminderToolExecuting {
-    func confirmationDetails(for request: ReminderToolRequest) -> ToolConfirmationDetails? { nil }
-    func execute(_ request: ReminderToolRequest) async -> ChatToolResult { .error("unused") }
-}
-
-@MainActor
-private final class UnusedNotesExecutor: NotesToolExecuting {
-    func confirmationDetails(for request: NoteToolRequest) -> ToolConfirmationDetails? { nil }
-    func execute(_ request: NoteToolRequest) async -> ChatToolResult { .error("unused") }
-}
-
-@MainActor
-private final class UnusedDesktopExecutor: DesktopToolExecuting {
-    func confirmationDetails(for request: DesktopToolRequest) -> ToolConfirmationDetails? { nil }
-    func execute(_ request: DesktopToolRequest) async -> ChatToolResult { .error("unused") }
-}
-
-@MainActor
-private final class UnusedTimerExecutor: TimerToolExecuting {
-    func confirmationDetails(for request: TimerToolRequest) -> ToolConfirmationDetails? { nil }
-    func execute(_ request: TimerToolRequest) async -> ChatToolResult { .error("unused") }
 }
 
 // MARK: - OAuth

@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import os
 
 @MainActor
 final class AppModel {
@@ -41,5 +42,26 @@ final class AppModel {
     func startCalendarMonitoring(onReminder: @escaping (CalendarEventDetails) -> Void) {
         calendarReminderMonitor.onReminder = onReminder
         calendarReminderMonitor.start()
+    }
+
+    /// Starts the reminder conversation once the chat surface is ready.
+    /// summonToChat's state transition (or the pet window itself, during
+    /// launch) may lag; retry rather than silently dropping the reminder.
+    func startCalendarReminderConversation(_ event: CalendarEventDetails, attempts: Int = 10) {
+        guard let window = petViewModel.petWindow, petViewModel.state.isChatting else {
+            if attempts > 1 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.startCalendarReminderConversation(event, attempts: attempts - 1)
+                }
+            } else {
+                Log.calendar.error("Dropping calendar reminder for \(event.summary, privacy: .public): chat never became available")
+            }
+            return
+        }
+        chatBubbleController.present(
+            anchoredTo: window,
+            onDismiss: { [petViewModel] in petViewModel.dismissChat() }
+        )
+        chatBubbleController.startCalendarEventConversation(event)
     }
 }

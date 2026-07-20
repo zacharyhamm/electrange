@@ -17,7 +17,12 @@ struct ElectragneApp: App {
         // pet view fighting over the same NSWindow
         Window("Electragne", id: "pet") {
             ContentView(appModel: appModel)
-                .onAppear { appDelegate.appModel = appModel }
+                .onAppear {
+                    appDelegate.appModel = appModel
+                    appModel.startCalendarMonitoring { [weak appDelegate] event in
+                        appDelegate?.presentCalendarReminder(event)
+                    }
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)

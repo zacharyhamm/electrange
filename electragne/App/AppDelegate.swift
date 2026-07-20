@@ -14,13 +14,7 @@ import UserNotifications
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem?
     /// Set by ElectragneApp when the pet window appears.
-    var appModel: AppModel? {
-        didSet {
-            appModel?.startCalendarMonitoring { [weak self] event in
-                self?.presentCalendarReminder(event)
-            }
-        }
-    }
+    var appModel: AppModel?
     /// The pet window, as reported by ContentView's WindowAccessor — the
     /// single mechanism that identifies it.
     private var petWindow: NSWindow? { appModel?.petViewModel.petWindow }
@@ -203,29 +197,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         appModel?.petViewModel.summonToChat()
     }
 
-    private func presentCalendarReminder(_ event: CalendarEventDetails, attempts: Int = 10) {
+    func presentCalendarReminder(_ event: CalendarEventDetails) {
         summonPetToChat()
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            guard let appModel, let window = self.petWindow,
-                  appModel.petViewModel.state.isChatting else {
-                // summonToChat's state transition (or the pet window itself,
-                // during launch) may not be ready yet; retry rather than
-                // silently dropping the reminder.
-                if attempts > 1 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                        self?.presentCalendarReminder(event, attempts: attempts - 1)
-                    }
-                } else {
-                    Log.calendar.error("Dropping calendar reminder for \(event.summary, privacy: .public): chat never became available")
-                }
-                return
-            }
-            appModel.chatBubbleController.present(
-                anchoredTo: window,
-                onDismiss: { appModel.petViewModel.dismissChat() }
-            )
-            appModel.chatBubbleController.startCalendarEventConversation(event)
+            self?.appModel?.startCalendarReminderConversation(event)
         }
     }
 
@@ -286,21 +261,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         alert.runModal()
     }
 
+    /// A lazily created auxiliary window (Settings, Memories) that survives
+    /// close and is re-shown on demand.
+    private func makeAuxiliaryWindow(
+        title: String,
+        size: NSSize,
+        styleMask: NSWindow.StyleMask,
+        contentView: NSView
+    ) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: styleMask,
+            backing: .buffered,
+            defer: false
+        )
+        window.title = title
+        window.isReleasedWhenClosed = false
+        window.contentView = contentView
+        window.center()
+        return window
+    }
+
     @objc func openSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Electragne Settings"
-            window.isReleasedWhenClosed = false
             let hostingView = NSHostingView(rootView: SettingsView())
             hostingView.sizingOptions = []
-            window.contentView = hostingView
-            window.center()
-            settingsWindow = window
+            settingsWindow = makeAuxiliaryWindow(
+                title: "Electragne Settings",
+                size: NSSize(width: 560, height: 520),
+                styleMask: [.titled, .closable],
+                contentView: hostingView
+            )
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
@@ -309,17 +300,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     @objc func openMemoryBrowser() {
         guard let memoryEngine = appModel?.memoryEngine else { return }
         if memoryBrowserWindow == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
+            memoryBrowserWindow = makeAuxiliaryWindow(
+                title: "Electragne Memories",
+                size: NSSize(width: 760, height: 520),
                 styleMask: [.titled, .closable, .resizable],
-                backing: .buffered,
-                defer: false
+                contentView: NSHostingView(rootView: MemoryBrowserView(engine: memoryEngine))
             )
-            window.title = "Electragne Memories"
-            window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: MemoryBrowserView(engine: memoryEngine))
-            window.center()
-            memoryBrowserWindow = window
         }
         NSApp.activate(ignoringOtherApps: true)
         memoryBrowserWindow?.makeKeyAndOrderFront(nil)
@@ -338,24 +324,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
 
     private func adjustPetSize(by delta: Double) {
-        let currentSize = UserDefaults.standard.double(forKey: PetSizeConstants.storageKey)
-        let size = currentSize > 0 ? currentSize : PetSizeConstants.defaultSize
-        let newSize = max(PetSizeConstants.minimumSize, min(PetSizeConstants.maximumSize, size + delta))
+        let newSize = PetSizeAdjustment.newSize(
+            current: UserDefaults.standard.double(forKey: PetSizeConstants.storageKey),
+            delta: delta
+        )
 
         guard let window = petWindow else {
             UserDefaults.standard.set(newSize, forKey: PetSizeConstants.storageKey)
             return
         }
 
-        let oldSize = window.frame.size
-        let oldOrigin = window.frame.origin
-
-        // Calculate new origin to keep pet grounded (the floor is the bottom
-        // edge of whichever screen the pet is on, not necessarily y=0)
-        let floorY = window.screen?.frame.minY ?? 0
-        let newOrigin = NSPoint(
-            x: oldOrigin.x,
-            y: max(floorY, oldOrigin.y - (newSize - oldSize.height))
+        let newOrigin = PetSizeAdjustment.groundedOrigin(
+            frame: window.frame,
+            newSize: newSize,
+            floorY: window.screen?.frame.minY ?? 0
         )
 
         // Update UserDefaults - this triggers SwiftUI to re-render with new size

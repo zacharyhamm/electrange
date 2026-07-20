@@ -5,6 +5,7 @@
 //  Physics, behavior, and sizing constants for the pet.
 //
 
+import CoreGraphics
 import Foundation
 
 // MARK: - Physics Constants
@@ -62,4 +63,23 @@ nonisolated enum PetSizeConstants {
     static let minimumSize: Double = 20
     static let maximumSize: Double = 200
     static let sizeStep: Double = 10
+}
+
+/// Pure geometry for the menu-bar size adjustment.
+nonisolated enum PetSizeAdjustment {
+    /// The clamped size after applying `delta` (0 or negative stored sizes
+    /// fall back to the default first).
+    static func newSize(current: Double, delta: Double) -> Double {
+        let size = current > 0 ? current : PetSizeConstants.defaultSize
+        return max(PetSizeConstants.minimumSize, min(PetSizeConstants.maximumSize, size + delta))
+    }
+
+    /// The window origin that keeps the pet grounded after a resize; the
+    /// floor is the bottom edge of whichever screen the pet is on.
+    static func groundedOrigin(frame: CGRect, newSize: Double, floorY: CGFloat) -> CGPoint {
+        CGPoint(
+            x: frame.origin.x,
+            y: max(floorY, frame.origin.y - (newSize - frame.height))
+        )
+    }
 }
