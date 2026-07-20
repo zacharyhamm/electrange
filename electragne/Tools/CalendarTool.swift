@@ -373,22 +373,23 @@ final class CalendarToolService: CalendarToolExecuting, CalendarEventProviding {
             "hangoutLink": .string(event.hangoutLink ?? ""),
         ]
         if let conferenceData = event.conferenceData {
+            let entryPoints: [ChatToolValue] = (conferenceData.entryPoints ?? []).map { entryPoint in
+                .object([
+                    "type": .string(entryPoint.entryPointType ?? ""),
+                    "uri": .string(entryPoint.uri ?? ""),
+                    "label": .string(entryPoint.label ?? ""),
+                    "meetingCode": .string(entryPoint.meetingCode ?? ""),
+                    "accessCode": .string(entryPoint.accessCode ?? ""),
+                    "passcode": .string(entryPoint.passcode ?? ""),
+                    "password": .string(entryPoint.password ?? ""),
+                    "pin": .string(entryPoint.pin ?? ""),
+                ])
+            }
             value["conference"] = .object([
                 "solutionName": .string(conferenceData.conferenceSolution?.name ?? ""),
                 "solutionType": .string(conferenceData.conferenceSolution?.key?.type ?? ""),
                 "notes": .string(conferenceData.notes ?? ""),
-                "entryPoints": .array((conferenceData.entryPoints ?? []).map { entryPoint in
-                    .object([
-                        "type": .string(entryPoint.entryPointType ?? ""),
-                        "uri": .string(entryPoint.uri ?? ""),
-                        "label": .string(entryPoint.label ?? ""),
-                        "meetingCode": .string(entryPoint.meetingCode ?? ""),
-                        "accessCode": .string(entryPoint.accessCode ?? ""),
-                        "passcode": .string(entryPoint.passcode ?? ""),
-                        "password": .string(entryPoint.password ?? ""),
-                        "pin": .string(entryPoint.pin ?? ""),
-                    ])
-                }),
+                "entryPoints": .array(entryPoints),
             ])
         }
         if let attachments = event.attachments, !attachments.isEmpty {
