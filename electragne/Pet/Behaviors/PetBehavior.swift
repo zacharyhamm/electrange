@@ -5,7 +5,6 @@ nonisolated struct TimerNeeds: OptionSet, Equatable {
     let rawValue: Int
 
     static let movement = TimerNeeds(rawValue: 1 << 0)
-    static let physics = TimerNeeds(rawValue: 1 << 1)
     static let animation = TimerNeeds(rawValue: 1 << 2)
     static let idle = TimerNeeds(rawValue: 1 << 3)
 }
@@ -272,7 +271,7 @@ extension PetBehavior {
 }
 
 @MainActor final class FallingBehavior: PetBehavior {
-    let timerNeeds: TimerNeeds = [.physics, .animation]
+    let timerNeeds: TimerNeeds = [.movement, .animation]
 
     func begin(_ context: PetContext) {
         context.coordinator.playFallAnimation()

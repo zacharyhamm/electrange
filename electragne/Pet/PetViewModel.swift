@@ -63,7 +63,6 @@ class PetViewModel {
     // MARK: - Timers
 
     private let movement = TimerDriver()
-    private let physics = TimerDriver()
     private let idle = TimerDriver()
     // The animation timer is non-repeating and self-rescheduling (it re-arms
     // itself with the next frame's interval), so it stays a raw Timer.
@@ -400,11 +399,8 @@ class PetViewModel {
 
     // MARK: - Window Climbing
 
-    /// Check whether the pet's step from currentX to newX crosses the side of
-    /// a climbable window. The window qualifies only if its top leaves room
-    /// for the pet below the top of the screen, its top is above the pet's
-    /// head (something to actually climb), and its side reaches down to the
-    /// pet. Rolls the climb chance per crossing.
+    /// Begins climbing the given window's near side (ClimbPolicy decides
+    /// whether a step qualifies).
     func startClimbingWindow(_ surface: WindowSurface) {
         climbWindowID = surface.id
         climbingOnLeftSide = isMovingRight
@@ -706,12 +702,6 @@ class PetViewModel {
                 behavior.tick(self.context)
             }
         }
-        if needs.contains(.physics) {
-            physics.start { [weak self] in
-                guard let self, let behavior = self.currentBehavior else { return }
-                behavior.tick(self.context)
-            }
-        }
         if needs.contains(.animation) {
             startDynamicAnimationTimer()
         }
@@ -725,7 +715,6 @@ class PetViewModel {
 
     func stopAllTimers() {
         movement.stop()
-        physics.stop()
         animationTimer?.invalidate()
         animationTimer = nil
         idle.stop()
@@ -826,14 +815,7 @@ class PetViewModel {
     }
 
     private func cleanupChildWindowRefs() {
-        // Create new array with only valid references to avoid accessing deallocating objects
-        var validRefs: [Weak<ChildPetWindow>] = []
-        for ref in childWindowRefs {
-            if ref.value != nil {
-                validRefs.append(ref)
-            }
-        }
-        childWindowRefs = validRefs
+        childWindowRefs.removeAll { $0.value == nil }
     }
 
     // MARK: - Window Management

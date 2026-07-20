@@ -11,7 +11,7 @@ struct PetBehaviorTests {
         #expect(WalkingBehavior().timerNeeds == [.movement, .animation, .idle])
         #expect(DockWalkBehavior().timerNeeds == [.movement, .animation, .idle])
         #expect(WindowTopBehavior().timerNeeds == [.movement, .animation, .idle])
-        #expect(FallingBehavior().timerNeeds == [.physics, .animation])
+        #expect(FallingBehavior().timerNeeds == [.movement, .animation])
     }
 
     @Test func transitionalBehaviorTimerNeedsAreDeclarative() {

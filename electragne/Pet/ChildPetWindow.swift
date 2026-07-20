@@ -48,21 +48,15 @@ class ChildPetWindow: NSWindow {
         let localParentX = parentPosition.x - screen.frame.minX
         let localParentY = parentPosition.y - screen.frame.minY
 
-        var spawnX = spawn.evaluateX(
-            imageX: localParentX, imageY: localParentY,
-            imageW: parentSize, imageH: parentSize,
-            screenW: screenW, screenH: screenH,
-            areaW: areaW, areaH: areaH,
-            random: random, randS: randS
-        )
-
-        let spawnY = spawn.evaluateY(
-            imageX: localParentX, imageY: localParentY,
-            imageW: parentSize, imageH: parentSize,
-            screenW: screenW, screenH: screenH,
-            areaW: areaW, areaH: areaH,
-            random: random, randS: randS
-        )
+        let variables: [String: Double] = [
+            "imageX": localParentX, "imageY": localParentY,
+            "imageW": parentSize, "imageH": parentSize,
+            "screenW": screenW, "screenH": screenH,
+            "areaW": areaW, "areaH": areaH,
+            "random": Double(random), "randS": Double(randS),
+        ]
+        var spawnX = spawn.x(variables: variables)
+        let spawnY = spawn.y(variables: variables)
 
         // Mirror X position if parent is moving right
         if isMovingRight {

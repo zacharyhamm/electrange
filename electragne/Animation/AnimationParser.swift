@@ -44,50 +44,23 @@ nonisolated struct ChildSpawn {
     let yExpression: String
     let nextAnimationID: String    // Animation for the child to play
 
-    // Evaluate position expression given current pet state
-    func evaluateX(imageX: CGFloat, imageY: CGFloat, imageW: CGFloat, imageH: CGFloat,
-                   screenW: CGFloat, screenH: CGFloat, areaW: CGFloat, areaH: CGFloat,
-                   random: Int, randS: Int) -> CGFloat {
-        return evaluateExpression(xExpression, imageX: imageX, imageY: imageY,
-                                  imageW: imageW, imageH: imageH, screenW: screenW,
-                                  screenH: screenH, areaW: areaW, areaH: areaH,
-                                  random: random, randS: randS)
+    /// Evaluate the position expressions against the spawn variables the
+    /// caller assembled ("imageX", "imageW", "screenW", "random", ...).
+    func x(variables: [String: Double]) -> CGFloat {
+        evaluate(xExpression, variables: variables)
     }
 
-    func evaluateY(imageX: CGFloat, imageY: CGFloat, imageW: CGFloat, imageH: CGFloat,
-                   screenW: CGFloat, screenH: CGFloat, areaW: CGFloat, areaH: CGFloat,
-                   random: Int, randS: Int) -> CGFloat {
-        return evaluateExpression(yExpression, imageX: imageX, imageY: imageY,
-                                  imageW: imageW, imageH: imageH, screenW: screenW,
-                                  screenH: screenH, areaW: areaW, areaH: areaH,
-                                  random: random, randS: randS)
+    func y(variables: [String: Double]) -> CGFloat {
+        evaluate(yExpression, variables: variables)
     }
 
-    private func evaluateExpression(_ expr: String, imageX: CGFloat, imageY: CGFloat,
-                                    imageW: CGFloat, imageH: CGFloat, screenW: CGFloat,
-                                    screenH: CGFloat, areaW: CGFloat, areaH: CGFloat,
-                                    random: Int, randS: Int) -> CGFloat {
+    private func evaluate(_ expr: String, variables: [String: Double]) -> CGFloat {
         guard !expr.isEmpty else { return 0 }
-
-        let variables: [String: Double] = [
-            "screenW": Double(screenW),
-            "screenH": Double(screenH),
-            "areaW": Double(areaW),
-            "areaH": Double(areaH),
-            "imageX": Double(imageX),
-            "imageY": Double(imageY),
-            "imageW": Double(imageW),
-            "imageH": Double(imageH),
-            "random": Double(random),
-            "randS": Double(randS),
-        ]
-
         guard let value = ExpressionEvaluator.evaluate(expr, variables: variables),
               value.isFinite else {
             Log.animation.error("Could not evaluate expression: \(expr, privacy: .public)")
             return 0
         }
-
         return CGFloat(value)
     }
 }
