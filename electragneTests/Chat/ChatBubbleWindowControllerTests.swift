@@ -8,11 +8,11 @@ struct ChatBubbleWindowControllerTests {
         let client = ControlledChatClient(attemptToolCall: true)
         let controller = makeController(client: client)
 
-        controller.startCalendarEventConversation(event(id: "one", summary: "Planning"))
+        controller.startProactiveConversation(prompt(id: "one", summary: "Planning"))
         await waitUntil { client.toolResultMessages.count == 1 }
 
         #expect(client.toolResultMessages == [
-            "Tools are disabled while summarizing a calendar event."
+            "Tools are disabled in this proactive conversation."
         ])
     }
 
@@ -20,9 +20,9 @@ struct ChatBubbleWindowControllerTests {
         let client = ControlledChatClient(suspendFirstRequest: true)
         let controller = makeController(client: client)
 
-        controller.startCalendarEventConversation(event(id: "one", summary: "First"))
+        controller.startProactiveConversation(prompt(id: "one", summary: "First"))
         await waitUntil { client.canResumeFirstRequest }
-        controller.startCalendarEventConversation(event(id: "two", summary: "Second"))
+        controller.startProactiveConversation(prompt(id: "two", summary: "Second"))
         await Task.yield()
 
         #expect(client.histories.count == 1)
@@ -48,6 +48,11 @@ struct ChatBubbleWindowControllerTests {
                 .appendingPathComponent(UUID().uuidString)),
             memoryEngine: memoryEngine
         )
+    }
+
+    private func prompt(id: String, summary: String) -> ChatBubbleWindowController.ProactivePrompt {
+        let event = event(id: id, summary: summary)
+        return .init(title: event.summary, prompt: event.reminderPrompt, joinURL: event.joinURL)
     }
 
     private func event(id: String, summary: String) -> CalendarEventDetails {

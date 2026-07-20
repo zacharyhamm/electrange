@@ -38,7 +38,14 @@ final class ChatBubbleWindowController {
     private var streamedBuffer = ""
     private var streamedImages: [ChatImage] = []
     private var streamedImagePresentation: ChatImagePresentation = .thumbnails
-    private var pendingCalendarEvents: [CalendarEventDetails] = []
+    /// A machine-initiated conversation (calendar reminder, automation
+    /// notice) waiting for the single in-flight stream slot.
+    struct ProactivePrompt {
+        let title: String
+        let prompt: String
+        var joinURL: URL? = nil
+    }
+    private var pendingProactivePrompts: [ProactivePrompt] = []
 
     /// Whether the in-flight stream's chat is the one on screen; gates every
     /// view-model mutation the stream makes.
@@ -120,7 +127,7 @@ final class ChatBubbleWindowController {
         // The stream (if any) keeps running; its chat is still current, so
         // tokens keep landing in the buffer and the next present() reattaches.
         resolveToolConfirmation(approved: false)
-        pendingCalendarEvents.removeAll()
+        pendingProactivePrompts.removeAll()
         removeEventMonitors()
         removeWindowObservers()
         panel?.orderOut(nil)
@@ -155,20 +162,20 @@ final class ChatBubbleWindowController {
         refreshChatList()
     }
 
-    func startCalendarEventConversation(_ event: CalendarEventDetails) {
-        pendingCalendarEvents.append(event)
-        startNextCalendarEventConversation()
+    func startProactiveConversation(_ prompt: ProactivePrompt) {
+        pendingProactivePrompts.append(prompt)
+        startNextProactiveConversation()
     }
 
-    private func startNextCalendarEventConversation() {
-        guard streamTask == nil, !pendingCalendarEvents.isEmpty else { return }
-        let event = pendingCalendarEvents.removeFirst()
+    private func startNextProactiveConversation() {
+        guard streamTask == nil, !pendingProactivePrompts.isEmpty else { return }
+        let prompt = pendingProactivePrompts.removeFirst()
         activeStreamID = nil
-        resetTranscript(to: StoredChat(title: event.summary))
+        resetTranscript(to: StoredChat(title: prompt.title))
         startStream(
-            userMessage: event.reminderPrompt,
+            userMessage: prompt.prompt,
             toolsEnabled: false,
-            openURLAfterResponse: event.joinURL
+            openURLAfterResponse: prompt.joinURL
         )
     }
 
@@ -237,7 +244,7 @@ final class ChatBubbleWindowController {
                     },
                     onToolCall: { call in
                         guard toolsEnabled else {
-                            return .error("Tools are disabled while summarizing a calendar event.")
+                            return .error("Tools are disabled in this proactive conversation.")
                         }
                         return await self.executeToolCall(call)
                     },
@@ -327,7 +334,7 @@ final class ChatBubbleWindowController {
             self.streamTask = nil
             self.activeStreamID = nil
             self.streamingChatID = nil
-            self.startNextCalendarEventConversation()
+            self.startNextProactiveConversation()
         }
     }
 
@@ -483,12 +490,7 @@ final class ChatBubbleWindowController {
             }
             return fallback
         }
-        let model = MemoryProviderPreference.model
-        return switch provider {
-        case .ollama: OllamaClient(model: model)
-        case .gemini: GeminiClient(model: model)
-        case .openAICompatible: OpenAICompatibleClient(model: model, thinking: false)
-        }
+        return provider.makeClient(model: MemoryProviderPreference.model, thinking: false)
     }
 
     /// Fetches the active provider's model list so the header picker can

@@ -7,7 +7,8 @@ final class ChatToolRouter {
 
     convenience init(
         memoryEngine: MemoryEngine,
-        calendarMonitor: CalendarReminderMonitor? = nil
+        calendarMonitor: CalendarReminderMonitor? = nil,
+        automationEngine: AutomationEngine? = nil
     ) {
         self.init(
             reminderExecutor: AppleReminderService(),
@@ -15,7 +16,8 @@ final class ChatToolRouter {
             desktopExecutor: DesktopToolService(),
             timerExecutor: TimerToolService(),
             calendarMonitor: calendarMonitor,
-            memoryExecutor: MemoryToolExecutor(engine: memoryEngine)
+            memoryExecutor: MemoryToolExecutor(engine: memoryEngine),
+            automationEngine: automationEngine
         )
     }
 
@@ -32,14 +34,29 @@ final class ChatToolRouter {
         mcpExecutor: (any ToolExecuting)? = nil,
         calendarMonitor: CalendarReminderMonitor? = nil,
         statusExecutor: (any ToolExecuting)? = nil,
-        memoryExecutor: any ToolExecuting
+        memoryExecutor: any ToolExecuting,
+        automationEngine: AutomationEngine? = nil
     ) {
         self.mcpExecutor = mcpExecutor ?? MCPToolExecutor()
         let gmail = gmailExecutor ?? GmailToolService()
         let calendar = calendarExecutor ?? CalendarToolService()
         let slack = slackExecutor ?? SlackToolService()
         let linear = linearExecutor ?? LinearToolService()
+        // The fallback engine is never started, but it must not share the live
+        // store: a create through it would persist a record the real engine
+        // picks up next tick. Give it a throwaway suite, wiped on construction.
+        let automations = AutomationToolService(engine: automationEngine ?? {
+            let suiteName = "org.impolexg.electragne.inert-automations"
+            let inertDefaults = UserDefaults(suiteName: suiteName)!
+            inertDefaults.removePersistentDomain(forName: suiteName)
+            return AutomationEngine(defaults: inertDefaults)
+        }())
         executors = [
+            .automations: ToolAdapter.sync(
+                parse: AutomationToolRequest.init(toolCall:),
+                confirm: automations.confirmationDetails(for:),
+                execute: automations.execute(_:)
+            ),
             .reminders: ToolAdapter.sync(
                 parse: ReminderToolRequest.init(toolCall:),
                 confirm: reminderExecutor.confirmationDetails(for:),

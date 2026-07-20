@@ -204,6 +204,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
+    func presentAutomationNotice(name: String, payload: String) {
+        summonPetToChat()
+        DispatchQueue.main.async { [weak self] in
+            self?.appModel?.startProactiveConversation(ChatBubbleWindowController.ProactivePrompt(
+                title: name,
+                prompt: """
+                My background automation ‘\(name)’ flagged something. Its finding:
+                \(payload)
+                Relay this to me concisely and note anything I should do. Do not call any tools.
+                """
+            ))
+        }
+    }
+
     @objc func toggleVisibility() {
         guard let window = petWindow else { return }
 

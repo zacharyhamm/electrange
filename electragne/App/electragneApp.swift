@@ -22,6 +22,9 @@ struct ElectragneApp: App {
                     appModel.startCalendarMonitoring { [weak appDelegate] event in
                         appDelegate?.presentCalendarReminder(event)
                     }
+                    appModel.startAutomations { [weak appDelegate] name, payload in
+                        appDelegate?.presentAutomationNotice(name: name, payload: payload)
+                    }
                 }
         }
         .windowStyle(.hiddenTitleBar)

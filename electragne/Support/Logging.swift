@@ -22,6 +22,8 @@ nonisolated enum Log {
     /// Movement / dock / physics tracing.
     static let physics = Logger(subsystem: subsystem, category: "physics")
     static let calendar = Logger(subsystem: subsystem, category: "calendar")
+    /// User-created recurring automations (AutomationEngine).
+    static let automation = Logger(subsystem: subsystem, category: "automation")
     /// MCP server connections and OAuth (MCPServerManager, MCPOAuth).
     static let mcp = Logger(subsystem: subsystem, category: "mcp")
     /// Long-term memory formation and retrieval (MemoryEngine, MemoryExtractor).

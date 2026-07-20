@@ -18,6 +18,7 @@ nonisolated enum ChatToolFamily: Equatable, Sendable {
     case linear
     case status
     case memory
+    case automations
 }
 
 nonisolated enum ChatToolParameterType: String, Equatable, Sendable {
@@ -207,6 +208,29 @@ nonisolated enum ChatToolRegistry {
                 "timerID": property(.string, "Opaque timer ID returned by create_timer or list_timers.")
             ], required: ["timerID"], initialStatus: "Confirm timer…",
             executionStatus: "Updating timers…"
+        ),
+        definition(
+            "create_automation", family: .automations,
+            description: "Create a recurring background automation after the owner confirms. It runs the given instruction headlessly with read-only tools every interval and proactively messages the owner only when its result warrants it.",
+            properties: [
+                "name": property(.string, "Short human-readable name for the automation."),
+                "intervalSeconds": property(.number, "Required whole-number run interval from 60 to 604800 seconds."),
+                "instruction": property(.string, "The task to perform each run, phrased as an instruction, including what makes a result worth notifying the owner about. Example: ‘Fetch today's messages in Slack channel #ops and notify me only if something looks urgent or blocking.’"),
+            ], required: ["intervalSeconds", "instruction"], initialStatus: "Confirm automation…",
+            executionStatus: "Saving automation…"
+        ),
+        definition(
+            "list_automations", family: .automations,
+            description: "List active background automations and obtain their opaque IDs.",
+            initialStatus: "Reading automations…", executionStatus: "Reading automations…"
+        ),
+        definition(
+            "cancel_automation", family: .automations,
+            description: "Cancel a background automation after confirmation. Use list_automations first to obtain its ID.",
+            properties: [
+                "automationID": property(.string, "Opaque automation ID returned by create_automation or list_automations.")
+            ], required: ["automationID"], initialStatus: "Confirm automation…",
+            executionStatus: "Updating automations…"
         ),
         definition(
             "report_app_status", family: .status,

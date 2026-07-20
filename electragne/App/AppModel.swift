@@ -14,15 +14,19 @@ import os
 final class AppModel {
     let petViewModel = PetViewModel()
     let calendarReminderMonitor = CalendarReminderMonitor()
+    let automationEngine = AutomationEngine()
     let memoryEngine = MemoryEngine()
     let chatBubbleController: ChatBubbleWindowController
 
     init() {
+        let toolRouter = ChatToolRouter(
+            memoryEngine: memoryEngine,
+            calendarMonitor: calendarReminderMonitor,
+            automationEngine: automationEngine
+        )
+        automationEngine.toolRouter = toolRouter
         chatBubbleController = ChatBubbleWindowController(
-            toolRouter: ChatToolRouter(
-                memoryEngine: memoryEngine,
-                calendarMonitor: calendarReminderMonitor
-            ),
+            toolRouter: toolRouter,
             memoryEngine: memoryEngine
         )
     }
@@ -44,17 +48,34 @@ final class AppModel {
         calendarReminderMonitor.start()
     }
 
+    func startAutomations(onNotify: @escaping (String, String) -> Void) {
+        automationEngine.onNotify = onNotify
+        automationEngine.start()
+    }
+
     /// Starts the reminder conversation once the chat surface is ready.
-    /// summonToChat's state transition (or the pet window itself, during
-    /// launch) may lag; retry rather than silently dropping the reminder.
     func startCalendarReminderConversation(_ event: CalendarEventDetails, attempts: Int = 10) {
+        startProactiveConversation(ChatBubbleWindowController.ProactivePrompt(
+            title: event.summary,
+            prompt: event.reminderPrompt,
+            joinURL: event.joinURL
+        ), attempts: attempts)
+    }
+
+    /// Starts a machine-initiated conversation once the chat surface is ready.
+    /// summonToChat's state transition (or the pet window itself, during
+    /// launch) may lag; retry rather than silently dropping the prompt.
+    func startProactiveConversation(
+        _ prompt: ChatBubbleWindowController.ProactivePrompt,
+        attempts: Int = 10
+    ) {
         guard let window = petViewModel.petWindow, petViewModel.state.isChatting else {
             if attempts > 1 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.startCalendarReminderConversation(event, attempts: attempts - 1)
+                    self?.startProactiveConversation(prompt, attempts: attempts - 1)
                 }
             } else {
-                Log.calendar.error("Dropping calendar reminder for \(event.summary, privacy: .public): chat never became available")
+                Log.calendar.error("Dropping proactive conversation ‘\(prompt.title, privacy: .public)’: chat never became available")
             }
             return
         }
@@ -62,6 +83,6 @@ final class AppModel {
             anchoredTo: window,
             onDismiss: { [petViewModel] in petViewModel.dismissChat() }
         )
-        chatBubbleController.startCalendarEventConversation(event)
+        chatBubbleController.startProactiveConversation(prompt)
     }
 }

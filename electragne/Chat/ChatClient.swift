@@ -251,6 +251,16 @@ nonisolated enum ChatProvider: String, CaseIterable, Sendable {
         }
     }
 
+    /// Fresh client for this provider. `thinking` only applies to
+    /// OpenAI-compatible backends; nil keeps the stored preference.
+    func makeClient(model: String? = nil, thinking: Bool? = nil) -> any ChatClient {
+        switch self {
+        case .ollama: OllamaClient(model: model)
+        case .gemini: GeminiClient(model: model)
+        case .openAICompatible: OpenAICompatibleClient(model: model, thinking: thinking)
+        }
+    }
+
     /// Providers usable right now: local Ollama needs no key, the rest need one.
     static func configured() -> [ChatProvider] {
         allCases.filter { provider in
