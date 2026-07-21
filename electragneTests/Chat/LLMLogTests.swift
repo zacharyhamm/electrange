@@ -66,4 +66,44 @@ struct LLMLogTests {
         ])
         #expect(logged[1]["body"] == .string(#"{"ok":true}"#))
     }
+
+    @Test func automationScopeKeepsACompleteClearableRunLog() async throws {
+        let (log, dir) = makeLog()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let context = AutomationRunContext(automationID: "automation-1", runID: "run-1")
+        let transport = LoggingTransport(
+            base: StubChatHTTPTransport([.init(lines: [#"{"answer":"NOTHING"}"#])]),
+            log: log
+        )
+
+        try await AutomationRunScope.$current.withValue(context) {
+            await log.append(kind: "automation_run_start", [
+                "name": .string("Inbox watch"),
+                "instruction": .string("Check the inbox."),
+                "intervalSeconds": .number(300),
+                "schedule": .string("09:00–17:00 on Mon, Tue, Wed, Thu, Fri"),
+            ])
+            let (lines, _) = try await transport.lines(for: URLRequest(url: URL(string: "http://localhost/chat")!))
+            for try await _ in lines {}
+            await log.append(kind: "tool", ["name": .string("search_gmail")])
+            await log.append(kind: "automation_run_end", [
+                "status": .string("completed"),
+                "output": .string("NOTHING"),
+                "notified": .bool(false),
+            ])
+        }
+
+        let run = try #require(await log.automationRuns().first)
+        #expect(run.id == "run-1")
+        #expect(run.automationID == "automation-1")
+        #expect(run.status == "completed")
+        #expect(run.endedAt != nil)
+        #expect(await log.automationEntries(automationID: "automation-1", runID: "run-1").map(\.kind) == [
+            "automation_run_start", "request", "response", "tool", "automation_run_end",
+        ])
+        #expect(!FileManager.default.fileExists(atPath: await log.fileURL(for: Date()).path))
+
+        try await log.clearAutomationHistory("automation-1")
+        #expect(await log.automationRuns().isEmpty)
+    }
 }

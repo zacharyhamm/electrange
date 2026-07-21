@@ -181,6 +181,47 @@ struct AutomationToolTests {
         #expect(notified.count == 1)
     }
 
+    @Test func engineLogsRunsAndEditsWithoutOverwritingLastRun() async throws {
+        let suite = "AutomationRunLogTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("automation-run-log-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = LLMLog(directory: directory)
+        let start = Date(timeIntervalSince1970: 1_000)
+        let engine = AutomationEngine(defaults: defaults, now: { start }, log: log)
+        engine.runner = { _ in "NOTIFY: inbox changed" }
+        let automation = engine.add(
+            name: "Inbox watch",
+            intervalSeconds: 300,
+            instruction: "Check the inbox.",
+            schedule: AutomationSchedule(startMinute: nil, endMinute: nil, weekdays: nil)
+        )
+
+        engine.tick()
+        for _ in 0..<200 where await log.automationRuns().first?.endedAt == nil {
+            await Task.yield()
+        }
+
+        let logged = try #require(await log.automationRuns().first)
+        #expect(logged.name == "Inbox watch")
+        #expect(logged.status == "completed")
+        #expect(await log.automationEntries(automationID: automation.id, runID: logged.id).last?.text
+            .contains("inbox changed") == true)
+
+        let lastRun = try #require(engine.list().first?.lastRun)
+        let edited = engine.edit(
+            id: automation.id,
+            name: "Inbox and calendar",
+            intervalSeconds: 600,
+            instruction: "Check both.",
+            schedule: nil
+        )
+        #expect(edited?.schedule == nil)
+        #expect(edited?.lastRun == lastRun)
+    }
+
     @Test func engineRunsAnOverdueAutomationWhenItsWindowOpens() async throws {
         let suite = "AutomationWindowTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -301,6 +342,54 @@ struct AutomationToolTests {
         engine.tick()
         await waitUntil { false }
         #expect(runCount == 1)
+
+        release?.resume()
+        await waitUntil { false }
+    }
+
+    @Test func runNowIgnoresScheduleAndIntervalAndStampsLastRun() async throws {
+        let suite = "AutomationRunNowTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let current = date(2026, 1, 4, 7, 0, calendar) // Sunday, before the window
+        let engine = AutomationEngine(defaults: defaults, now: { current }, calendar: calendar)
+        var runCount = 0
+        engine.runner = { _ in runCount += 1; return "NOTHING" }
+        let automation = engine.add(
+            name: "Workday",
+            intervalSeconds: 60,
+            instruction: "Watch.",
+            schedule: AutomationSchedule(startMinute: 480, endMinute: 1_080, weekdays: [2, 3, 4, 5, 6])
+        )
+
+        engine.tick()
+        await waitUntil { false }
+        #expect(runCount == 0)
+
+        #expect(engine.runNow(id: automation.id))
+        await waitUntil { runCount == 1 }
+        #expect(runCount == 1)
+        #expect(engine.list().first?.lastRun == current)
+    }
+
+    @Test func runNowRejectsUnknownAndInFlightAutomations() async throws {
+        let suite = "AutomationRunNowBusyTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let engine = AutomationEngine(defaults: defaults)
+        var release: CheckedContinuation<Void, Never>?
+        engine.runner = { _ in
+            await withCheckedContinuation { release = $0 }
+            return "NOTHING"
+        }
+        let automation = engine.add(name: "Slow", intervalSeconds: 60, instruction: "Watch.")
+
+        #expect(!engine.runNow(id: "missing"))
+        #expect(engine.runNow(id: automation.id))
+        await waitUntil { release != nil }
+        #expect(!engine.runNow(id: automation.id))
 
         release?.resume()
         await waitUntil { false }

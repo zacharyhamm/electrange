@@ -24,6 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private var summonHotkey: GlobalHotkey?
     private var settingsWindow: NSWindow?
     private var memoryBrowserWindow: NSWindow?
+    private var automationBrowserWindow: NSWindow?
     private var collectionBehaviorObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -162,6 +163,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         menu.addItem(NSMenuItem(
             title: "Browse Memories…",
             action: #selector(openMemoryBrowser),
+            keyEquivalent: ""
+        ))
+        menu.addItem(NSMenuItem(
+            title: "Manage Automations…",
+            action: #selector(openAutomationBrowser),
             keyEquivalent: ""
         ))
 
@@ -312,15 +318,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     @objc func openMemoryBrowser() {
         guard let memoryEngine = appModel?.memoryEngine else { return }
         if memoryBrowserWindow == nil {
+            // sizingOptions = []: the hosting view must never feed intrinsic
+            // size back into the window, or window ↔ layout feedback can spin
+            // the main thread at 100%.
+            let hostingView = NSHostingView(rootView: MemoryBrowserView(engine: memoryEngine))
+            hostingView.sizingOptions = []
             memoryBrowserWindow = makeAuxiliaryWindow(
                 title: "Electragne Memories",
                 size: NSSize(width: 760, height: 520),
                 styleMask: [.titled, .closable, .resizable],
-                contentView: NSHostingView(rootView: MemoryBrowserView(engine: memoryEngine))
+                contentView: hostingView
             )
         }
         NSApp.activate(ignoringOtherApps: true)
         memoryBrowserWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc func openAutomationBrowser() {
+        guard let automationEngine = appModel?.automationEngine else { return }
+        if automationBrowserWindow == nil {
+            let hostingView = NSHostingView(rootView: AutomationBrowserView(engine: automationEngine))
+            hostingView.sizingOptions = []
+            automationBrowserWindow = makeAuxiliaryWindow(
+                title: "Electragne Automations",
+                size: NSSize(width: 900, height: 640),
+                styleMask: [.titled, .closable, .resizable],
+                contentView: hostingView
+            )
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        automationBrowserWindow?.makeKeyAndOrderFront(nil)
     }
 
     @objc func quitApp() {

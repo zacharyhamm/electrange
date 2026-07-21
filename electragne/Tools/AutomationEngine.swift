@@ -12,22 +12,25 @@ final class AutomationEngine {
     private let poller = TimerDriver()
     private let now: () -> Date
     private let calendar: Calendar
+    private let log: LLMLog?
     private var running: Set<String> = []
     private var started = false
     var onNotify: (String, String) -> Void = { _, _ in }
     /// Set after construction by AppModel; breaks the engine ↔ router cycle.
     weak var toolRouter: ChatToolRouter?
     /// Injectable for tests; nil runs a real headless LLM turn.
-    var runner: ((AutomationRecord) async -> String)?
+    var runner: ((AutomationRecord) async throws -> String)?
 
     init(
         defaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init,
-        calendar: Calendar = .autoupdatingCurrent
+        calendar: Calendar = .autoupdatingCurrent,
+        log: LLMLog? = nil
     ) {
         self.store = AutomationStore(defaults: defaults)
         self.now = now
         self.calendar = calendar
+        self.log = log
     }
 
     func start() {
@@ -79,12 +82,40 @@ final class AutomationEngine {
         return automations[index]
     }
 
+    /// Replaces every owner-editable field while preserving engine-owned
+    /// state such as lastRun. Unlike update(...), nil clears the schedule.
+    func edit(
+        id: String,
+        name: String,
+        intervalSeconds: Int,
+        instruction: String,
+        schedule: AutomationSchedule?
+    ) -> AutomationRecord? {
+        var automations = store.load()
+        guard let index = automations.firstIndex(where: { $0.id == id }) else { return nil }
+        automations[index].name = name
+        automations[index].intervalSeconds = intervalSeconds
+        automations[index].instruction = instruction
+        automations[index].schedule = schedule
+        store.save(automations)
+        return automations[index]
+    }
+
     func remove(id: String) -> AutomationRecord? {
         var automations = store.load()
         guard let index = automations.firstIndex(where: { $0.id == id }) else { return nil }
         let removed = automations.remove(at: index)
         store.save(automations)
         return removed
+    }
+
+    /// Runs an automation immediately, ignoring its interval and schedule
+    /// window. Returns false for unknown IDs or when a run is in flight.
+    func runNow(id: String) -> Bool {
+        guard !running.contains(id),
+              let automation = store.load().first(where: { $0.id == id }) else { return false }
+        run(automation)
+        return true
     }
 
     func tick() {
@@ -103,23 +134,61 @@ final class AutomationEngine {
         markLastRun(automation.id, at: now())
         Task { [weak self] in
             guard let self else { return }
-            let output: String = if let runner = self.runner {
-                await runner(automation)
-            } else {
-                await self.headlessTurn(automation)
+            let context = AutomationRunContext(automationID: automation.id, runID: UUID().uuidString)
+            await AutomationRunScope.$current.withValue(context) {
+                await self.performRun(automation)
             }
-            self.running.remove(automation.id)
-            // Cancelled while the run was in flight — drop the result.
-            guard self.store.load().contains(where: { $0.id == automation.id }) else { return }
-            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmed.hasPrefix("NOTIFY:") else { return }
-            let payload = trimmed.dropFirst("NOTIFY:".count)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !payload.isEmpty else {
-                Log.automation.warning("Automation ‘\(automation.name, privacy: .public)’ replied NOTIFY: with no message; skipping notice.")
+        }
+    }
+
+    private func performRun(_ automation: AutomationRecord) async {
+        await log?.append(kind: "automation_run_start", [
+            "name": .string(automation.name),
+            "instruction": .string(automation.instruction),
+            "intervalSeconds": .number(Double(automation.intervalSeconds)),
+            "schedule": automation.schedule.map { .string($0.text) } ?? .null,
+        ])
+        do {
+            let output: String = if let runner {
+                try await runner(automation)
+            } else {
+                try await headlessTurn(automation)
+            }
+            running.remove(automation.id)
+            guard store.load().contains(where: { $0.id == automation.id }) else {
+                await log?.append(kind: "automation_run_end", [
+                    "status": .string("discarded"),
+                    "output": .string(output),
+                    "notified": .bool(false),
+                ])
                 return
             }
-            self.onNotify(automation.name, payload)
+
+            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            var notified = false
+            if trimmed.hasPrefix("NOTIFY:") {
+                let payload = trimmed.dropFirst("NOTIFY:".count)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if payload.isEmpty {
+                    Log.automation.warning("Automation ‘\(automation.name, privacy: .public)’ replied NOTIFY: with no message; skipping notice.")
+                } else {
+                    notified = true
+                    onNotify(automation.name, payload)
+                }
+            }
+            await log?.append(kind: "automation_run_end", [
+                "status": .string("completed"),
+                "output": .string(output),
+                "notified": .bool(notified),
+            ])
+        } catch {
+            running.remove(automation.id)
+            Log.automation.error("Automation ‘\(automation.name, privacy: .public)’ failed: \(error.localizedDescription, privacy: .public)")
+            await log?.append(kind: "automation_run_end", [
+                "status": .string("failed"),
+                "error": .string(error.localizedDescription),
+                "notified": .bool(false),
+            ])
         }
     }
 
@@ -139,28 +208,29 @@ final class AutomationEngine {
         the owner. Otherwise reply exactly "NOTHING".
         """
 
-    private func headlessTurn(_ automation: AutomationRecord) async -> String {
-        guard let toolRouter else { return "" }
+    private func headlessTurn(_ automation: AutomationRecord) async throws -> String {
+        guard let toolRouter else { throw AutomationRunError.missingToolRouter }
         let client = ChatProviderPreference.selected.makeClient()
         let history = [
             ChatMessage(role: "system", content: Self.systemPrompt),
             ChatMessage(role: "user", content: automation.instruction),
         ]
         var buffer = ""
-        do {
-            try await client.streamChat(
-                history: history,
-                onStatus: { _ in },
-                onToolCall: { call in
-                    await toolRouter.execute(call, confirm: { _ in false }, onStatus: { _ in })
-                },
-                onImages: { _ in },
-                onToken: { buffer += $0 }
-            )
-        } catch {
-            Log.automation.error("Automation ‘\(automation.name, privacy: .public)’ failed: \(error.localizedDescription, privacy: .public)")
-            return ""
-        }
+        try await client.streamChat(
+            history: history,
+            onStatus: { _ in },
+            onToolCall: { call in
+                await toolRouter.execute(call, confirm: { _ in false }, onStatus: { _ in })
+            },
+            onImages: { _ in },
+            onToken: { buffer += $0 }
+        )
         return buffer
     }
+}
+
+nonisolated private enum AutomationRunError: LocalizedError {
+    case missingToolRouter
+
+    var errorDescription: String? { "Automation tools are unavailable." }
 }

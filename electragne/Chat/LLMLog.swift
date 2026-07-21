@@ -1,9 +1,37 @@
 import Foundation
 import os
 
-/// Append-only JSONL log of every LLM wire interaction and tool call, one
-/// file per day under Application Support/electragne/logs. Always on; failures
-/// are swallowed so logging can never break chat.
+nonisolated struct AutomationRunContext: Sendable {
+    let automationID: String
+    let runID: String
+}
+
+nonisolated enum AutomationRunScope {
+    @TaskLocal static var current: AutomationRunContext?
+}
+
+nonisolated struct AutomationRunSummary: Identifiable, Sendable {
+    let id: String
+    let automationID: String
+    let name: String
+    let instruction: String
+    let intervalSeconds: Int
+    let schedule: String?
+    let startedAt: Date
+    let endedAt: Date?
+    let status: String
+}
+
+nonisolated struct AutomationLogEntry: Identifiable, Sendable {
+    let id: Int
+    let kind: String
+    let timestamp: Date?
+    let text: String
+}
+
+/// Append-only JSONL log of every LLM wire interaction and tool call. Normal
+/// chat uses one file per day; automation traffic uses one file per run so it
+/// can be browsed and cleared independently. Failures never break chat.
 actor LLMLog {
     static let shared = LLMLog()
 
@@ -11,6 +39,11 @@ actor LLMLog {
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return encoder
+    }()
+    private let displayEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return encoder
     }()
     // Formatters are costly to build; actor isolation makes reuse safe.
@@ -36,14 +69,16 @@ actor LLMLog {
         var entry = fields
         entry["kind"] = .string(kind)
         entry["ts"] = .string(timestampFormatter.string(from: Date()))
+        let run = AutomationRunScope.current
+        if let run {
+            entry["automationID"] = .string(run.automationID)
+            entry["runID"] = .string(run.runID)
+        }
         do {
-            try FileManager.default.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true
-            )
+            let url = run.map(runFileURL) ?? fileURL(for: Date())
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             var line = try encoder.encode(entry)
             line.append(0x0A)
-            let url = fileURL(for: Date())
             if !FileManager.default.fileExists(atPath: url.path) {
                 FileManager.default.createFile(atPath: url.path, contents: nil)
             }
@@ -59,6 +94,87 @@ actor LLMLog {
 
     func fileURL(for date: Date) -> URL {
         directory.appendingPathComponent("llm-\(dayFormatter.string(from: date)).jsonl")
+    }
+
+    func automationRuns() -> [AutomationRunSummary] {
+        let root = automationDirectory
+        guard let automationFolders = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil,
+            options: .skipsHiddenFiles
+        ) else { return [] }
+
+        return automationFolders.flatMap { folder in
+            (try? FileManager.default.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: nil,
+                options: .skipsHiddenFiles
+            )) ?? []
+        }
+        .compactMap(runSummary)
+        .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    func automationEntries(automationID: String, runID: String) -> [AutomationLogEntry] {
+        decodedLines(at: runFileURL(.init(automationID: automationID, runID: runID)))
+            .enumerated()
+            .compactMap { offset, entry in
+                guard let data = try? displayEncoder.encode(entry),
+                      let text = String(data: data, encoding: .utf8) else { return nil }
+                return AutomationLogEntry(
+                    id: offset,
+                    kind: entry["kind"]?.stringValue ?? "entry",
+                    timestamp: entry["ts"]?.stringValue.flatMap(timestampFormatter.date(from:)),
+                    text: text
+                )
+            }
+    }
+
+    func clearAutomationHistory(_ automationID: String) throws {
+        let url = automationDirectory.appendingPathComponent(automationID, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
+    }
+
+    private var automationDirectory: URL {
+        directory.appendingPathComponent("automations", isDirectory: true)
+    }
+
+    private func runFileURL(_ run: AutomationRunContext) -> URL {
+        automationDirectory
+            .appendingPathComponent(run.automationID, isDirectory: true)
+            .appendingPathComponent("\(run.runID).jsonl")
+    }
+
+    private func decodedLines(at url: URL) -> [[String: ChatToolValue]] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return String(decoding: data, as: UTF8.self)
+            .split(separator: "\n")
+            .compactMap { try? JSONDecoder().decode([String: ChatToolValue].self, from: Data($0.utf8)) }
+    }
+
+    private func runSummary(at url: URL) -> AutomationRunSummary? {
+        let entries = decodedLines(at: url)
+        guard let start = entries.first(where: { $0["kind"]?.stringValue == "automation_run_start" }),
+              let automationID = start["automationID"]?.stringValue,
+              let runID = start["runID"]?.stringValue,
+              let name = start["name"]?.stringValue,
+              let instruction = start["instruction"]?.stringValue,
+              let interval = start["intervalSeconds"]?.numberValue,
+              let timestamp = start["ts"]?.stringValue,
+              let startedAt = timestampFormatter.date(from: timestamp) else { return nil }
+        let end = entries.last(where: { $0["kind"]?.stringValue == "automation_run_end" })
+        return AutomationRunSummary(
+            id: runID,
+            automationID: automationID,
+            name: name,
+            instruction: instruction,
+            intervalSeconds: Int(interval),
+            schedule: start["schedule"]?.stringValue,
+            startedAt: startedAt,
+            endedAt: end?["ts"]?.stringValue.flatMap(timestampFormatter.date(from:)),
+            status: end?["status"]?.stringValue ?? "interrupted"
+        )
     }
 }
 

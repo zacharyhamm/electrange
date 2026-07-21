@@ -14,7 +14,7 @@ import os
 final class AppModel {
     let petViewModel = PetViewModel()
     let calendarReminderMonitor = CalendarReminderMonitor()
-    let automationEngine = AutomationEngine()
+    let automationEngine = AutomationEngine(log: .shared)
     let memoryEngine = MemoryEngine()
     let chatBubbleController: ChatBubbleWindowController
 
