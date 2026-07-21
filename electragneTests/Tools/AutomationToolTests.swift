@@ -20,6 +20,25 @@ struct AutomationToolTests {
             "instruction": .string("Watch the channel."),
         ])) == .create(name: "Automation", intervalSeconds: 60, instruction: "Watch the channel.", schedule: nil))
         #expect(try AutomationToolRequest(toolCall: call("list_automations")) == .list)
+        #expect(try AutomationToolRequest(toolCall: call("update_automation", [
+            "automationID": .string("id-1"),
+            "intervalSeconds": .number(300),
+        ])) == .update(
+            automationID: "id-1",
+            name: nil,
+            intervalSeconds: 300,
+            instruction: nil,
+            schedule: nil
+        ))
+        #expect(throws: AutomationToolError.missingArgument("automationID")) {
+            try AutomationToolRequest(toolCall: call("update_automation"))
+        }
+        #expect(throws: AutomationToolError.invalidInterval) {
+            try AutomationToolRequest(toolCall: call("update_automation", [
+                "automationID": .string("id-1"),
+                "intervalSeconds": .number(30),
+            ]))
+        }
         #expect(try AutomationToolRequest(toolCall: call("cancel_automation", [
             "automationID": .string(" id-1 "),
         ])) == .cancel(automationID: "id-1"))
@@ -313,6 +332,46 @@ struct AutomationToolTests {
         #expect((await service.execute(.list)).response["count"]?.numberValue == 0)
 
         let missing = await service.execute(.cancel(automationID: automationID))
+        #expect(missing.response["status"]?.stringValue == "not_found")
+    }
+
+    @Test func serviceUpdatesOnlyProvidedFields() async throws {
+        let suite = "AutomationUpdateTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let engine = AutomationEngine(defaults: defaults)
+        let service = AutomationToolService(engine: engine)
+
+        let created = await service.execute(.create(
+            name: "Slack watch",
+            intervalSeconds: 120,
+            instruction: "Check #ops.",
+            schedule: AutomationSchedule(startMinute: 480, endMinute: 1_080, weekdays: nil)
+        ))
+        let automationID = try #require(created.response["automationID"]?.stringValue)
+
+        let updated = await service.execute(.update(
+            automationID: automationID,
+            name: nil,
+            intervalSeconds: 600,
+            instruction: "Check #ops and #eng.",
+            schedule: nil
+        ))
+        #expect(updated.response["status"]?.stringValue == "updated")
+
+        let record = try #require(engine.list().first)
+        #expect(record.name == "Slack watch")
+        #expect(record.intervalSeconds == 600)
+        #expect(record.instruction == "Check #ops and #eng.")
+        #expect(record.schedule == AutomationSchedule(startMinute: 480, endMinute: 1_080, weekdays: nil))
+
+        let missing = await service.execute(.update(
+            automationID: "gone",
+            name: nil,
+            intervalSeconds: nil,
+            instruction: nil,
+            schedule: nil
+        ))
         #expect(missing.response["status"]?.stringValue == "not_found")
     }
 

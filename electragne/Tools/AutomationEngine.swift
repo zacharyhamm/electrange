@@ -60,6 +60,25 @@ final class AutomationEngine {
         store.load()
     }
 
+    /// Nil arguments leave the corresponding field unchanged; a provided
+    /// schedule replaces the old one wholesale. Returns nil for unknown IDs.
+    func update(
+        id: String,
+        name: String? = nil,
+        intervalSeconds: Int? = nil,
+        instruction: String? = nil,
+        schedule: AutomationSchedule? = nil
+    ) -> AutomationRecord? {
+        var automations = store.load()
+        guard let index = automations.firstIndex(where: { $0.id == id }) else { return nil }
+        if let name { automations[index].name = name }
+        if let intervalSeconds { automations[index].intervalSeconds = intervalSeconds }
+        if let instruction { automations[index].instruction = instruction }
+        if let schedule { automations[index].schedule = schedule }
+        store.save(automations)
+        return automations[index]
+    }
+
     func remove(id: String) -> AutomationRecord? {
         var automations = store.load()
         guard let index = automations.firstIndex(where: { $0.id == id }) else { return nil }

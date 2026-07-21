@@ -3,9 +3,9 @@ import os
 
 nonisolated struct AutomationRecord: Codable, Equatable, Sendable {
     let id: String
-    let name: String
-    let intervalSeconds: Int
-    let instruction: String
+    var name: String
+    var intervalSeconds: Int
+    var instruction: String
     var schedule: AutomationSchedule? = nil
     var lastRun: Date?
 }
@@ -76,6 +76,13 @@ nonisolated struct AutomationSchedule: Codable, Equatable, Sendable {
 nonisolated enum AutomationToolRequest: Equatable, Sendable {
     case create(name: String, intervalSeconds: Int, instruction: String, schedule: AutomationSchedule? = nil)
     case list
+    case update(
+        automationID: String,
+        name: String?,
+        intervalSeconds: Int?,
+        instruction: String?,
+        schedule: AutomationSchedule?
+    )
     case cancel(automationID: String)
 
     init(toolCall: ChatToolCall) throws {
@@ -83,49 +90,31 @@ nonisolated enum AutomationToolRequest: Equatable, Sendable {
 
         switch toolCall.name {
         case "create_automation":
-            guard let rawInterval = toolCall.arguments["intervalSeconds"]?.numberValue,
-                  rawInterval.isFinite,
-                  rawInterval.rounded() == rawInterval,
-                  rawInterval >= 60,
-                  rawInterval <= 604_800 else {
+            guard let intervalSeconds = try Self.parseInterval(toolCall) else {
                 throw AutomationToolError.invalidInterval
             }
             guard let instruction = args.string("instruction") else {
                 throw AutomationToolError.missingArgument("instruction")
             }
-            let hasStart = toolCall.arguments["windowStart"] != nil
-            let hasEnd = toolCall.arguments["windowEnd"] != nil
-            guard hasStart == hasEnd else { throw AutomationToolError.invalidWindow }
-            var startMinute: Int?
-            var endMinute: Int?
-            if hasStart {
-                guard let start = args.string("windowStart"),
-                      let end = args.string("windowEnd"),
-                      let parsedStart = AutomationSchedule.parseTime(start),
-                      let parsedEnd = AutomationSchedule.parseTime(end),
-                      parsedStart != parsedEnd else { throw AutomationToolError.invalidWindow }
-                startMinute = parsedStart
-                endMinute = parsedEnd
-            }
-            var weekdays: [Int]?
-            if toolCall.arguments["activeDays"] != nil {
-                guard let days = args.string("activeDays"),
-                      let parsed = AutomationSchedule.parseWeekdays(days) else {
-                    throw AutomationToolError.invalidDays
-                }
-                weekdays = parsed
-            }
-            let schedule = startMinute != nil || weekdays != nil
-                ? AutomationSchedule(startMinute: startMinute, endMinute: endMinute, weekdays: weekdays)
-                : nil
             self = .create(
                 name: args.string("name") ?? "Automation",
-                intervalSeconds: Int(rawInterval),
+                intervalSeconds: intervalSeconds,
                 instruction: instruction,
-                schedule: schedule
+                schedule: try Self.parseSchedule(toolCall, args)
             )
         case "list_automations":
             self = .list
+        case "update_automation":
+            guard let automationID = args.string("automationID") else {
+                throw AutomationToolError.missingArgument("automationID")
+            }
+            self = .update(
+                automationID: automationID,
+                name: args.string("name"),
+                intervalSeconds: try Self.parseInterval(toolCall),
+                instruction: args.string("instruction"),
+                schedule: try Self.parseSchedule(toolCall, args)
+            )
         case "cancel_automation":
             guard let automationID = args.string("automationID") else {
                 throw AutomationToolError.missingArgument("automationID")
@@ -134,6 +123,50 @@ nonisolated enum AutomationToolRequest: Equatable, Sendable {
         default:
             throw AutomationToolError.unsupportedTool(toolCall.name)
         }
+    }
+
+    /// Nil when the argument is absent; throws when present but invalid.
+    private static func parseInterval(_ toolCall: ChatToolCall) throws -> Int? {
+        guard let raw = toolCall.arguments["intervalSeconds"]?.numberValue else { return nil }
+        guard raw.isFinite,
+              raw.rounded() == raw,
+              raw >= 60,
+              raw <= 604_800 else {
+            throw AutomationToolError.invalidInterval
+        }
+        return Int(raw)
+    }
+
+    /// Nil when no window or day arguments are present.
+    private static func parseSchedule(
+        _ toolCall: ChatToolCall,
+        _ args: ToolCallArguments
+    ) throws -> AutomationSchedule? {
+        let hasStart = toolCall.arguments["windowStart"] != nil
+        let hasEnd = toolCall.arguments["windowEnd"] != nil
+        guard hasStart == hasEnd else { throw AutomationToolError.invalidWindow }
+        var startMinute: Int?
+        var endMinute: Int?
+        if hasStart {
+            guard let start = args.string("windowStart"),
+                  let end = args.string("windowEnd"),
+                  let parsedStart = AutomationSchedule.parseTime(start),
+                  let parsedEnd = AutomationSchedule.parseTime(end),
+                  parsedStart != parsedEnd else { throw AutomationToolError.invalidWindow }
+            startMinute = parsedStart
+            endMinute = parsedEnd
+        }
+        var weekdays: [Int]?
+        if toolCall.arguments["activeDays"] != nil {
+            guard let days = args.string("activeDays"),
+                  let parsed = AutomationSchedule.parseWeekdays(days) else {
+                throw AutomationToolError.invalidDays
+            }
+            weekdays = parsed
+        }
+        return startMinute != nil || weekdays != nil
+            ? AutomationSchedule(startMinute: startMinute, endMinute: endMinute, weekdays: weekdays)
+            : nil
     }
 }
 
@@ -211,6 +244,18 @@ final class AutomationToolService: AutomationToolExecuting {
             )
         case .list:
             return nil
+        case .update(let automationID, let name, let seconds, let instruction, let schedule):
+            let existing = engine.list().first { $0.id == automationID }
+            var details: [(String, String)] = []
+            if let seconds { details.append(("Every", TimerToolService.durationText(seconds))) }
+            if let schedule { details.append(("When", schedule.text)) }
+            if let instruction { details.append(("Task", instruction)) }
+            return ToolConfirmationDetails(
+                title: "Update this automation?",
+                primaryText: name ?? existing?.name ?? "Selected automation",
+                details: details,
+                actionLabel: "Update"
+            )
         case .cancel(let automationID):
             let automation = engine.list().first { $0.id == automationID }
             return ToolConfirmationDetails(
@@ -247,6 +292,21 @@ final class AutomationToolService: AutomationToolExecuting {
                     ? "There are no active automations."
                     : "Found \(automations.count) active automation\(automations.count == 1 ? "" : "s")."),
             ])
+
+        case .update(let automationID, let name, let seconds, let instruction, let schedule):
+            guard let automation = engine.update(
+                id: automationID,
+                name: name,
+                intervalSeconds: seconds,
+                instruction: instruction,
+                schedule: schedule
+            ) else {
+                return .make(
+                    status: "not_found",
+                    message: "That automation no longer exists. List automations again to get a current ID."
+                )
+            }
+            return automationResult(automation, status: "updated", message: "Updated ‘\(automation.name)’.")
 
         case .cancel(let automationID):
             guard let automation = engine.remove(id: automationID) else {

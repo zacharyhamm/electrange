@@ -27,9 +27,22 @@
 		DD0000000000000000000002 /* electragneTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = electragneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3FEXC0000000000000000001 /* Exceptions for "electragne" folder in "electragne" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3F53307C2F32F272003EA740 /* electragne */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		3F53307F2F32F272003EA740 /* electragne */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				3FEXC0000000000000000001 /* Exceptions for "electragne" folder in "electragne" target */,
+			);
 			path = electragne;
 			sourceTree = "<group>";
 		};

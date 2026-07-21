@@ -228,6 +228,20 @@ nonisolated enum ChatToolRegistry {
             initialStatus: "Reading automations…", executionStatus: "Reading automations…"
         ),
         definition(
+            "update_automation", family: .automations,
+            description: "Update a background automation after confirmation. Only the provided fields change; providing any window or day argument replaces the whole schedule. Use list_automations first to obtain its ID.",
+            properties: [
+                "automationID": property(.string, "Opaque automation ID returned by create_automation or list_automations."),
+                "name": property(.string, "New short human-readable name for the automation."),
+                "intervalSeconds": property(.number, "New whole-number run interval from 60 to 604800 seconds."),
+                "instruction": property(.string, "New task to perform each run, phrased as an instruction, including what makes a result worth notifying the owner about."),
+                "windowStart": property(.string, "New local start time in 24-hour HH:mm format. Requires windowEnd."),
+                "windowEnd": property(.string, "New local end time in 24-hour HH:mm format. Requires windowStart; an earlier time means overnight."),
+                "activeDays": property(.string, "New comma-separated days when runs may start: mon,tue,wed,thu,fri,sat,sun. For overnight windows, the start day owns the after-midnight hours."),
+            ], required: ["automationID"], initialStatus: "Confirm automation…",
+            executionStatus: "Updating automations…"
+        ),
+        definition(
             "cancel_automation", family: .automations,
             description: "Cancel a background automation after confirmation. Use list_automations first to obtain its ID.",
             properties: [

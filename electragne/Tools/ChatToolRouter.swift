@@ -57,35 +57,38 @@ final class ChatToolRouter {
                 confirm: automations.confirmationDetails(for:),
                 execute: automations.execute(_:)
             ),
+            // Closure literals rather than method references: an unapplied
+            // method on an existential is a non-Sendable function value, which
+            // warns when converted to the adapter's @MainActor parameters.
             .reminders: ToolAdapter.sync(
                 parse: ReminderToolRequest.init(toolCall:),
-                confirm: reminderExecutor.confirmationDetails(for:),
-                execute: reminderExecutor.execute(_:)
+                confirm: { reminderExecutor.confirmationDetails(for: $0) },
+                execute: { await reminderExecutor.execute($0) }
             ),
             .notes: ToolAdapter.sync(
                 parse: NoteToolRequest.init(toolCall:),
-                confirm: notesExecutor.confirmationDetails(for:),
-                execute: notesExecutor.execute(_:)
+                confirm: { notesExecutor.confirmationDetails(for: $0) },
+                execute: { await notesExecutor.execute($0) }
             ),
             .desktop: ToolAdapter.sync(
                 parse: DesktopToolRequest.init(toolCall:),
-                confirm: desktopExecutor.confirmationDetails(for:),
-                execute: desktopExecutor.execute(_:)
+                confirm: { desktopExecutor.confirmationDetails(for: $0) },
+                execute: { await desktopExecutor.execute($0) }
             ),
             .timers: ToolAdapter.sync(
                 parse: TimerToolRequest.init(toolCall:),
-                confirm: timerExecutor.confirmationDetails(for:),
-                execute: timerExecutor.execute(_:)
+                confirm: { timerExecutor.confirmationDetails(for: $0) },
+                execute: { await timerExecutor.execute($0) }
             ),
             .slack: ToolAdapter.sync(
                 parse: { try SlackToolRequest(toolCall: $0) },
-                confirm: slack.confirmationDetails(for:),
-                execute: slack.execute(_:)
+                confirm: { slack.confirmationDetails(for: $0) },
+                execute: { await slack.execute($0) }
             ),
             .linear: ToolAdapter.sync(
                 parse: LinearToolRequest.init(toolCall:),
-                confirm: linear.confirmationDetails(for:),
-                execute: linear.execute(_:)
+                confirm: { linear.confirmationDetails(for: $0) },
+                execute: { await linear.execute($0) }
             ),
             // Google families prepare asynchronously: the confirmation card
             // may need a fetch first.
