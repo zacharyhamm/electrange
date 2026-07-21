@@ -155,6 +155,21 @@ enum UserPreferences {
         defaults.bool(forKey: dobbsUseProxyKey)
     }
 
+    // MARK: LED Sign (MatrixPortal M4)
+
+    nonisolated static let ledSignEndpointKey = "ledSignEndpoint"
+    nonisolated static let ledSignUseProxyKey = "ledSignUseProxy"
+
+    /// The LED sign host or host:port from Settings, or nil when unset/blank
+    /// (feature off).
+    nonisolated static func ledSignEndpoint(in defaults: UserDefaults = .standard) -> String? {
+        trimmed(defaults.string(forKey: ledSignEndpointKey))
+    }
+
+    nonisolated static func ledSignUseProxy(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: ledSignUseProxyKey)
+    }
+
     // MARK: Ollama base URL (points at a local or tailnet Ollama server)
 
     nonisolated static let ollamaBaseURLKey = "ollamaBaseURL"

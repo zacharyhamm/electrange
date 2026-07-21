@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import os
 
@@ -42,6 +43,7 @@ struct CalendarReminderTimerScheduler: CalendarReminderScheduling {
 final class CalendarReminderMonitor {
     static let pollInterval: TimeInterval = 15 * 60
     static let leadTime: TimeInterval = 3 * 60
+    static let fetchRetryDelay: TimeInterval = 20
     static let firedStorageKey = "calendarReminderFiredOccurrences"
 
     private struct ScheduledReminder {
@@ -66,7 +68,11 @@ final class CalendarReminderMonitor {
     private var scheduled: [String: ScheduledReminder] = [:]
     private var fired: Set<String>
     private var started = false
-    var onReminder: (CalendarEventDetails) -> Void = { _ in }
+    private var activity: (any NSObjectProtocol)?
+    private var wakeObserver: (any NSObjectProtocol)?
+    /// Delivers the reminder; returns whether it actually reached the owner.
+    /// Undelivered occurrences stay unfired so later polls retry them.
+    var onReminder: (CalendarEventDetails) async -> Bool = { _ in true }
 
     var isMonitoring: Bool { started }
 
@@ -100,6 +106,19 @@ final class CalendarReminderMonitor {
     func start() {
         guard !started else { return }
         started = true
+        // App Nap defers main-runloop timers in an idle menu-bar app, which
+        // makes the lead-time timer fire after the meeting already started.
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep,
+            reason: "Calendar meeting reminders"
+        )
+        // Timers do not fire during system sleep; re-evaluate on wake so a
+        // meeting now inside the lead time still gets its reminder.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.refresh() }
+        }
         Task { await refresh() }
         poller.start(interval: Self.pollInterval) { [weak self] in
             Task { await self?.refresh() }
@@ -146,7 +165,10 @@ final class CalendarReminderMonitor {
         scheduled[event.id] = ScheduledReminder(start: start, summary: event.summary, timer: timer)
     }
 
-    private func validateAndFire(eventID: String, expectedStart: Date) async {
+    private func validateAndFire(
+        eventID: String, expectedStart: Date, retriesLeft: Int = 1
+    ) async {
+        let summary = scheduled[eventID]?.summary
         if scheduled[eventID]?.start == expectedStart {
             scheduled[eventID] = nil
         }
@@ -162,11 +184,30 @@ final class CalendarReminderMonitor {
                 return
             }
             guard !hasFired(fresh) else { return }
-            onReminder(fresh)
-            fired.insert(occurrenceKey(fresh))
-            saveFired()
+            if await onReminder(fresh) {
+                fired.insert(occurrenceKey(fresh))
+                saveFired()
+            } else {
+                Log.calendar.error("Reminder for ‘\(fresh.summary, privacy: .public)’ was not delivered; leaving it eligible for retry")
+            }
         } catch {
             Log.calendar.error("Calendar reminder validation failed: \(error.localizedDescription, privacy: .public)")
+            // A network blip exactly at fire time would otherwise silently
+            // drop the reminder; retry once while the meeting hasn't started.
+            guard retriesLeft > 0, expectedStart > now() else { return }
+            let timer = scheduler.schedule(
+                at: now().addingTimeInterval(Self.fetchRetryDelay)
+            ) { [weak self] in
+                Task {
+                    await self?.validateAndFire(
+                        eventID: eventID, expectedStart: expectedStart,
+                        retriesLeft: retriesLeft - 1
+                    )
+                }
+            }
+            scheduled[eventID] = ScheduledReminder(
+                start: expectedStart, summary: summary ?? "", timer: timer
+            )
         }
     }
 

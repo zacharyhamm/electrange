@@ -65,6 +65,29 @@ struct SlackToolRequestTests {
         #expect(request == .channelMessages(channel: "ops", from: nil, to: nil))
     }
 
+    @Test func parsesMessagesSinceWithOptionalChannel() throws {
+        let since = "2026-07-21T15:30:00.123Z"
+        #expect(try SlackToolRequest(toolCall: call("get_slack_messages_since", [
+            "since": .string(since), "channel": .string("D1"),
+        ])) == .messagesSince(since: ToolDate.timestamp(since)!, channel: "D1"))
+        #expect(try SlackToolRequest(toolCall: call("get_slack_messages_since", [
+            "since": .string("2026-07-21T15:30:00Z"),
+        ])) == .messagesSince(
+            since: ToolDate.timestamp("2026-07-21T15:30:00Z")!, channel: nil
+        ))
+    }
+
+    @Test func rejectsInvalidMessagesSinceTimestamp() {
+        #expect(throws: SlackToolError.missingArgument("since")) {
+            try SlackToolRequest(toolCall: call("get_slack_messages_since", [:]))
+        }
+        #expect(throws: SlackToolError.invalidTimestamp("yesterday")) {
+            try SlackToolRequest(toolCall: call("get_slack_messages_since", [
+                "since": .string("yesterday"),
+            ]))
+        }
+    }
+
     @Test func parsesThreadUsersPermalinkAndPost() throws {
         #expect(try SlackToolRequest(toolCall: call("get_slack_thread", [
             "channelID": .string("C01"), "threadTS": .string("1.5"),

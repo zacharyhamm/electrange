@@ -11,6 +11,7 @@ import Foundation
 
 nonisolated enum SlackToolRequest: Equatable, Sendable {
     case search(query: String, limit: Int)
+    case messagesSince(since: Date, channel: String?)
     /// from/to are half-open bounds resolved from YYYY-MM-DD calendar days in
     /// the owner's time zone: from = start of that day, to = start of the day
     /// AFTER the given (inclusive) end date. nil leaves the bound open.
@@ -40,6 +41,12 @@ nonisolated enum SlackToolRequest: Equatable, Sendable {
                 calendar.date(byAdding: .day, value: 1, to: try Self.day($0, calendar: calendar))!
             }
             self = .channelMessages(channel: try required("channel"), from: from, to: to)
+        case "get_slack_messages_since":
+            let raw = try required("since")
+            guard let since = ToolDate.timestamp(raw), since.timeIntervalSince1970 > 0 else {
+                throw SlackToolError.invalidTimestamp(raw)
+            }
+            self = .messagesSince(since: since, channel: args.string("channel"))
         case "get_slack_thread":
             self = .thread(channelID: try required("channelID"), threadTS: try required("threadTS"))
         case "list_slack_users":
@@ -73,6 +80,7 @@ nonisolated enum SlackToolError: LocalizedError, Equatable {
     case missingArgument(String)
     case invalidLimit
     case invalidDate(String)
+    case invalidTimestamp(String)
 
     var errorDescription: String? {
         switch self {
@@ -80,6 +88,7 @@ nonisolated enum SlackToolError: LocalizedError, Equatable {
         case .missingArgument(let name): "The ‘\(name)’ argument is required."
         case .invalidLimit: "Slack result limit must be a whole number from 1 to 50."
         case .invalidDate(let raw): "‘\(raw)’ is not a valid YYYY-MM-DD date."
+        case .invalidTimestamp(let raw): "‘\(raw)’ is not a valid RFC 3339 timestamp after 1970."
         }
     }
 }
@@ -128,6 +137,13 @@ final class SlackToolService: SlackToolExecuting {
             case .search(let query, let limit):
                 let hits = try await DobbsClient.search(settings, query: query, limit: limit)
                 return Self.result(messages: hits, emptyNote: "No archived Slack messages matched.")
+            case .messagesSince(let since, let channel):
+                let messages = try await DobbsClient.messagesSince(
+                    settings, since: Self.unixNanos(since), channel: channel
+                )
+                return Self.result(
+                    messages: messages, emptyNote: "No newer archived Slack messages."
+                )
             case .channelMessages(let channel, let from, let to):
                 let messages = try await DobbsClient.conversationRange(
                     settings, channel: channel,

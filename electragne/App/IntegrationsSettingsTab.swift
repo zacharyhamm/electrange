@@ -12,6 +12,9 @@ struct IntegrationsSettingsTab: View {
     @AppStorage(UserPreferences.socksProxyEndpointKey)
     private var socksProxyEndpoint = UserPreferences.defaultSOCKSProxyEndpoint
 
+    @AppStorage(UserPreferences.ledSignEndpointKey) private var ledSignEndpoint = ""
+    @AppStorage(UserPreferences.ledSignUseProxyKey) private var ledSignUseProxy = false
+
     @AppStorage(UserPreferences.dobbsEndpointKey) private var dobbsEndpoint = ""
     @AppStorage(UserPreferences.dobbsWorkspaceKey) private var dobbsWorkspace = ""
     @AppStorage(UserPreferences.dobbsUseProxyKey) private var dobbsUseProxy = false
@@ -40,6 +43,20 @@ struct IntegrationsSettingsTab: View {
                     TextField(UserPreferences.defaultSOCKSProxyEndpoint, text: $socksProxyEndpoint)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 320)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("LED Sign")
+                        .font(.headline)
+                    Text("Shows meeting reminders and pet messages on a MatrixPortal LED sign. Leave the endpoint blank to disable.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("host or host:port, e.g. 192.168.1.50", text: $ledSignEndpoint)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 320)
+                    Toggle("Route via Tailscale proxy", isOn: $ledSignUseProxy)
                 }
 
                 Divider()

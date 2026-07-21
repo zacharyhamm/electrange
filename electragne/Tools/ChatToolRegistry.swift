@@ -19,6 +19,7 @@ nonisolated enum ChatToolFamily: Equatable, Sendable {
     case status
     case memory
     case automations
+    case ledSign
 }
 
 nonisolated enum ChatToolParameterType: String, Equatable, Sendable {
@@ -250,6 +251,22 @@ nonisolated enum ChatToolRegistry {
             executionStatus: "Updating automations…"
         ),
         definition(
+            "send_led_sign", family: .ledSign,
+            description: "Display a short message on the owner's LED matrix sign. Text must be printable ASCII, at most 80 characters.",
+            properties: [
+                "text": property(.string, "Required message text, printable ASCII, at most 80 characters."),
+                "duration": property(.number, "Optional display duration in seconds from 1 to 60. Default 10."),
+                "animation": property(.string, "Optional animation: static, scroll (default), blink, page, typewriter, or slide."),
+                "icon": property(.string, "Optional icon: alert, check, heart, smile, x, up, down, bell, question, clock, mail, or zap."),
+                "color": property(.string, "Optional text color as #RRGGBB or a named color: red, orange, amber, yellow, green, cyan, blue, purple, pink, white."),
+                "icon_color": property(.string, "Optional icon color, same formats as color. Defaults to color."),
+                "color_mode": property(.string, "Optional color effect: solid (default), rainbow, or pulse."),
+                "mode": property(.string, "Optional full-screen animation before and between passes: panic, celebrate, alarm, rain, wipe, or siren."),
+                "priority": property(.boolean, "Set true to preempt the currently displayed message."),
+            ], required: ["text"], initialStatus: "Updating the LED sign…",
+            executionStatus: "Updating the LED sign…"
+        ),
+        definition(
             "report_app_status", family: .status,
             description: "Report Electragne's own internal scheduling state: active countdown timers and which calendar events it will proactively notify the owner about.",
             initialStatus: "Checking internal state…", executionStatus: "Checking internal state…"
@@ -352,6 +369,15 @@ nonisolated enum ChatToolRegistry {
                 "from": property(.string, "Optional inclusive start date as YYYY-MM-DD in the owner's time zone."),
                 "to": property(.string, "Optional inclusive end date as YYYY-MM-DD in the owner's time zone."),
             ], required: ["channel"], initialStatus: "Reading Slack…",
+            executionStatus: "Reading Slack…"
+        ),
+        definition(
+            "get_slack_messages_since", family: .slack,
+            description: "Read every archived Slack message strictly newer than a timestamp, across the workspace or optionally in one channel or DM.",
+            properties: [
+                "since": property(.string, "Required RFC 3339 timestamp with UTC offset."),
+                "channel": property(.string, "Optional channel or DM name or ID; omit to include all conversations."),
+            ], required: ["since"], initialStatus: "Reading Slack…",
             executionStatus: "Reading Slack…"
         ),
         definition(

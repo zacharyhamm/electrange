@@ -43,7 +43,7 @@ final class AppModel {
         }
     }
 
-    func startCalendarMonitoring(onReminder: @escaping (CalendarEventDetails) -> Void) {
+    func startCalendarMonitoring(onReminder: @escaping (CalendarEventDetails) async -> Bool) {
         calendarReminderMonitor.onReminder = onReminder
         calendarReminderMonitor.start()
     }
@@ -53,36 +53,59 @@ final class AppModel {
         automationEngine.start()
     }
 
-    /// Starts the reminder conversation once the chat surface is ready.
-    func startCalendarReminderConversation(_ event: CalendarEventDetails, attempts: Int = 10) {
-        startProactiveConversation(ChatBubbleWindowController.ProactivePrompt(
+    /// Delivers a calendar reminder to every configured surface: the LED sign
+    /// (independent of chat state) and the proactive chat bubble. True when at
+    /// least one surface got it, so the monitor only marks delivered
+    /// occurrences as fired.
+    func deliverCalendarReminder(_ event: CalendarEventDetails) async -> Bool {
+        async let sign = sendCalendarReminderToLEDSign(event)
+        let bubbled = await startProactiveConversation(ChatBubbleWindowController.ProactivePrompt(
             title: event.summary,
             prompt: event.reminderPrompt,
             joinURL: event.joinURL
-        ), attempts: attempts)
+        ))
+        return await sign || bubbled
+    }
+
+    private func sendCalendarReminderToLEDSign(_ event: CalendarEventDetails) async -> Bool {
+        guard UserPreferences.ledSignEndpoint() != nil else { return false }
+        do {
+            try await LEDSignClient.send(try LEDSignMessage(
+                text: "\(event.summary) in 3 min",
+                duration: 30,
+                icon: "clock",
+                priority: true
+            ))
+            return true
+        } catch {
+            Log.calendar.error("LED sign reminder failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     /// Starts a machine-initiated conversation once the chat surface is ready.
     /// summonToChat's state transition (or the pet window itself, during
     /// launch) may lag; retry rather than silently dropping the prompt.
+    /// Returns whether the bubble was actually presented.
+    @discardableResult
     func startProactiveConversation(
         _ prompt: ChatBubbleWindowController.ProactivePrompt,
         attempts: Int = 10
-    ) {
-        guard let window = petViewModel.petWindow, petViewModel.state.isChatting else {
-            if attempts > 1 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.startProactiveConversation(prompt, attempts: attempts - 1)
-                }
-            } else {
-                Log.calendar.error("Dropping proactive conversation ‘\(prompt.title, privacy: .public)’: chat never became available")
+    ) async -> Bool {
+        for attempt in 1...attempts {
+            if let window = petViewModel.petWindow, petViewModel.state.isChatting {
+                chatBubbleController.present(
+                    anchoredTo: window,
+                    onDismiss: { [petViewModel] in petViewModel.dismissChat() }
+                )
+                chatBubbleController.startProactiveConversation(prompt)
+                return true
             }
-            return
+            if attempt < attempts {
+                try? await Task.sleep(for: .seconds(0.5))
+            }
         }
-        chatBubbleController.present(
-            anchoredTo: window,
-            onDismiss: { [petViewModel] in petViewModel.dismissChat() }
-        )
-        chatBubbleController.startProactiveConversation(prompt)
+        Log.calendar.error("Dropping proactive conversation ‘\(prompt.title, privacy: .public)’: chat never became available")
+        return false
     }
 }

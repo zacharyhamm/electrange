@@ -31,6 +31,7 @@ final class ChatToolRouter {
         slackExecutor: (any SlackToolExecuting)? = nil,
         linearExecutor: (any LinearToolExecuting)? = nil,
         webSearchExecutor: (any ToolExecuting)? = nil,
+        ledSignExecutor: LEDSignToolService? = nil,
         mcpExecutor: (any ToolExecuting)? = nil,
         calendarMonitor: CalendarReminderMonitor? = nil,
         statusExecutor: (any ToolExecuting)? = nil,
@@ -106,6 +107,14 @@ final class ChatToolRouter {
                     execute: { await calendar.execute(prepared) }
                 )
             },
+            .ledSign: {
+                let ledSign = ledSignExecutor ?? LEDSignToolService()
+                return ToolAdapter.sync(
+                    parse: LEDSignToolRequest.init(toolCall:),
+                    confirm: { _ in nil },
+                    execute: { await ledSign.execute($0) }
+                )
+            }(),
             .webSearch: webSearchExecutor ?? WebSearchExecutor(),
             .status: statusExecutor ?? AppStatusExecutor(monitor: calendarMonitor),
             .memory: memoryExecutor,

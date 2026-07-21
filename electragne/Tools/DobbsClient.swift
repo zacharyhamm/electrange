@@ -142,6 +142,24 @@ nonisolated enum DobbsClient {
         return result.messages ?? []
     }
 
+    /// Every archived message strictly newer than since, oldest-first. An
+    /// empty channel includes all channels and DMs.
+    static func messagesSince(
+        _ settings: DobbsSettings, since: Int64, channel: String?
+    ) async throws -> [DobbsMessage] {
+        struct Params: Encodable {
+            let since: Int64
+            let channel: String?
+        }
+        struct Result: Decodable {
+            let messages: [DobbsMessage]?
+        }
+        let result: Result = try await call(
+            settings, method: "messages_since", params: Params(since: since, channel: channel)
+        )
+        return result.messages ?? []
+    }
+
     /// A whole thread (root + replies) from the archive, oldest-first.
     static func conversation(
         _ settings: DobbsSettings, channelID: String, threadTS: String, limit: Int

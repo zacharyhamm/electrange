@@ -16,7 +16,7 @@ struct CalendarReminderMonitorTests {
             now: { now }, calendar: utcCalendar
         )
         var delivered: [CalendarEventDetails] = []
-        monitor.onReminder = { delivered.append($0) }
+        monitor.onReminder = { delivered.append($0); return true }
 
         await monitor.refresh()
         #expect(scheduler.entries.count == 1)
@@ -43,7 +43,7 @@ struct CalendarReminderMonitorTests {
             now: { now }, calendar: utcCalendar
         )
         var deletedDelivered = false
-        deletionMonitor.onReminder = { _ in deletedDelivered = true }
+        deletionMonitor.onReminder = { _ in deletedDelivered = true; return true }
         await deletionMonitor.refresh()
         deletionScheduler.fire(0)
         await Task.yield()
@@ -62,7 +62,7 @@ struct CalendarReminderMonitorTests {
             now: { now }, calendar: utcCalendar
         )
         var delivered = 0
-        monitor.onReminder = { _ in delivered += 1 }
+        monitor.onReminder = { _ in delivered += 1; return true }
 
         await monitor.refresh()
         await monitor.refresh()
@@ -108,12 +108,77 @@ struct CalendarReminderMonitorTests {
             now: { now }, calendar: utcCalendar
         )
         var delivered = 0
-        monitor.onReminder = { _ in delivered += 1 }
+        monitor.onReminder = { _ in delivered += 1; return true }
 
         await monitor.refresh()
         await monitor.refresh()
 
         #expect(delivered == 1)
+    }
+
+    @Test func retriesAnUndeliveredReminderOnTheNextRefresh() async {
+        let now = Date(timeIntervalSince1970: 1_768_000_000)
+        let upcoming = event(start: now.addingTimeInterval(60))
+        let provider = ReminderEventProvider(snapshot: [upcoming], current: upcoming)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let monitor = CalendarReminderMonitor(
+            events: provider, scheduler: ReminderScheduler(), defaults: defaults,
+            now: { now }, calendar: utcCalendar
+        )
+        var attempts = 0
+        var deliverable = false
+        monitor.onReminder = { _ in attempts += 1; return deliverable }
+
+        await monitor.refresh()
+        #expect(attempts == 1)
+        #expect(defaults.stringArray(forKey: CalendarReminderMonitor.firedStorageKey) ?? [] == [])
+
+        deliverable = true
+        await monitor.refresh()
+        #expect(attempts == 2)
+        #expect(defaults.stringArray(forKey: CalendarReminderMonitor.firedStorageKey)?.count == 1)
+
+        await monitor.refresh()
+        #expect(attempts == 2)
+    }
+
+    @Test func retriesOnceWhenTheFireTimeFetchFails() async {
+        let now = Date(timeIntervalSince1970: 1_768_000_000)
+        let upcoming = event(start: now.addingTimeInterval(3_600))
+        let provider = ReminderEventProvider(snapshot: [upcoming], current: upcoming)
+        let scheduler = ReminderScheduler()
+        let monitor = CalendarReminderMonitor(
+            events: provider, scheduler: scheduler,
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            now: { now }, calendar: utcCalendar
+        )
+        var delivered = 0
+        monitor.onReminder = { _ in delivered += 1; return true }
+
+        await monitor.refresh()
+        #expect(scheduler.entries.count == 1)
+
+        provider.currentError = TestError.network
+        scheduler.fire(0)
+        await drainMainActor()
+        #expect(delivered == 0)
+        #expect(scheduler.entries.count == 2)
+        #expect(scheduler.entries[1].date == now.addingTimeInterval(CalendarReminderMonitor.fetchRetryDelay))
+
+        provider.currentError = nil
+        scheduler.fire(1)
+        await drainMainActor()
+        #expect(delivered == 1)
+
+        // The retry is single-shot: a second consecutive failure stops.
+        provider.currentError = TestError.network
+        scheduler.fire(1)
+        await drainMainActor()
+        #expect(scheduler.entries.count == 2)
+    }
+
+    private func drainMainActor() async {
+        for _ in 0..<4 { await Task.yield() }
     }
 
     @Test func exposesScheduledRemindersAsUpcomingSnapshot() async {
@@ -207,10 +272,15 @@ struct CalendarReminderMonitorTests {
     }
 }
 
+private enum TestError: Error {
+    case network
+}
+
 @MainActor
 private final class ReminderEventProvider: CalendarEventProviding {
     var snapshot: [CalendarEventDetails]
     var current: CalendarEventDetails?
+    var currentError: Error?
     var requests: [Range<Date>] = []
 
     init(snapshot: [CalendarEventDetails], current: CalendarEventDetails?) {
@@ -222,7 +292,10 @@ private final class ReminderEventProvider: CalendarEventProviding {
         requests.append(start..<end)
         return snapshot
     }
-    func event(id: String) async throws -> CalendarEventDetails? { current }
+    func event(id: String) async throws -> CalendarEventDetails? {
+        if let currentError { throw currentError }
+        return current
+    }
 }
 
 @MainActor

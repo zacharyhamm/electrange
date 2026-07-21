@@ -20,7 +20,7 @@ struct ElectragneApp: App {
                 .onAppear {
                     appDelegate.appModel = appModel
                     appModel.startCalendarMonitoring { [weak appDelegate] event in
-                        appDelegate?.presentCalendarReminder(event)
+                        await appDelegate?.presentCalendarReminder(event) ?? false
                     }
                     appModel.startAutomations { [weak appDelegate] name, payload in
                         appDelegate?.presentAutomationNotice(name: name, payload: payload)

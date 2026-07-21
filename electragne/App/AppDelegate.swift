@@ -197,17 +197,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         appModel?.petViewModel.summonToChat()
     }
 
-    func presentCalendarReminder(_ event: CalendarEventDetails) {
+    func presentCalendarReminder(_ event: CalendarEventDetails) async -> Bool {
         summonPetToChat()
-        DispatchQueue.main.async { [weak self] in
-            self?.appModel?.startCalendarReminderConversation(event)
-        }
+        return await appModel?.deliverCalendarReminder(event) ?? false
     }
 
     func presentAutomationNotice(name: String, payload: String) {
         summonPetToChat()
-        DispatchQueue.main.async { [weak self] in
-            self?.appModel?.startProactiveConversation(ChatBubbleWindowController.ProactivePrompt(
+        Task { [weak self] in
+            await self?.appModel?.startProactiveConversation(ChatBubbleWindowController.ProactivePrompt(
                 title: name,
                 prompt: """
                 My background automation ‘\(name)’ flagged something. Its finding:
