@@ -11,6 +11,7 @@ final class AutomationEngine {
     private let store: AutomationStore
     private let poller = TimerDriver()
     private let now: () -> Date
+    private let calendar: Calendar
     private var running: Set<String> = []
     private var started = false
     var onNotify: (String, String) -> Void = { _, _ in }
@@ -19,9 +20,14 @@ final class AutomationEngine {
     /// Injectable for tests; nil runs a real headless LLM turn.
     var runner: ((AutomationRecord) async -> String)?
 
-    init(defaults: UserDefaults = .standard, now: @escaping () -> Date = Date.init) {
+    init(
+        defaults: UserDefaults = .standard,
+        now: @escaping () -> Date = Date.init,
+        calendar: Calendar = .autoupdatingCurrent
+    ) {
         self.store = AutomationStore(defaults: defaults)
         self.now = now
+        self.calendar = calendar
     }
 
     func start() {
@@ -32,12 +38,18 @@ final class AutomationEngine {
         }
     }
 
-    func add(name: String, intervalSeconds: Int, instruction: String) -> AutomationRecord {
+    func add(
+        name: String,
+        intervalSeconds: Int,
+        instruction: String,
+        schedule: AutomationSchedule? = nil
+    ) -> AutomationRecord {
         let automation = AutomationRecord(
             id: UUID().uuidString,
             name: name,
             intervalSeconds: intervalSeconds,
             instruction: instruction,
+            schedule: schedule,
             lastRun: nil
         )
         store.save(store.load() + [automation])
@@ -59,6 +71,7 @@ final class AutomationEngine {
     func tick() {
         let current = now()
         for automation in store.load() where !running.contains(automation.id) {
+            guard automation.schedule?.allows(current, calendar: calendar) ?? true else { continue }
             let due = (automation.lastRun ?? .distantPast)
                 .addingTimeInterval(TimeInterval(automation.intervalSeconds))
             if current >= due { run(automation) }

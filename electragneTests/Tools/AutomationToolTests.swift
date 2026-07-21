@@ -11,17 +11,72 @@ struct AutomationToolTests {
         ])) == .create(
             name: "Slack watch",
             intervalSeconds: 120,
-            instruction: "Check #ops for anything urgent."
+            instruction: "Check #ops for anything urgent.",
+            schedule: nil
         ))
 
         #expect(try AutomationToolRequest(toolCall: call("create_automation", [
             "intervalSeconds": .number(60),
             "instruction": .string("Watch the channel."),
-        ])) == .create(name: "Automation", intervalSeconds: 60, instruction: "Watch the channel."))
+        ])) == .create(name: "Automation", intervalSeconds: 60, instruction: "Watch the channel.", schedule: nil))
         #expect(try AutomationToolRequest(toolCall: call("list_automations")) == .list)
         #expect(try AutomationToolRequest(toolCall: call("cancel_automation", [
             "automationID": .string(" id-1 "),
         ])) == .cancel(automationID: "id-1"))
+    }
+
+    @Test func parsesAndValidatesAutomationSchedules() throws {
+        #expect(try AutomationToolRequest(toolCall: call("create_automation", [
+            "intervalSeconds": .number(300),
+            "instruction": .string("Watch."),
+            "windowStart": .string("08:00"),
+            "windowEnd": .string("18:00"),
+            "activeDays": .string("mon, tue, wed, thu, fri"),
+        ])) == .create(
+            name: "Automation",
+            intervalSeconds: 300,
+            instruction: "Watch.",
+            schedule: AutomationSchedule(
+                startMinute: 480,
+                endMinute: 1_080,
+                weekdays: [2, 3, 4, 5, 6]
+            )
+        ))
+
+        for arguments: [String: ChatToolValue] in [
+            ["windowStart": .string("08:00")],
+            ["windowStart": .string("8:00"), "windowEnd": .string("18:00")],
+            ["windowStart": .string("08:00"), "windowEnd": .string("08:00")],
+        ] {
+            #expect(throws: AutomationToolError.invalidWindow) {
+                try AutomationToolRequest(toolCall: call("create_automation", arguments.merging([
+                    "intervalSeconds": .number(300), "instruction": .string("Watch."),
+                ]) { current, _ in current }))
+            }
+        }
+        #expect(throws: AutomationToolError.invalidDays) {
+            try AutomationToolRequest(toolCall: call("create_automation", [
+                "intervalSeconds": .number(300),
+                "instruction": .string("Watch."),
+                "activeDays": .string("weekdays"),
+            ]))
+        }
+    }
+
+    @Test func scheduleAllowsSameDayAndOvernightWindows() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let workday = AutomationSchedule(startMinute: 480, endMinute: 1_080, weekdays: [2, 3, 4, 5, 6])
+        let overnight = AutomationSchedule(startMinute: 1_320, endMinute: 360, weekdays: [2])
+
+        #expect(workday.allows(date(2026, 1, 5, 8, 0, calendar), calendar: calendar))
+        #expect(workday.allows(date(2026, 1, 5, 17, 59, calendar), calendar: calendar))
+        #expect(!workday.allows(date(2026, 1, 5, 18, 0, calendar), calendar: calendar))
+        #expect(!workday.allows(date(2026, 1, 4, 9, 0, calendar), calendar: calendar))
+        #expect(overnight.allows(date(2026, 1, 5, 22, 0, calendar), calendar: calendar))
+        #expect(overnight.allows(date(2026, 1, 6, 5, 59, calendar), calendar: calendar))
+        #expect(!overnight.allows(date(2026, 1, 6, 6, 0, calendar), calendar: calendar))
+        #expect(!overnight.allows(date(2026, 1, 6, 22, 0, calendar), calendar: calendar))
     }
 
     @Test func rejectsInvalidIntervalsAndMissingArguments() {
@@ -61,6 +116,16 @@ struct AutomationToolTests {
         #expect(store.load() == automations)
     }
 
+    @Test func automationStoreDecodesRecordsWithoutSchedules() throws {
+        let suite = "AutomationLegacyTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data(#"[{"id":"one","name":"Watch","intervalSeconds":60,"instruction":"Check."}]"#.utf8), forKey: AutomationStore.storageKey)
+
+        let automation = try #require(AutomationStore(defaults: defaults).load().first)
+        #expect(automation.schedule == nil)
+    }
+
     @Test func engineRunsDueAutomationsAndNotifiesOnPrefix() async throws {
         let suite = "AutomationEngineTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -95,6 +160,33 @@ struct AutomationToolTests {
         await waitUntil { runCount == 2 }
         #expect(runCount == 2)
         #expect(notified.count == 1)
+    }
+
+    @Test func engineRunsAnOverdueAutomationWhenItsWindowOpens() async throws {
+        let suite = "AutomationWindowTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        var current = date(2026, 1, 5, 7, 59, calendar)
+        let engine = AutomationEngine(defaults: defaults, now: { current }, calendar: calendar)
+        var runCount = 0
+        engine.runner = { _ in runCount += 1; return "NOTHING" }
+        _ = engine.add(
+            name: "Workday",
+            intervalSeconds: 60,
+            instruction: "Watch.",
+            schedule: AutomationSchedule(startMinute: 480, endMinute: 1_080, weekdays: [2, 3, 4, 5, 6])
+        )
+
+        engine.tick()
+        await waitUntil { false }
+        #expect(runCount == 0)
+
+        current = date(2026, 1, 5, 8, 0, calendar)
+        engine.tick()
+        await waitUntil { runCount == 1 }
+        #expect(runCount == 1)
     }
 
     @Test func engineRequiresTheExactNotifyPrefix() async throws {
@@ -205,9 +297,11 @@ struct AutomationToolTests {
         let created = await service.execute(.create(
             name: "Slack watch",
             intervalSeconds: 120,
-            instruction: "Check #ops."
+            instruction: "Check #ops.",
+            schedule: AutomationSchedule(startMinute: 480, endMinute: 1_080, weekdays: [2, 3, 4, 5, 6])
         ))
         #expect(created.response["status"]?.stringValue == "created")
+        #expect(created.response["schedule"]?.stringValue == "08:00–18:00 on Mon, Tue, Wed, Thu, Fri")
         let automationID = try #require(created.response["automationID"]?.stringValue)
 
         let listed = await service.execute(.list)
@@ -233,5 +327,18 @@ struct AutomationToolTests {
         _ arguments: [String: ChatToolValue] = [:]
     ) -> ChatToolCall {
         ChatToolCall(id: "test", name: name, arguments: arguments)
+    }
+
+    private func date(
+        _ year: Int,
+        _ month: Int,
+        _ day: Int,
+        _ hour: Int,
+        _ minute: Int,
+        _ calendar: Calendar
+    ) -> Date {
+        calendar.date(from: DateComponents(
+            year: year, month: month, day: day, hour: hour, minute: minute
+        ))!
     }
 }

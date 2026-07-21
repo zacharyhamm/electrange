@@ -216,6 +216,9 @@ nonisolated enum ChatToolRegistry {
                 "name": property(.string, "Short human-readable name for the automation."),
                 "intervalSeconds": property(.number, "Required whole-number run interval from 60 to 604800 seconds."),
                 "instruction": property(.string, "The task to perform each run, phrased as an instruction, including what makes a result worth notifying the owner about. Example: ‘Fetch today's messages in Slack channel #ops and notify me only if something looks urgent or blocking.’"),
+                "windowStart": property(.string, "Optional local start time in 24-hour HH:mm format. Requires windowEnd."),
+                "windowEnd": property(.string, "Optional local end time in 24-hour HH:mm format. Requires windowStart; an earlier time means overnight."),
+                "activeDays": property(.string, "Optional comma-separated days when runs may start: mon,tue,wed,thu,fri,sat,sun. For overnight windows, the start day owns the after-midnight hours."),
             ], required: ["intervalSeconds", "instruction"], initialStatus: "Confirm automation…",
             executionStatus: "Saving automation…"
         ),
