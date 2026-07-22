@@ -284,6 +284,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private func makeAuxiliaryWindow(
         title: String,
         size: NSSize,
+        minSize: NSSize,
         styleMask: NSWindow.StyleMask,
         contentView: NSView
     ) -> NSWindow {
@@ -294,6 +295,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             defer: false
         )
         window.title = title
+        // With sizingOptions = [] the hosting view never constrains the window,
+        // so the window must enforce the SwiftUI content's minimum itself or
+        // the content overflows the frame when the user shrinks it.
+        window.contentMinSize = minSize
         window.isReleasedWhenClosed = false
         window.contentView = contentView
         window.center()
@@ -307,6 +312,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             settingsWindow = makeAuxiliaryWindow(
                 title: "Electragne Settings",
                 size: NSSize(width: 560, height: 520),
+                minSize: NSSize(width: 560, height: 520),
                 styleMask: [.titled, .closable],
                 contentView: hostingView
             )
@@ -326,6 +332,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             memoryBrowserWindow = makeAuxiliaryWindow(
                 title: "Electragne Memories",
                 size: NSSize(width: 760, height: 520),
+                minSize: NSSize(width: 620, height: 400),
                 styleMask: [.titled, .closable, .resizable],
                 contentView: hostingView
             )
@@ -342,6 +349,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             automationBrowserWindow = makeAuxiliaryWindow(
                 title: "Electragne Automations",
                 size: NSSize(width: 900, height: 640),
+                minSize: NSSize(width: 800, height: 500),
                 styleMask: [.titled, .closable, .resizable],
                 contentView: hostingView
             )

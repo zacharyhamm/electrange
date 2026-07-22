@@ -8,60 +8,71 @@ struct AutomationBrowserView: View {
     @State private var runs: [AutomationRunSummary] = []
     @State private var selection: String?
     @State private var creating = false
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var showSidebar = true
 
     init(engine: AutomationEngine, log: LLMLog = .shared) {
         self.engine = engine
         self.log = log
     }
 
+    // HSplitView, not NavigationSplitView: the latter is backed by an
+    // NSSplitViewController that expects to be the root of a SwiftUI window
+    // scene. Inside our manually hosted NSWindow (sizingOptions = []) it is
+    // not bound to the window, so divider drags grow the split view past the
+    // window bounds and the panes slide off-screen.
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            List(selection: $selection) {
-                Section("Scheduled") {
-                    ForEach(automations, id: \.id) { automation in
-                        AutomationLabel(
-                            name: automation.name,
-                            schedule: scheduleText(automation)
-                        )
-                        .tag(activeKey(automation.id))
-                    }
+        VStack(spacing: 0) {
+            header
+            Divider()
+            HSplitView {
+                if showSidebar {
+                    sidebarList
+                        .frame(minWidth: 200, idealWidth: 260, maxWidth: 320)
                 }
-                if !archived.isEmpty {
-                    Section("History") {
-                        ForEach(archived) { automation in
-                            AutomationLabel(name: automation.name, schedule: "No longer scheduled")
-                                .tag(historyKey(automation.automationID))
-                        }
-                    }
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 240, ideal: 280)
-            // The system toggle lives inside the sidebar column, so it (and any
-            // sidebar toolbar items) jump to the detail column when collapsed.
-            // Remove it and pin our own controls to the window toolbar instead.
-            .toolbar(removing: .sidebarToggle)
-        } detail: {
-            detail
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button("Toggle Sidebar", systemImage: "sidebar.leading") {
-                    withAnimation {
-                        columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
-                    }
-                }
-            }
-            ToolbarItem {
-                Button("New Automation", systemImage: "plus") { creating = true }
-            }
-            ToolbarItem {
-                Button("Refresh", systemImage: "arrow.clockwise") { Task { await reload() } }
+                detail
+                    .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 760, minHeight: 500)
+        // 800 = sidebar max (320) + detail min (480: run-history HSplitView 180+300).
+        .frame(minWidth: 800, minHeight: 500)
         .task { await reload() }
         .onChange(of: selection) { _, _ in creating = false }
+    }
+
+    private var header: some View {
+        HStack {
+            Button("Toggle Sidebar", systemImage: "sidebar.leading") {
+                showSidebar.toggle()
+            }
+            Spacer()
+            Button("New Automation", systemImage: "plus") { creating = true }
+            Button("Refresh", systemImage: "arrow.clockwise") { Task { await reload() } }
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.borderless)
+        .padding(8)
+    }
+
+    private var sidebarList: some View {
+        List(selection: $selection) {
+            Section("Scheduled") {
+                ForEach(automations, id: \.id) { automation in
+                    AutomationLabel(
+                        name: automation.name,
+                        schedule: scheduleText(automation)
+                    )
+                    .tag(activeKey(automation.id))
+                }
+            }
+            if !archived.isEmpty {
+                Section("History") {
+                    ForEach(archived) { automation in
+                        AutomationLabel(name: automation.name, schedule: "No longer scheduled")
+                            .tag(historyKey(automation.automationID))
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder private var detail: some View {
