@@ -21,6 +21,7 @@ final class ChatBubbleWindowController {
     private let geminiClient: any ChatClient
     private let openAICompatibleClient: any ChatClient
     private let toolRouter: ChatToolRouter
+    let terminalController: TerminalPanelController?
     private var streamTask: Task<Void, Never>?
     private let confirmationBroker = ConfirmationBroker()
     /// The active conversation; persisted after every exchange and reloaded
@@ -51,6 +52,23 @@ final class ChatBubbleWindowController {
     /// view-model mutation the stream makes.
     private var streamIsForeground: Bool { streamingChatID == currentChat.id }
 
+    var currentChatID: UUID { currentChat.id }
+    /// User-resized terminal widths, scoped to the lifetime of each live chat session.
+    private var terminalWidths: [UUID: CGFloat] = [:]
+
+    func terminalWidth(for chatID: UUID, initialHeight: CGFloat) -> CGFloat {
+        terminalWidths[chatID]
+            ?? ChatBubblePlacement.preferredTerminalWidth(forHeight: initialHeight)
+    }
+
+    func rememberTerminalWidth(_ width: CGFloat, for chatID: UUID) {
+        terminalWidths[chatID] = width
+    }
+
+    /// Tool calls belong to the stream's chat even if the owner switches
+    /// conversations while the model is working.
+    var toolChatID: UUID { streamingChatID ?? currentChat.id }
+
     private var history: [ChatMessage] {
         get { currentChat.messages }
         set { currentChat.messages = newValue }
@@ -66,8 +84,10 @@ final class ChatBubbleWindowController {
         openAICompatibleClient: any ChatClient = OpenAICompatibleClient(),
         toolRouter: ChatToolRouter,
         chatStore: ChatStore = ChatStore(),
-        memoryEngine: MemoryEngine
+        memoryEngine: MemoryEngine,
+        terminalController: TerminalPanelController? = nil
     ) {
+        self.terminalController = terminalController
         self.ollamaClient = ollamaClient
         self.geminiClient = geminiClient
         self.openAICompatibleClient = openAICompatibleClient
@@ -103,7 +123,8 @@ final class ChatBubbleWindowController {
                 onSelectChat: { [weak self] id in self?.switchToChat(id: id) },
                 onSelectModel: { [weak self] id in self?.selectModel(id) },
                 onConfirmTool: { [weak self] in self?.resolveToolConfirmation(approved: true) },
-                onCancelTool: { [weak self] in self?.resolveToolConfirmation(approved: false) }
+                onCancelTool: { [weak self] in self?.resolveToolConfirmation(approved: false) },
+                onCloseTerminal: { [weak self] in self?.closeTerminal() }
             )
             refreshChatList()
             refreshModels()
@@ -118,6 +139,52 @@ final class ChatBubbleWindowController {
             setExpanded(true)
         }
         panel?.makeKeyAndOrderFront(nil)
+        restoreTerminal()
+    }
+
+    /// Shows the terminal column for the current chat, creating its session
+    /// on first use. False when the bubble isn't on screen (the tool's guard).
+    @discardableResult
+    func showTerminal() -> Bool {
+        guard panel != nil, let terminalController else { return false }
+        model.terminalView = terminalController.view(for: currentChat.id)
+        setExpanded(true)
+        return true
+    }
+
+    func writeTerminal(_ input: TerminalWriteInput) -> Bool {
+        guard panel != nil, let terminalController else { return false }
+        let chatID = toolChatID
+        guard terminalController.send(input, for: chatID) else { return false }
+        if chatID == currentChat.id {
+            model.terminalView = terminalController.view(for: chatID)
+            setExpanded(true)
+        }
+        return true
+    }
+
+    func readTerminal(maxLines: Int) -> TerminalReadResult? {
+        terminalController?.read(maxLines: maxLines, for: toolChatID)
+    }
+
+    /// The user closed the terminal column; the shell stays alive and the
+    /// bubble shrinks back to the chat column.
+    private func closeTerminal() {
+        terminalController?.markClosed(currentChat.id)
+        model.terminalView = nil
+        setExpanded(true)
+    }
+
+    /// Attaches the current chat's terminal (and only it), if wanted, and
+    /// sizes the bubble for whichever columns are showing.
+    private func restoreTerminal() {
+        guard panel != nil else { return }
+        let hadTerminal = model.terminalView != nil
+        let wants = terminalController?.wantsVisible(for: currentChat.id) == true
+        model.terminalView = wants ? terminalController?.view(for: currentChat.id) : nil
+        if wants || hadTerminal {
+            setExpanded(true)
+        }
     }
 
     func dismiss(notify: Bool) {
@@ -534,6 +601,7 @@ final class ChatBubbleWindowController {
         attachStreamIfActive()
         refreshChatList()
         setExpanded(true)
+        restoreTerminal()
     }
 
     deinit {

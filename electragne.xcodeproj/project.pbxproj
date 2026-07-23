@@ -10,6 +10,7 @@
 		EF0000000000000000000001 /* AppAuth in Frameworks */ = {isa = PBXBuildFile; productRef = EF0000000000000000000003 /* AppAuth */; };
 		EE0000000000000000000001 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = EE0000000000000000000003 /* SwiftMath */; };
 		EA0000000000000000000001 /* MCP in Frameworks */ = {isa = PBXBuildFile; productRef = EA0000000000000000000003 /* MCP */; };
+		EB0000000000000000000001 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = EB0000000000000000000003 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,6 +62,7 @@
 				EF0000000000000000000001 /* AppAuth in Frameworks */,
 				EE0000000000000000000001 /* SwiftMath in Frameworks */,
 				EA0000000000000000000001 /* MCP in Frameworks */,
+				EB0000000000000000000001 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -115,6 +117,7 @@
 				EF0000000000000000000003 /* AppAuth */,
 				EE0000000000000000000003 /* SwiftMath */,
 				EA0000000000000000000003 /* MCP */,
+				EB0000000000000000000003 /* SwiftTerm */,
 			);
 			productName = electragne;
 			productReference = 3F53307D2F32F272003EA740 /* electragne.app */;
@@ -177,6 +180,7 @@
 				EF0000000000000000000002 /* XCRemoteSwiftPackageReference "AppAuth-iOS" */,
 				EE0000000000000000000002 /* XCRemoteSwiftPackageReference "SwiftMath" */,
 				EA0000000000000000000002 /* XCRemoteSwiftPackageReference "swift-sdk" */,
+				EB0000000000000000000002 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 			);
 			projectDirPath = "";
 			projectRoot = "";
@@ -254,6 +258,14 @@
 				minimumVersion = 0.12.1;
 			};
 		};
+		EB0000000000000000000002 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.2.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -271,6 +283,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = EA0000000000000000000002 /* XCRemoteSwiftPackageReference "swift-sdk" */;
 			productName = MCP;
+		};
+		EB0000000000000000000003 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EB0000000000000000000002 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
 		};
 /* End XCSwiftPackageProductDependency section */
 
@@ -402,7 +419,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = NO;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
 				LM_FILTER_WARNINGS = YES;
 				LM_FORCE_LINK_GENERATION = YES;
@@ -442,7 +459,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = NO;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
 				LM_FILTER_WARNINGS = YES;
 				LM_FORCE_LINK_GENERATION = YES;

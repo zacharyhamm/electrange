@@ -12,35 +12,39 @@ nonisolated enum ChatBubbleTailEdge: Equatable {
 }
 
 /// Pure placement result so screen-edge behavior can be unit tested without a window.
-struct ChatBubblePlacement: Equatable {
+nonisolated struct ChatBubblePlacement: Equatable {
     static let defaultSize = CGSize(width: 320, height: 140)
     static let expandedSize = CGSize(width: 340, height: 380)
     static let minPanelSize = CGSize(width: 320, height: 140)
-    static let maxPanelSize = CGSize(width: 720, height: 900)
+    static let maxPanelSize = CGSize(width: 1440, height: 900)
     static let screenMargin: CGFloat = 8
     static let petGap: CGFloat = 4
+    static let terminalLayoutSpacing: CGFloat = 25 // Two 12pt gaps and a 1pt divider.
 
     let origin: CGPoint
+    let size: CGSize
     let tailEdge: ChatBubbleTailEdge
     let tailOffset: CGFloat
 
-    /// The largest bubble that still fits the visible frame with margins and
-    /// leaves room for the pet (plus gap) stacked below it. Never smaller
-    /// than minPanelSize so the panel's min/max stay consistent.
+    /// The largest bubble that fits above the pet inside the visible frame.
     static func maxSize(petFrame: CGRect, visibleFrame: CGRect) -> CGSize {
         CGSize(
-            width: max(
-                minPanelSize.width,
-                min(maxPanelSize.width, visibleFrame.width - 2 * screenMargin)
-            ),
+            width: max(0, min(maxPanelSize.width, visibleFrame.width - 2 * screenMargin)),
             height: max(
-                minPanelSize.height,
-                min(
-                    maxPanelSize.height,
-                    visibleFrame.height - 2 * screenMargin - petFrame.height - petGap
-                )
+                0,
+                min(maxPanelSize.height, visibleFrame.maxY - screenMargin - petFrame.maxY - petGap)
             )
         )
+    }
+
+    /// Gives horizontal resize space to the terminal after preserving the
+    /// chat's saved width and the layout chrome between the two columns.
+    static func terminalWidth(panelWidth: CGFloat, chatWidth: CGFloat) -> CGFloat {
+        max(0, panelWidth - chatWidth - terminalLayoutSpacing)
+    }
+
+    static func preferredTerminalWidth(forHeight height: CGFloat) -> CGFloat {
+        (height * 1.5).rounded()
     }
 
     static func calculate(
@@ -48,31 +52,26 @@ struct ChatBubblePlacement: Equatable {
         visibleFrame: CGRect,
         bubbleSize: CGSize = defaultSize
     ) -> ChatBubblePlacement {
+        let maximumSize = maxSize(petFrame: petFrame, visibleFrame: visibleFrame)
+        let bubbleSize = CGSize(
+            width: min(max(0, bubbleSize.width), maximumSize.width),
+            height: min(max(0, bubbleSize.height), maximumSize.height)
+        )
         let minX = visibleFrame.minX + screenMargin
         let maxX = visibleFrame.maxX - screenMargin - bubbleSize.width
         let desiredX = petFrame.midX - bubbleSize.width / 2
         let x = maxX >= minX ? min(max(desiredX, minX), maxX) : visibleFrame.minX
 
-        let aboveY = petFrame.maxY + petGap
-        let fitsAbove = aboveY + bubbleSize.height <= visibleFrame.maxY - screenMargin
-        let tailEdge: ChatBubbleTailEdge = fitsAbove ? .bottom : .top
-
-        let desiredY = fitsAbove
-            ? aboveY
-            : petFrame.minY - petGap - bubbleSize.height
-        let minY = visibleFrame.minY + screenMargin
-        let maxY = visibleFrame.maxY - screenMargin - bubbleSize.height
-        let y = maxY >= minY ? min(max(desiredY, minY), maxY) : visibleFrame.minY
-
-        let minimumTailOffset: CGFloat = 28
+        let tailInset = min(28, bubbleSize.width / 2)
         let tailOffset = min(
-            max(petFrame.midX - x, minimumTailOffset),
-            bubbleSize.width - minimumTailOffset
+            max(petFrame.midX - x, tailInset),
+            bubbleSize.width - tailInset
         )
 
         return ChatBubblePlacement(
-            origin: CGPoint(x: x, y: y),
-            tailEdge: tailEdge,
+            origin: CGPoint(x: x, y: petFrame.maxY + petGap),
+            size: bubbleSize,
+            tailEdge: .bottom,
             tailOffset: tailOffset
         )
     }

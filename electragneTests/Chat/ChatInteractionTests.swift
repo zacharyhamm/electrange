@@ -57,28 +57,28 @@ struct ChatInteractionTests {
         #expect(right.tailOffset == 292)
     }
 
-    @Test func bubbleFlipsBelowPetNearTopOfScreen() {
+    @Test func bubbleShrinksButStaysAbovePetNearTopOfScreen() {
         let placement = ChatBubblePlacement.calculate(
             petFrame: CGRect(x: 700, y: 820, width: 40, height: 40),
             visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900)
         )
 
-        #expect(placement.origin == CGPoint(x: 560, y: 676))
-        #expect(placement.tailEdge == .top)
+        #expect(placement.origin == CGPoint(x: 560, y: 864))
+        #expect(placement.size == CGSize(width: 320, height: 28))
+        #expect(placement.tailEdge == .bottom)
         #expect(placement.tailOffset == 160)
     }
 
-    @Test func expandedBubbleFlipsBelowPetAndClampsNearTopOfScreen() {
+    @Test func expandedBubbleShrinksInsteadOfCrossingThePet() {
         let placement = ChatBubblePlacement.calculate(
             petFrame: CGRect(x: 700, y: 820, width: 40, height: 40),
             visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
             bubbleSize: ChatBubblePlacement.expandedSize
         )
 
-        // Desired y (below the pet) would be 820 - 4 - 380 = 436, which fits,
-        // and the taller bubble no longer fits above the pet.
-        #expect(placement.origin == CGPoint(x: 550, y: 436))
-        #expect(placement.tailEdge == .top)
+        #expect(placement.origin == CGPoint(x: 550, y: 864))
+        #expect(placement.size == CGSize(width: 340, height: 28))
+        #expect(placement.tailEdge == .bottom)
         #expect(placement.tailOffset == 170)
     }
 
@@ -88,8 +88,8 @@ struct ChatInteractionTests {
             visibleFrame: CGRect(x: 0, y: 0, width: 600, height: 500)
         )
 
-        // Width: 600 - 2*8; height: 500 - 2*8 - 40 (pet) - 4 (gap).
-        #expect(size == CGSize(width: 584, height: 440))
+        // Width: 600 - 2*8; height: 500 - 8 (top) - 40 (pet top) - 4 (gap).
+        #expect(size == CGSize(width: 584, height: 448))
     }
 
     @Test func maxBubbleSizeIsCappedByMaxPanelSizeOnBigScreens() {
@@ -101,13 +101,41 @@ struct ChatInteractionTests {
         #expect(size == ChatBubblePlacement.maxPanelSize)
     }
 
-    @Test func maxBubbleSizeNeverDropsBelowMinPanelSize() {
+    @Test func maxBubbleSizeDropsBelowMinimumToStayOnScreen() {
         let size = ChatBubblePlacement.maxSize(
             petFrame: CGRect(x: 0, y: 0, width: 200, height: 200),
             visibleFrame: CGRect(x: 0, y: 0, width: 300, height: 250)
         )
 
-        #expect(size == ChatBubblePlacement.minPanelSize)
+        #expect(size == CGSize(width: 284, height: 38))
+    }
+
+    @Test func oversizedBubbleIsConstrainedToSafeAreaAbovePet() {
+        let placement = ChatBubblePlacement.calculate(
+            petFrame: CGRect(x: -100, y: 100, width: 40, height: 40),
+            visibleFrame: CGRect(x: -300, y: 0, width: 600, height: 500),
+            bubbleSize: CGSize(width: 2_000, height: 2_000)
+        )
+
+        #expect(placement.origin == CGPoint(x: -292, y: 144))
+        #expect(placement.size == CGSize(width: 584, height: 348))
+        #expect(placement.origin.y >= 140)
+        #expect(placement.origin.y + placement.size.height == 492)
+    }
+
+    @Test func terminalWidthUsesAllSpaceBeyondTheSavedChatWidth() {
+        #expect(ChatBubblePlacement.terminalWidth(
+            panelWidth: 935,
+            chatWidth: 340
+        ) == 570)
+        #expect(ChatBubblePlacement.terminalWidth(
+            panelWidth: 800,
+            chatWidth: 340
+        ) == 435)
+        #expect(ChatBubblePlacement.terminalWidth(
+            panelWidth: 300,
+            chatWidth: 340
+        ) == 0)
     }
 
     @Test func summonPlacesPetInRightThirdOnTheGround() {

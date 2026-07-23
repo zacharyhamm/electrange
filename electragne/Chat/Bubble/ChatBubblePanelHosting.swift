@@ -23,26 +23,31 @@ extension ChatBubbleWindowController {
             ?? NSScreen.main
         guard let visibleFrame = screen?.visibleFrame else { return }
 
-        // Cap the bubble so it fits on screen with the pet below it, and
-        // shrink it now if it's already past the cap (setContentSize is not
-        // constrained by maxSize; only user resizing is).
-        let maxSize = ChatBubblePlacement.maxSize(
-            petFrame: petWindow.frame,
-            visibleFrame: visibleFrame
-        )
-        panel.maxSize = maxSize
-        if panel.frame.width > maxSize.width || panel.frame.height > maxSize.height {
-            panel.setContentSize(CGSize(
-                width: min(panel.frame.width, maxSize.width),
-                height: min(panel.frame.height, maxSize.height)
-            ))
-        }
-
         let placement = ChatBubblePlacement.calculate(
             petFrame: petWindow.frame,
             visibleFrame: visibleFrame,
             bubbleSize: panel.frame.size
         )
+        let maximumSize = ChatBubblePlacement.maxSize(
+            petFrame: petWindow.frame,
+            visibleFrame: visibleFrame
+        )
+        let minimumWidth = ChatBubblePlacement.minPanelSize.width
+            + (model.terminalView == nil ? 0 : ChatBubblePlacement.terminalLayoutSpacing)
+        panel.minSize = CGSize(
+            width: min(minimumWidth, maximumSize.width),
+            height: min(ChatBubblePlacement.minPanelSize.height, maximumSize.height)
+        )
+        panel.maxSize = maximumSize
+        if panel.frame.size != placement.size {
+            panel.setContentSize(placement.size)
+        }
+        model.terminalWidth = model.terminalView == nil
+            ? 0
+            : ChatBubblePlacement.terminalWidth(
+                panelWidth: placement.size.width,
+                chatWidth: expandedSize.width
+            )
         model.tailEdge = placement.tailEdge
         model.tailOffset = placement.tailOffset
         panel.setFrameOrigin(placement.origin)
@@ -57,23 +62,37 @@ extension ChatBubbleWindowController {
         let defaults = UserDefaults.standard
         let width = defaults.double(forKey: Self.savedWidthKey)
         let height = defaults.double(forKey: Self.savedHeightKey)
-        guard width >= ChatBubblePlacement.minPanelSize.width,
-              height >= ChatBubblePlacement.minPanelSize.height else {
+        guard width > 0, height > 0 else {
             return ChatBubblePlacement.expandedSize
         }
         return CGSize(width: width, height: height)
     }
 
+    /// Persists the *chat column* size: the terminal column's width (if one
+    /// is showing) is excluded so reopening without a terminal isn't wide.
     private func persistPanelSize() {
         guard let panel else { return }
         let defaults = UserDefaults.standard
-        defaults.set(Double(panel.frame.width), forKey: Self.savedWidthKey)
+        let terminalSpacing = model.terminalView == nil ? 0 : ChatBubblePlacement.terminalLayoutSpacing
+        defaults.set(
+            Double(panel.frame.width - model.terminalWidth - terminalSpacing),
+            forKey: Self.savedWidthKey
+        )
         defaults.set(Double(panel.frame.height), forKey: Self.savedHeightKey)
+        if model.terminalView != nil {
+            rememberTerminalWidth(model.terminalWidth, for: currentChatID)
+        }
     }
 
     func setExpanded(_ expanded: Bool) {
         guard let panel else { return }
-        let size = expanded ? expandedSize : ChatBubblePlacement.defaultSize
+        var size = expanded ? expandedSize : ChatBubblePlacement.defaultSize
+        model.terminalWidth = model.terminalView == nil
+            ? 0
+            : terminalWidth(for: currentChatID, initialHeight: size.height)
+        if model.terminalView != nil {
+            size.width += model.terminalWidth + ChatBubblePlacement.terminalLayoutSpacing
+        }
         guard panel.frame.size != size else { return }
         panel.setContentSize(size)
         reposition()
@@ -159,13 +178,23 @@ extension ChatBubbleWindowController {
         // After the user drags the bubble to a new size, remember it and
         // re-anchor so the tail points back at the pet.
         if let panel {
+            let liveResizeObserver = center.addObserver(
+                forName: NSWindow.didResizeNotification,
+                object: panel,
+                queue: .main
+            ) { [weak self] _ in
+                self?.reposition()
+            }
+            windowObservers.append(liveResizeObserver)
+
             let resizeObserver = center.addObserver(
                 forName: NSWindow.didEndLiveResizeNotification,
                 object: panel,
                 queue: .main
             ) { [weak self] _ in
-                self?.persistPanelSize()
-                self?.reposition()
+                guard let self else { return }
+                self.reposition()
+                self.persistPanelSize()
             }
             windowObservers.append(resizeObserver)
         }

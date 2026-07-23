@@ -8,6 +8,7 @@
 
 import Foundation
 import Observation
+import SwiftTerm
 
 enum ChatBubblePhase: Equatable {
     case idle
@@ -47,6 +48,10 @@ final class ChatBubbleModel {
     var currentModel = ""
     var fontSize: CGFloat = UserPreferences.chatFontSize()
     var pendingToolConfirmation: PendingToolConfirmation?
+    /// The current chat's terminal, shown beside the transcript when non-nil.
+    /// The view is owned by TerminalPanelController; this is just attachment.
+    var terminalView: LocalProcessTerminalView?
+    var terminalWidth: CGFloat = 0
 
     var isStreaming: Bool { phase == .streaming }
 

@@ -8,13 +8,15 @@ final class ChatToolRouter {
     convenience init(
         memoryEngine: MemoryEngine,
         calendarMonitor: CalendarReminderMonitor? = nil,
-        automationEngine: AutomationEngine? = nil
+        automationEngine: AutomationEngine? = nil,
+        terminalExecutor: TerminalToolService? = nil
     ) {
         self.init(
             reminderExecutor: AppleReminderService(),
             notesExecutor: AppleNotesService(),
             desktopExecutor: DesktopToolService(),
             timerExecutor: TimerToolService(),
+            terminalExecutor: terminalExecutor,
             calendarMonitor: calendarMonitor,
             memoryExecutor: MemoryToolExecutor(engine: memoryEngine),
             automationEngine: automationEngine
@@ -32,6 +34,7 @@ final class ChatToolRouter {
         linearExecutor: (any LinearToolExecuting)? = nil,
         webSearchExecutor: (any ToolExecuting)? = nil,
         ledSignExecutor: LEDSignToolService? = nil,
+        terminalExecutor: TerminalToolService? = nil,
         mcpExecutor: (any ToolExecuting)? = nil,
         calendarMonitor: CalendarReminderMonitor? = nil,
         statusExecutor: (any ToolExecuting)? = nil,
@@ -113,6 +116,14 @@ final class ChatToolRouter {
                     parse: LEDSignToolRequest.init(toolCall:),
                     confirm: { _ in nil },
                     execute: { await ledSign.execute($0) }
+                )
+            }(),
+            .terminal: {
+                let terminal = terminalExecutor ?? TerminalToolService()
+                return ToolAdapter.sync(
+                    parse: TerminalToolRequest.init(toolCall:),
+                    confirm: terminal.confirmationDetails(for:),
+                    execute: { await terminal.execute($0) }
                 )
             }(),
             .webSearch: webSearchExecutor ?? WebSearchExecutor(),

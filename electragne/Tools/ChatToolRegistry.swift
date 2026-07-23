@@ -20,6 +20,7 @@ nonisolated enum ChatToolFamily: Equatable, Sendable {
     case memory
     case automations
     case ledSign
+    case terminal
 }
 
 nonisolated enum ChatToolParameterType: String, Equatable, Sendable {
@@ -265,6 +266,28 @@ nonisolated enum ChatToolRegistry {
                 "priority": property(.boolean, "Set true to preempt the currently displayed message."),
             ], required: ["text"], initialStatus: "Updating the LED sign…",
             executionStatus: "Updating the LED sign…"
+        ),
+        definition(
+            "open_terminal", family: .terminal,
+            description: "Open the embedded terminal panel beside the chat window.",
+            initialStatus: "Opening terminal…", executionStatus: "Opening terminal…"
+        ),
+        definition(
+            "write_terminal", family: .terminal,
+            description: "Send text or one key press to the current chat's embedded terminal after the owner confirms. Provide exactly one of text or key.",
+            properties: [
+                "text": property(.string, "Text to send. Use pressEnter to submit it as a command."),
+                "key": property(.string, "One Unicode character, a named terminal key (such as escape, up, F12, or keypad1), or keycode:<0-65535>."),
+                "modifiers": property(.string, "Optional key modifiers joined by +: control, option, command, shift, caps-lock, function, numeric-pad, help, or hyper. Aliases include ctrl, alt/meta, and super/cmd."),
+                "pressEnter": property(.boolean, "For text only: append Enter after the text. Defaults to true."),
+            ], initialStatus: "Confirm terminal input…", executionStatus: "Writing to terminal…"
+        ),
+        definition(
+            "read_terminal", family: .terminal,
+            description: "Read the newest lines from the current chat's embedded terminal, including full-screen programs such as top.",
+            properties: [
+                "maxLines": property(.number, "Optional whole-number line limit from 1 to 200. Defaults to 100."),
+            ], initialStatus: "Reading terminal…", executionStatus: "Reading terminal…"
         ),
         definition(
             "report_app_status", family: .status,

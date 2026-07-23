@@ -138,7 +138,7 @@ struct GeminiClientTests {
         #expect(tools.count == 2)
         #expect(tools[0]["googleSearch"] != nil)
         let functions = try #require(tools[1]["functionDeclarations"] as? [[String: Any]])
-        #expect(functions.count == 46)
+        #expect(functions.count == 49)
         #expect(Set(functions.compactMap { $0["name"] as? String }) == [
             "image_search",
             "create_reminder", "list_reminders", "update_reminder", "delete_reminder",
@@ -146,6 +146,7 @@ struct GeminiClientTests {
             "open_app", "open_url", "find_files", "reveal_in_finder",
             "create_timer", "list_timers", "cancel_timer",
             "send_led_sign",
+            "open_terminal", "write_terminal", "read_terminal",
             "create_automation", "list_automations", "update_automation", "cancel_automation",
             "report_app_status",
             "list_google_accounts", "search_gmail", "read_gmail_message",

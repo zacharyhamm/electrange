@@ -6,6 +6,8 @@
 //  and the speech-bubble shape.
 //
 
+import AppKit
+import SwiftTerm
 import SwiftUI
 
 struct ChatBubbleView: View {
@@ -17,6 +19,7 @@ struct ChatBubbleView: View {
     let onSelectModel: (String) -> Void
     let onConfirmTool: () -> Void
     let onCancelTool: () -> Void
+    let onCloseTerminal: () -> Void
 
     @FocusState private var inputIsFocused: Bool
     @AppStorage(UserPreferences.chatOpacityKey)
@@ -42,6 +45,70 @@ struct ChatBubbleView: View {
                 }
                 .shadow(color: .black.opacity(0.16 * bubbleOpacity), radius: 4, y: 2)
 
+            HStack(alignment: .top, spacing: 12) {
+                chatColumn
+                if let terminalView = model.terminalView {
+                    Divider()
+                        .frame(width: 1)
+                    TerminalHostView(terminalView: terminalView)
+                        .frame(width: model.terminalWidth)
+                        .overlay(alignment: .topTrailing) {
+                            Button(action: onCloseTerminal) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .frame(width: 18, height: 18)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Close terminal")
+                        }
+                }
+            }
+            .padding(.top, model.tailEdge == .top ? 24 : 14)
+            .padding(.bottom, model.tailEdge == .bottom ? 24 : 14)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .onExitCommand {
+            if model.pendingToolConfirmation != nil {
+                onCancelTool()
+            } else {
+                onDismiss()
+            }
+        }
+        .background {
+            // Window-scoped shortcuts. Invisible buttons let SwiftUI route
+            // them while the chat panel is the key window.
+            Group {
+                Button("", action: onNewChat)
+                    .keyboardShortcut("n", modifiers: .command)
+                Button("") { model.adjustFontSize(by: 1) }
+                    .keyboardShortcut("+", modifiers: .command)
+                Button("") { model.adjustFontSize(by: 1) }
+                    .keyboardShortcut("=", modifiers: .command)
+                Button("") { model.adjustFontSize(by: -1) }
+                    .keyboardShortcut("-", modifiers: .command)
+            }
+            .buttonStyle(.plain)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+        }
+        .onAppear {
+            DispatchQueue.main.async {
+                inputIsFocused = true
+            }
+        }
+        .onChange(of: model.isStreaming) { _, streaming in
+            if !streaming {
+                inputIsFocused = true
+            }
+        }
+        .onChange(of: model.pendingToolConfirmation) { _, confirmation in
+            inputIsFocused = confirmation == nil
+        }
+    }
+
+    private var chatColumn: some View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center) {
                     Text("sheepchat. baaa.")
@@ -134,40 +201,7 @@ struct ChatBubbleView: View {
                     )
                 }
             }
-            .padding(.top, model.tailEdge == .top ? 24 : 14)
-            .padding(.bottom, model.tailEdge == .bottom ? 24 : 14)
-            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        }
-        .onExitCommand(perform: onDismiss)
-        .background {
-            // Window-scoped shortcuts. Invisible buttons let SwiftUI route
-            // them while the chat panel is the key window.
-            Group {
-                Button("", action: onNewChat)
-                    .keyboardShortcut("n", modifiers: .command)
-                Button("") { model.adjustFontSize(by: 1) }
-                    .keyboardShortcut("+", modifiers: .command)
-                Button("") { model.adjustFontSize(by: 1) }
-                    .keyboardShortcut("=", modifiers: .command)
-                Button("") { model.adjustFontSize(by: -1) }
-                    .keyboardShortcut("-", modifiers: .command)
-            }
-            .buttonStyle(.plain)
-            .opacity(0)
-            .frame(width: 0, height: 0)
-            .accessibilityHidden(true)
-        }
-        .onAppear {
-            DispatchQueue.main.async {
-                inputIsFocused = true
-            }
-        }
-        .onChange(of: model.isStreaming) { _, streaming in
-            if !streaming {
-                inputIsFocused = true
-            }
-        }
     }
 
     private func submit() {
@@ -260,9 +294,11 @@ private struct ChatTranscriptView: View {
                 Button("Cancel", action: onCancelTool)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .keyboardShortcut(.cancelAction)
                 Button(details.actionLabel, action: onConfirmTool)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
+                    .keyboardShortcut(.defaultAction)
             }
         }
         .padding(10)
@@ -342,6 +378,22 @@ private struct ChatTranscriptView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+/// Hosts the externally-owned SwiftTerm view (one live session per chat,
+/// owned by TerminalPanelController). updateNSView reparents it, so the same
+/// shell and scrollback move between layouts without restarting.
+private struct TerminalHostView: NSViewRepresentable {
+    let terminalView: LocalProcessTerminalView
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ container: NSView, context: Context) {
+        guard terminalView.superview !== container else { return }
+        terminalView.frame = container.bounds
+        terminalView.autoresizingMask = [.width, .height]
+        container.subviews = [terminalView]
     }
 }
 

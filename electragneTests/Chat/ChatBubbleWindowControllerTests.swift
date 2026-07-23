@@ -4,6 +4,18 @@ import Testing
 
 @MainActor
 struct ChatBubbleWindowControllerTests {
+    @Test func terminalWidthsAreRememberedPerChat() {
+        let controller = makeController(client: ControlledChatClient())
+        let first = UUID()
+        let second = UUID()
+
+        #expect(controller.terminalWidth(for: first, initialHeight: 200) == 300)
+        controller.rememberTerminalWidth(425, for: first)
+
+        #expect(controller.terminalWidth(for: first, initialHeight: 200) == 425)
+        #expect(controller.terminalWidth(for: second, initialHeight: 200) == 300)
+    }
+
     @Test func calendarSummaryDisablesToolsWithoutAJoinURL() async {
         let client = ControlledChatClient(attemptToolCall: true)
         let controller = makeController(client: client)
