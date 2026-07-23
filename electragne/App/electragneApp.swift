@@ -22,8 +22,8 @@ struct ElectragneApp: App {
                     appModel.startCalendarMonitoring { [weak appDelegate] event in
                         await appDelegate?.presentCalendarReminder(event) ?? false
                     }
-                    appModel.startAutomations { [weak appDelegate] name, payload in
-                        appDelegate?.presentAutomationNotice(name: name, payload: payload)
+                    appModel.startAutomations { [weak appDelegate] notice in
+                        await appDelegate?.presentAutomationNotice(notice) ?? false
                     }
                 }
         }

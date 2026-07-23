@@ -16,19 +16,41 @@ final class AppModel {
     let calendarReminderMonitor = CalendarReminderMonitor()
     let automationEngine = AutomationEngine(log: .shared)
     let memoryEngine = MemoryEngine()
+    let terminalController = TerminalPanelController()
     let chatBubbleController: ChatBubbleWindowController
 
     init() {
+        let terminalToolService = TerminalToolService()
         let toolRouter = ChatToolRouter(
             memoryEngine: memoryEngine,
             calendarMonitor: calendarReminderMonitor,
-            automationEngine: automationEngine
+            automationEngine: automationEngine,
+            terminalExecutor: terminalToolService
         )
         automationEngine.toolRouter = toolRouter
         chatBubbleController = ChatBubbleWindowController(
             toolRouter: toolRouter,
-            memoryEngine: memoryEngine
+            memoryEngine: memoryEngine,
+            terminalController: terminalController
         )
+        automationEngine.currentToolChatID = { [weak chatBubbleController] in
+            chatBubbleController?.toolChatID
+        }
+        automationEngine.hasTerminalSession = { [weak terminalController] chatID in
+            terminalController?.hasSession(for: chatID) ?? false
+        }
+        terminalToolService.present = { [weak chatBubbleController, weak terminalController] chatID in
+            if let chatID { return terminalController?.hasSession(for: chatID) ?? false }
+            return chatBubbleController?.showTerminal() ?? false
+        }
+        terminalToolService.write = { [weak chatBubbleController, weak terminalController] input, chatID in
+            if let chatID { return terminalController?.send(input, for: chatID) ?? false }
+            return chatBubbleController?.writeTerminal(input) ?? false
+        }
+        terminalToolService.read = { [weak chatBubbleController, weak terminalController] maxLines, chatID in
+            if let chatID { return terminalController?.read(maxLines: maxLines, for: chatID) }
+            return chatBubbleController?.readTerminal(maxLines: maxLines)
+        }
     }
 
     /// App bootstrap, called when the pet window content appears.
@@ -48,7 +70,7 @@ final class AppModel {
         calendarReminderMonitor.start()
     }
 
-    func startAutomations(onNotify: @escaping (String, String) -> Void) {
+    func startAutomations(onNotify: @escaping (AutomationNotice) async -> Bool) {
         automationEngine.onNotify = onNotify
         automationEngine.start()
     }
@@ -98,8 +120,7 @@ final class AppModel {
                     anchoredTo: window,
                     onDismiss: { [petViewModel] in petViewModel.dismissChat() }
                 )
-                chatBubbleController.startProactiveConversation(prompt)
-                return true
+                return chatBubbleController.startProactiveConversation(prompt)
             }
             if attempt < attempts {
                 try? await Task.sleep(for: .seconds(0.5))

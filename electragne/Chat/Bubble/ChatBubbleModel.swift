@@ -21,6 +21,7 @@ struct ChatBubbleEntry: Equatable, Identifiable {
         case user
         case assistant
         case tool
+        case automation
     }
 
     let id = UUID()

@@ -8,6 +8,53 @@ nonisolated struct AutomationRecord: Codable, Equatable, Sendable {
     var instruction: String
     var schedule: AutomationSchedule? = nil
     var lastRun: Date?
+    var isEnabled = true
+    var chatID: UUID? = nil
+    var terminalAccess = false
+    var lastDeliveryStatus: String? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, intervalSeconds, instruction, schedule, lastRun
+        case isEnabled, chatID, terminalAccess, lastDeliveryStatus
+    }
+
+    init(
+        id: String,
+        name: String,
+        intervalSeconds: Int,
+        instruction: String,
+        schedule: AutomationSchedule? = nil,
+        lastRun: Date? = nil,
+        isEnabled: Bool = true,
+        chatID: UUID? = nil,
+        terminalAccess: Bool = false,
+        lastDeliveryStatus: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.intervalSeconds = intervalSeconds
+        self.instruction = instruction
+        self.schedule = schedule
+        self.lastRun = lastRun
+        self.isEnabled = isEnabled
+        self.chatID = chatID
+        self.terminalAccess = terminalAccess
+        self.lastDeliveryStatus = lastDeliveryStatus
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        intervalSeconds = try values.decode(Int.self, forKey: .intervalSeconds)
+        instruction = try values.decode(String.self, forKey: .instruction)
+        schedule = try values.decodeIfPresent(AutomationSchedule.self, forKey: .schedule)
+        lastRun = try values.decodeIfPresent(Date.self, forKey: .lastRun)
+        isEnabled = try values.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        chatID = try values.decodeIfPresent(UUID.self, forKey: .chatID)
+        terminalAccess = try values.decodeIfPresent(Bool.self, forKey: .terminalAccess) ?? false
+        lastDeliveryStatus = try values.decodeIfPresent(String.self, forKey: .lastDeliveryStatus)
+    }
 }
 
 nonisolated struct AutomationSchedule: Codable, Equatable, Sendable {
@@ -74,14 +121,22 @@ nonisolated struct AutomationSchedule: Codable, Equatable, Sendable {
 }
 
 nonisolated enum AutomationToolRequest: Equatable, Sendable {
-    case create(name: String, intervalSeconds: Int, instruction: String, schedule: AutomationSchedule? = nil)
+    case create(
+        name: String,
+        intervalSeconds: Int,
+        instruction: String,
+        schedule: AutomationSchedule? = nil,
+        terminalAccess: Bool = false
+    )
     case list
     case update(
         automationID: String,
         name: String?,
         intervalSeconds: Int?,
         instruction: String?,
-        schedule: AutomationSchedule?
+        schedule: AutomationSchedule?,
+        enabled: Bool? = nil,
+        terminalAccess: Bool? = nil
     )
     case cancel(automationID: String)
 
@@ -100,7 +155,8 @@ nonisolated enum AutomationToolRequest: Equatable, Sendable {
                 name: args.string("name") ?? "Automation",
                 intervalSeconds: intervalSeconds,
                 instruction: instruction,
-                schedule: try Self.parseSchedule(toolCall, args)
+                schedule: try Self.parseSchedule(toolCall, args),
+                terminalAccess: try Self.parseBoolean(toolCall, "terminalAccess") ?? false
             )
         case "list_automations":
             self = .list
@@ -113,7 +169,9 @@ nonisolated enum AutomationToolRequest: Equatable, Sendable {
                 name: args.string("name"),
                 intervalSeconds: try Self.parseInterval(toolCall),
                 instruction: args.string("instruction"),
-                schedule: try Self.parseSchedule(toolCall, args)
+                schedule: try Self.parseSchedule(toolCall, args),
+                enabled: try Self.parseBoolean(toolCall, "enabled"),
+                terminalAccess: try Self.parseBoolean(toolCall, "terminalAccess")
             )
         case "cancel_automation":
             guard let automationID = args.string("automationID") else {
@@ -135,6 +193,14 @@ nonisolated enum AutomationToolRequest: Equatable, Sendable {
             throw AutomationToolError.invalidInterval
         }
         return Int(raw)
+    }
+
+    private static func parseBoolean(_ toolCall: ChatToolCall, _ name: String) throws -> Bool? {
+        guard let value = toolCall.arguments[name] else { return nil }
+        guard let result = value.boolValue else {
+            throw AutomationToolError.invalidBoolean(name)
+        }
+        return result
     }
 
     /// Nil when no window or day arguments are present.
@@ -176,6 +242,7 @@ nonisolated enum AutomationToolError: LocalizedError, Equatable {
     case invalidInterval
     case invalidWindow
     case invalidDays
+    case invalidBoolean(String)
 
     var errorDescription: String? {
         switch self {
@@ -184,6 +251,7 @@ nonisolated enum AutomationToolError: LocalizedError, Equatable {
         case .invalidInterval: "Automation interval must be a whole number from 60 seconds to 7 days."
         case .invalidWindow: "Automation window must have different start and end times in HH:mm format."
         case .invalidDays: "Automation days must be a comma-separated list using mon, tue, wed, thu, fri, sat, or sun."
+        case .invalidBoolean(let name): "Automation ‘\(name)’ must be true or false."
         }
     }
 }
@@ -230,12 +298,15 @@ final class AutomationToolService: AutomationToolExecuting {
 
     func confirmationDetails(for request: AutomationToolRequest) -> ToolConfirmationDetails? {
         switch request {
-        case .create(let name, let seconds, let instruction, let schedule):
+        case .create(let name, let seconds, let instruction, let schedule, let terminalAccess):
             var details = [
                 ("Every", TimerToolService.durationText(seconds)),
                 ("Task", instruction),
             ]
             if let schedule { details.insert(("When", schedule.text), at: 1) }
+            if terminalAccess {
+                details.append(("Terminal", "Unattended read and write access to this chat"))
+            }
             return ToolConfirmationDetails(
                 title: "Start this automation?",
                 primaryText: name,
@@ -244,12 +315,21 @@ final class AutomationToolService: AutomationToolExecuting {
             )
         case .list:
             return nil
-        case .update(let automationID, let name, let seconds, let instruction, let schedule):
+        case .update(
+            let automationID, let name, let seconds, let instruction,
+            let schedule, let enabled, let terminalAccess
+        ):
             let existing = engine.list().first { $0.id == automationID }
             var details: [(String, String)] = []
             if let seconds { details.append(("Every", TimerToolService.durationText(seconds))) }
             if let schedule { details.append(("When", schedule.text)) }
             if let instruction { details.append(("Task", instruction)) }
+            if let enabled { details.append(("Status", enabled ? "Enabled" : "Paused")) }
+            if let terminalAccess {
+                details.append(("Terminal", terminalAccess
+                    ? "Unattended read and write access to this chat"
+                    : "No access"))
+            }
             return ToolConfirmationDetails(
                 title: "Update this automation?",
                 primaryText: name ?? existing?.name ?? "Selected automation",
@@ -269,12 +349,22 @@ final class AutomationToolService: AutomationToolExecuting {
 
     func execute(_ request: AutomationToolRequest) async -> ChatToolResult {
         switch request {
-        case .create(let name, let seconds, let instruction, let schedule):
+        case .create(let name, let seconds, let instruction, let schedule, let terminalAccess):
+            let chatID = engine.currentToolChatID()
+            if terminalAccess,
+               (chatID == nil || chatID.map(engine.hasTerminalSession) != true) {
+                return .make(
+                    status: "terminal_unavailable",
+                    message: "Open this chat’s terminal before granting unattended terminal access."
+                )
+            }
             let automation = engine.add(
                 name: name,
                 intervalSeconds: seconds,
                 instruction: instruction,
-                schedule: schedule
+                schedule: schedule,
+                chatID: chatID,
+                terminalAccess: terminalAccess
             )
             return automationResult(
                 automation,
@@ -293,13 +383,27 @@ final class AutomationToolService: AutomationToolExecuting {
                     : "Found \(automations.count) active automation\(automations.count == 1 ? "" : "s")."),
             ])
 
-        case .update(let automationID, let name, let seconds, let instruction, let schedule):
+        case .update(
+            let automationID, let name, let seconds, let instruction,
+            let schedule, let enabled, let terminalAccess
+        ):
+            let chatID = terminalAccess == true ? engine.currentToolChatID() : nil
+            if terminalAccess == true,
+               (chatID == nil || chatID.map(engine.hasTerminalSession) != true) {
+                return .make(
+                    status: "terminal_unavailable",
+                    message: "Open this chat’s terminal before granting unattended terminal access."
+                )
+            }
             guard let automation = engine.update(
                 id: automationID,
                 name: name,
                 intervalSeconds: seconds,
                 instruction: instruction,
-                schedule: schedule
+                schedule: schedule,
+                isEnabled: enabled,
+                terminalAccess: terminalAccess,
+                chatID: chatID
             ) else {
                 return .make(
                     status: "not_found",
@@ -336,12 +440,21 @@ final class AutomationToolService: AutomationToolExecuting {
             "name": .string(automation.name),
             "intervalSeconds": .number(Double(automation.intervalSeconds)),
             "instruction": .string(automation.instruction),
+            "enabled": .bool(automation.isEnabled),
+            "terminalAccess": .bool(automation.terminalAccess),
+            "terminalStatus": .string(engine.terminalStatus(for: automation)),
+            "nextRun": automation.isEnabled
+                ? .string(TimerToolService.dateString(engine.nextRun(for: automation)))
+                : .null,
         ]
         if let lastRun = automation.lastRun {
             values["lastRun"] = .string(TimerToolService.dateString(lastRun))
         }
         if let schedule = automation.schedule {
             values["schedule"] = .string(schedule.text)
+        }
+        if let status = automation.lastDeliveryStatus {
+            values["lastDeliveryStatus"] = .string(status)
         }
         return values
     }

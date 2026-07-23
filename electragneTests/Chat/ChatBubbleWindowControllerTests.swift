@@ -47,17 +47,66 @@ struct ChatBubbleWindowControllerTests {
         #expect(!client.firstRequestWasCancelled)
     }
 
-    private func makeController(client: ControlledChatClient) -> ChatBubbleWindowController {
+    @Test func automationUpdateReturnsToItsOriginatingChat() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ChatStore(directory: directory)
+        let chat = StoredChat(
+            title: "Build",
+            messages: [ChatMessage(role: "user", content: "Watch this build.")]
+        )
+        store.save(chat)
+        let client = ControlledChatClient()
         let memoryEngine = MemoryEngine(store: MemoryStore(
-            directory: FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
+            directory: directory.appendingPathComponent("memory")
         ))
-        return ChatBubbleWindowController(
+        let controller = ChatBubbleWindowController(
             ollamaClient: client,
             geminiClient: client,
             toolRouter: ChatToolRouter(memoryEngine: memoryEngine),
-            chatStore: ChatStore(directory: FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)),
+            chatStore: store,
+            memoryEngine: memoryEngine
+        )
+
+        let accepted = controller.startProactiveConversation(.init(
+            title: "Build watch",
+            prompt: "The build failed.",
+            targetChatID: chat.id,
+            source: .init(automationID: "automation", runID: "run", name: "Build watch")
+        ))
+        await waitUntil { store.load(id: chat.id)?.messages.last?.role == "assistant" }
+
+        let saved = try #require(store.load(id: chat.id))
+        #expect(accepted)
+        #expect(store.listSummaries().count == 1)
+        #expect(saved.messages[saved.messages.count - 2].source?.automationID == "automation")
+        #expect(saved.messages.last?.content == "Summary")
+    }
+
+    private func makeTempStore() -> ChatStore {
+        ChatStore(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString))
+    }
+
+    private func makeMemoryEngine() -> MemoryEngine {
+        MemoryEngine(store: MemoryStore(
+            directory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+        ))
+    }
+
+    private func makeController(
+        client: ControlledChatClient,
+        store: ChatStore? = nil,
+        router: ChatToolRouter? = nil
+    ) -> ChatBubbleWindowController {
+        let memoryEngine = makeMemoryEngine()
+        return ChatBubbleWindowController(
+            ollamaClient: client,
+            geminiClient: client,
+            toolRouter: router ?? ChatToolRouter(memoryEngine: memoryEngine),
+            chatStore: store ?? makeTempStore(),
             memoryEngine: memoryEngine
         )
     }

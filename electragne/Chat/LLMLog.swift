@@ -4,6 +4,8 @@ import os
 nonisolated struct AutomationRunContext: Sendable {
     let automationID: String
     let runID: String
+    var chatID: UUID? = nil
+    var terminalAccess = false
 }
 
 nonisolated enum AutomationRunScope {

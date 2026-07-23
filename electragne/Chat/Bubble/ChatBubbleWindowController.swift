@@ -45,6 +45,8 @@ final class ChatBubbleWindowController {
         let title: String
         let prompt: String
         var joinURL: URL? = nil
+        var targetChatID: UUID? = nil
+        var source: ChatMessageSource? = nil
     }
     private var pendingProactivePrompts: [ProactivePrompt] = []
 
@@ -194,7 +196,7 @@ final class ChatBubbleWindowController {
         // The stream (if any) keeps running; its chat is still current, so
         // tokens keep landing in the buffer and the next present() reattaches.
         resolveToolConfirmation(approved: false)
-        pendingProactivePrompts.removeAll()
+        pendingProactivePrompts.removeAll { $0.source == nil }
         removeEventMonitors()
         removeWindowObservers()
         panel?.orderOut(nil)
@@ -209,8 +211,13 @@ final class ChatBubbleWindowController {
     /// The transcript rows for a stored history.
     private static func entries(from history: [ChatMessage]) -> [ChatBubbleEntry] {
         history.map { turn in
-            ChatBubbleEntry(
-                role: turn.role == "user" ? .user : .assistant,
+            if turn.role == "tool" {
+                return ChatBubbleEntry(role: .tool, text: turn.content)
+            }
+            return ChatBubbleEntry(
+                role: turn.source == nil
+                    ? (turn.role == "user" ? .user : .assistant)
+                    : .automation,
                 text: turn.content,
                 images: turn.images ?? []
             )
@@ -227,29 +234,47 @@ final class ChatBubbleWindowController {
         model.entries = []
         model.phase = .idle
         refreshChatList()
+        restoreTerminal()
     }
 
-    func startProactiveConversation(_ prompt: ProactivePrompt) {
+    @discardableResult
+    func startProactiveConversation(_ prompt: ProactivePrompt) -> Bool {
+        if let chatID = prompt.targetChatID,
+           chatID != currentChat.id,
+           chatStore.load(id: chatID) == nil {
+            return false
+        }
         pendingProactivePrompts.append(prompt)
         startNextProactiveConversation()
+        return true
     }
 
     private func startNextProactiveConversation() {
         guard streamTask == nil, !pendingProactivePrompts.isEmpty else { return }
         let prompt = pendingProactivePrompts.removeFirst()
         activeStreamID = nil
-        resetTranscript(to: StoredChat(title: prompt.title))
+        if let chatID = prompt.targetChatID {
+            guard let chat = chatID == currentChat.id ? currentChat : chatStore.load(id: chatID) else {
+                startNextProactiveConversation()
+                return
+            }
+            resetTranscript(to: chat)
+        } else {
+            resetTranscript(to: StoredChat(title: prompt.title))
+        }
         startStream(
             userMessage: prompt.prompt,
             toolsEnabled: false,
-            openURLAfterResponse: prompt.joinURL
+            openURLAfterResponse: prompt.joinURL,
+            source: prompt.source
         )
     }
 
-    private func startStream(
+    func startStream(
         userMessage: String,
         toolsEnabled: Bool = true,
-        openURLAfterResponse: URL? = nil
+        openURLAfterResponse: URL? = nil,
+        source: ChatMessageSource? = nil
     ) {
         resolveToolConfirmation(approved: false)
         if let backgroundID = streamingChatID, backgroundID != currentChat.id {
@@ -270,12 +295,18 @@ final class ChatBubbleWindowController {
         model.text = ""
         model.status = "Thinking…"
         model.phase = .streaming
-        model.entries.append(ChatBubbleEntry(role: .user, text: userMessage))
+        model.entries.append(ChatBubbleEntry(
+            role: source == nil ? .user : .automation,
+            text: userMessage
+        ))
         model.entries.append(ChatBubbleEntry(role: .assistant, text: ""))
         setExpanded(true)
 
-        history.append(ChatMessage(role: "user", content: userMessage))
-        let extractionContext = Array(history.dropLast().suffix(4))
+        history.append(ChatMessage(role: "user", content: userMessage, source: source))
+        if source != nil { persistCurrentChat() }
+        let extractionContext = Array(
+            history.dropLast().filter { $0.role != "tool" }.suffix(4)
+        )
 
         let provider = ChatProviderPreference.selected
         let client: any ChatClient = switch provider {
@@ -283,7 +314,10 @@ final class ChatBubbleWindowController {
         case .gemini: geminiClient
         case .openAICompatible: openAICompatibleClient
         }
-        var messages = history
+        // Tool records (and legacy stored tool_calls) are display-only; replaying
+        // them breaks provider pairing rules (Gemini thought signatures,
+        // OpenAI tool_call_id), so they never go back on the wire.
+        var messages = history.filter { $0.role != "tool" && $0.toolCalls == nil }
         if let memories = memoryEngine.contextBlock(for: userMessage) {
             // Injected into the outgoing request only, right before the new
             // user turn — never persisted to the chat or shown in the bubble.
@@ -350,10 +384,13 @@ final class ChatBubbleWindowController {
             let streamed = self.streamedBuffer
             let images = self.streamedImages
             if self.currentChat.id == chatID {
-                if streamed.isEmpty, images.isEmpty, openURLAfterResponse == nil {
+                if streamed.isEmpty, images.isEmpty, openURLAfterResponse == nil,
+                   source == nil, self.history.last?.role == "user" {
                     // Nothing came back (error or cancelled early); drop the
                     // question so a retry doesn't duplicate it, and the empty
-                    // answer placeholder from the transcript.
+                    // answer placeholder from the transcript. When tool records
+                    // followed the question, keep everything instead — tools
+                    // ran, possibly with side effects.
                     self.history.removeLast()
                     if self.model.entries.last?.role == .assistant,
                        self.model.entries.last?.text.isEmpty == true {
@@ -498,7 +535,7 @@ final class ChatBubbleWindowController {
         images: [ChatImage]
     ) {
         guard var chat = chatStore.load(id: chatID) else { return }
-        if streamed.isEmpty, images.isEmpty {
+        if streamed.isEmpty, images.isEmpty, chat.messages.last?.source == nil {
             if chat.messages.last?.role == "user" { chat.messages.removeLast() }
         } else {
             chat.messages.append(ChatMessage(

@@ -163,6 +163,7 @@ nonisolated struct OllamaClient: ChatProviderBackend, ChatClient {
         let wireHistory = history.map { message in
             var message = message
             message.images = nil
+            message.source = nil
             return message
         }
         let request = ChatRequest(

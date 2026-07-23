@@ -178,6 +178,7 @@ nonisolated struct ChatMessage: Equatable, Codable, Sendable {
     var toolName: String? = nil
     var toolCallID: String? = nil
     var toolCalls: [ChatToolCall]? = nil
+    var source: ChatMessageSource? = nil
 
     enum CodingKeys: String, CodingKey {
         case role
@@ -186,7 +187,15 @@ nonisolated struct ChatMessage: Equatable, Codable, Sendable {
         case toolName = "tool_name"
         case toolCallID = "tool_call_id"
         case toolCalls = "tool_calls"
+        case source
     }
+}
+
+nonisolated struct ChatMessageSource: Equatable, Codable, Sendable {
+    let automationID: String
+    let runID: String
+    let name: String
+    var timestamp = Date()
 }
 
 nonisolated enum ChatSystemPrompt {

@@ -115,6 +115,13 @@ struct AutomationToolTests {
         #expect(throws: AutomationToolError.missingArgument("automationID")) {
             try AutomationToolRequest(toolCall: call("cancel_automation"))
         }
+        #expect(throws: AutomationToolError.invalidBoolean("terminalAccess")) {
+            try AutomationToolRequest(toolCall: call("create_automation", [
+                "intervalSeconds": .number(120),
+                "instruction": .string("Watch."),
+                "terminalAccess": .string("yes"),
+            ]))
+        }
     }
 
     @Test func automationStoreRoundTripsRecords() throws {
@@ -143,6 +150,9 @@ struct AutomationToolTests {
 
         let automation = try #require(AutomationStore(defaults: defaults).load().first)
         #expect(automation.schedule == nil)
+        #expect(automation.isEnabled)
+        #expect(!automation.terminalAccess)
+        #expect(automation.chatID == nil)
     }
 
     @Test func engineRunsDueAutomationsAndNotifiesOnPrefix() async throws {
@@ -152,7 +162,10 @@ struct AutomationToolTests {
         var current = Date(timeIntervalSince1970: 1_000)
         let engine = AutomationEngine(defaults: defaults, now: { current })
         var notified: [(String, String)] = []
-        engine.onNotify = { notified.append(($0, $1)) }
+        engine.onNotify = {
+            notified.append(($0.name, $0.message))
+            return true
+        }
         var runCount = 0
         var output = "NOTIFY: server down"
         engine.runner = { _ in
@@ -179,6 +192,46 @@ struct AutomationToolTests {
         await waitUntil { runCount == 2 }
         #expect(runCount == 2)
         #expect(notified.count == 1)
+    }
+
+    @Test func pausedAndDisconnectedTerminalAutomationsDoNotRun() async throws {
+        let suite = "AutomationPausedTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let engine = AutomationEngine(defaults: defaults)
+        var runCount = 0
+        engine.runner = { _ in runCount += 1; return "NOTHING" }
+        let paused = engine.add(name: "Paused", intervalSeconds: 60, instruction: "Check.")
+        _ = engine.update(id: paused.id, isEnabled: false)
+        _ = engine.add(
+            name: "Terminal",
+            intervalSeconds: 60,
+            instruction: "Check.",
+            chatID: UUID(),
+            terminalAccess: true
+        )
+
+        engine.tick()
+        await waitUntil { false }
+
+        #expect(runCount == 0)
+        #expect(engine.list().first { $0.name == "Terminal" }?.lastRun != nil)
+    }
+
+    @Test func failedMainChatDeliveryPausesAutomation() async throws {
+        let suite = "AutomationDeliveryTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let engine = AutomationEngine(defaults: defaults)
+        engine.runner = { _ in "NOTIFY: important" }
+        engine.onNotify = { _ in false }
+        let automation = engine.add(name: "Watch", intervalSeconds: 60, instruction: "Check.")
+
+        engine.tick()
+        await waitUntil { engine.list().first?.lastDeliveryStatus == "failed" }
+
+        #expect(engine.list().first?.isEnabled == false)
+        #expect(engine.list().first?.id == automation.id)
     }
 
     @Test func engineLogsRunsAndEditsWithoutOverwritingLastRun() async throws {
@@ -256,7 +309,10 @@ struct AutomationToolTests {
         var current = Date(timeIntervalSince1970: 1_000)
         let engine = AutomationEngine(defaults: defaults, now: { current })
         var notified: [(String, String)] = []
-        engine.onNotify = { notified.append(($0, $1)) }
+        engine.onNotify = {
+            notified.append(($0.name, $0.message))
+            return true
+        }
         var runCount = 0
         var output = ""
         engine.runner = { _ in
@@ -289,7 +345,7 @@ struct AutomationToolTests {
         defer { defaults.removePersistentDomain(forName: suite) }
         let engine = AutomationEngine(defaults: defaults)
         var notified = 0
-        engine.onNotify = { _, _ in notified += 1 }
+        engine.onNotify = { _ in notified += 1; return true }
         var release: CheckedContinuation<Void, Never>?
         engine.runner = { _ in
             await withCheckedContinuation { release = $0 }

@@ -213,7 +213,7 @@ nonisolated enum ChatToolRegistry {
         ),
         definition(
             "create_automation", family: .automations,
-            description: "Create a recurring background automation after the owner confirms. It runs the given instruction headlessly with read-only tools every interval and proactively messages the owner only when its result warrants it.",
+            description: "Create a recurring background automation after the owner confirms. It runs the instruction headlessly every interval and reports important updates back to this chat. Set terminalAccess only when it must monitor or operate this chat’s open terminal.",
             properties: [
                 "name": property(.string, "Short human-readable name for the automation."),
                 "intervalSeconds": property(.number, "Required whole-number run interval from 60 to 604800 seconds."),
@@ -221,6 +221,7 @@ nonisolated enum ChatToolRegistry {
                 "windowStart": property(.string, "Optional local start time in 24-hour HH:mm format. Requires windowEnd."),
                 "windowEnd": property(.string, "Optional local end time in 24-hour HH:mm format. Requires windowStart; an earlier time means overnight."),
                 "activeDays": property(.string, "Optional comma-separated days when runs may start: mon,tue,wed,thu,fri,sat,sun. For overnight windows, the start day owns the after-midnight hours."),
+                "terminalAccess": property(.boolean, "Grant unattended read and write access to this chat’s existing terminal. Defaults to false."),
             ], required: ["intervalSeconds", "instruction"], initialStatus: "Confirm automation…",
             executionStatus: "Saving automation…"
         ),
@@ -240,6 +241,8 @@ nonisolated enum ChatToolRegistry {
                 "windowStart": property(.string, "New local start time in 24-hour HH:mm format. Requires windowEnd."),
                 "windowEnd": property(.string, "New local end time in 24-hour HH:mm format. Requires windowStart; an earlier time means overnight."),
                 "activeDays": property(.string, "New comma-separated days when runs may start: mon,tue,wed,thu,fri,sat,sun. For overnight windows, the start day owns the after-midnight hours."),
+                "enabled": property(.boolean, "Set false to pause without deleting, or true to resume."),
+                "terminalAccess": property(.boolean, "Grant or revoke unattended terminal access. Granting binds the automation to this chat’s existing terminal."),
             ], required: ["automationID"], initialStatus: "Confirm automation…",
             executionStatus: "Updating automations…"
         ),

@@ -377,6 +377,19 @@ private struct ChatTranscriptView: View {
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        case .automation:
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Background automation", systemImage: "clock.arrow.2.circlepath")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                LinkedText(text: entry.text, fontSize: model.fontSize)
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(Color.secondary.opacity(0.1))
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

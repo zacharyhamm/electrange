@@ -15,7 +15,9 @@ final class AutomationEngine {
     private let log: LLMLog?
     private var running: Set<String> = []
     private var started = false
-    var onNotify: (String, String) -> Void = { _, _ in }
+    var onNotify: (AutomationNotice) async -> Bool = { _ in false }
+    var currentToolChatID: () -> UUID? = { nil }
+    var hasTerminalSession: (UUID) -> Bool = { _ in false }
     /// Set after construction by AppModel; breaks the engine ↔ router cycle.
     weak var toolRouter: ChatToolRouter?
     /// Injectable for tests; nil runs a real headless LLM turn.
@@ -45,15 +47,20 @@ final class AutomationEngine {
         name: String,
         intervalSeconds: Int,
         instruction: String,
-        schedule: AutomationSchedule? = nil
+        schedule: AutomationSchedule? = nil,
+        chatID: UUID? = nil,
+        terminalAccess: Bool = false
     ) -> AutomationRecord {
+        let targetChatID = chatID ?? currentToolChatID()
         let automation = AutomationRecord(
             id: UUID().uuidString,
             name: name,
             intervalSeconds: intervalSeconds,
             instruction: instruction,
             schedule: schedule,
-            lastRun: nil
+            lastRun: nil,
+            chatID: targetChatID,
+            terminalAccess: terminalAccess
         )
         store.save(store.load() + [automation])
         return automation
@@ -70,7 +77,10 @@ final class AutomationEngine {
         name: String? = nil,
         intervalSeconds: Int? = nil,
         instruction: String? = nil,
-        schedule: AutomationSchedule? = nil
+        schedule: AutomationSchedule? = nil,
+        isEnabled: Bool? = nil,
+        terminalAccess: Bool? = nil,
+        chatID: UUID? = nil
     ) -> AutomationRecord? {
         var automations = store.load()
         guard let index = automations.firstIndex(where: { $0.id == id }) else { return nil }
@@ -78,6 +88,11 @@ final class AutomationEngine {
         if let intervalSeconds { automations[index].intervalSeconds = intervalSeconds }
         if let instruction { automations[index].instruction = instruction }
         if let schedule { automations[index].schedule = schedule }
+        if let isEnabled { automations[index].isEnabled = isEnabled }
+        if let terminalAccess {
+            automations[index].terminalAccess = terminalAccess
+            if terminalAccess, let chatID { automations[index].chatID = chatID }
+        }
         store.save(automations)
         return automations[index]
     }
@@ -89,7 +104,8 @@ final class AutomationEngine {
         name: String,
         intervalSeconds: Int,
         instruction: String,
-        schedule: AutomationSchedule?
+        schedule: AutomationSchedule?,
+        isEnabled: Bool? = nil
     ) -> AutomationRecord? {
         var automations = store.load()
         guard let index = automations.firstIndex(where: { $0.id == id }) else { return nil }
@@ -97,6 +113,7 @@ final class AutomationEngine {
         automations[index].intervalSeconds = intervalSeconds
         automations[index].instruction = instruction
         automations[index].schedule = schedule
+        if let isEnabled { automations[index].isEnabled = isEnabled }
         store.save(automations)
         return automations[index]
     }
@@ -114,17 +131,25 @@ final class AutomationEngine {
     func runNow(id: String) -> Bool {
         guard !running.contains(id),
               let automation = store.load().first(where: { $0.id == id }) else { return false }
+        guard terminalAvailable(for: automation) else { return false }
         run(automation)
         return true
     }
 
     func tick() {
         let current = now()
-        for automation in store.load() where !running.contains(automation.id) {
+        for automation in store.load()
+            where automation.isEnabled && !running.contains(automation.id) {
             guard automation.schedule?.allows(current, calendar: calendar) ?? true else { continue }
             let due = (automation.lastRun ?? .distantPast)
                 .addingTimeInterval(TimeInterval(automation.intervalSeconds))
-            if current >= due { run(automation) }
+            if current >= due {
+                if terminalAvailable(for: automation) {
+                    run(automation)
+                } else {
+                    skipUnavailableTerminal(automation)
+                }
+            }
         }
     }
 
@@ -134,7 +159,12 @@ final class AutomationEngine {
         markLastRun(automation.id, at: now())
         Task { [weak self] in
             guard let self else { return }
-            let context = AutomationRunContext(automationID: automation.id, runID: UUID().uuidString)
+            let context = AutomationRunContext(
+                automationID: automation.id,
+                runID: UUID().uuidString,
+                chatID: automation.chatID,
+                terminalAccess: automation.terminalAccess
+            )
             await AutomationRunScope.$current.withValue(context) {
                 await self.performRun(automation)
             }
@@ -173,7 +203,18 @@ final class AutomationEngine {
                     Log.automation.warning("Automation ‘\(automation.name, privacy: .public)’ replied NOTIFY: with no message; skipping notice.")
                 } else {
                     notified = true
-                    onNotify(automation.name, payload)
+                    let delivered = await onNotify(AutomationNotice(
+                        automationID: automation.id,
+                        runID: AutomationRunScope.current?.runID ?? UUID().uuidString,
+                        name: automation.name,
+                        chatID: automation.chatID,
+                        message: payload
+                    ))
+                    setDeliveryStatus(
+                        automation.id,
+                        status: delivered ? "queued" : "failed",
+                        pause: !delivered
+                    )
                 }
             }
             await log?.append(kind: "automation_run_end", [
@@ -199,10 +240,61 @@ final class AutomationEngine {
         store.save(automations)
     }
 
+    func nextRun(for automation: AutomationRecord) -> Date {
+        automation.lastRun?
+            .addingTimeInterval(TimeInterval(automation.intervalSeconds))
+            ?? now()
+    }
+
+    func terminalStatus(for automation: AutomationRecord) -> String {
+        guard automation.terminalAccess else { return "not_requested" }
+        guard let chatID = automation.chatID else { return "unbound" }
+        return hasTerminalSession(chatID) ? "connected" : "waiting"
+    }
+
+    private func terminalAvailable(for automation: AutomationRecord) -> Bool {
+        !automation.terminalAccess
+            || automation.chatID.map(hasTerminalSession) == true
+    }
+
+    private func skipUnavailableTerminal(_ automation: AutomationRecord) {
+        let date = now()
+        markLastRun(automation.id, at: date)
+        let context = AutomationRunContext(
+            automationID: automation.id,
+            runID: UUID().uuidString,
+            chatID: automation.chatID,
+            terminalAccess: true
+        )
+        Task { [log] in
+            await AutomationRunScope.$current.withValue(context) {
+                await log?.append(kind: "automation_run_start", [
+                    "name": .string(automation.name),
+                    "instruction": .string(automation.instruction),
+                    "intervalSeconds": .number(Double(automation.intervalSeconds)),
+                    "schedule": automation.schedule.map { .string($0.text) } ?? .null,
+                ])
+                await log?.append(kind: "automation_run_end", [
+                    "status": .string("waiting_for_terminal"),
+                    "notified": .bool(false),
+                ])
+            }
+        }
+    }
+
+    private func setDeliveryStatus(_ id: String, status: String, pause: Bool) {
+        var automations = store.load()
+        guard let index = automations.firstIndex(where: { $0.id == id }) else { return }
+        automations[index].lastDeliveryStatus = status
+        if pause { automations[index].isEnabled = false }
+        store.save(automations)
+    }
+
     private static let systemPrompt = """
         You are running as a background automation with no visible chat. \
-        Perform the task below using read-only tools as needed; write actions \
-        will be denied. When you are done, decide whether the result warrants \
+        Perform the task below using tools as needed. Terminal writes are allowed \
+        only when this automation was explicitly granted terminal access; every \
+        other write action will be denied. When you are done, decide whether the result warrants \
         proactively interrupting the owner. If — and only if — it does, your \
         final reply MUST start with "NOTIFY:" followed by a short message for \
         the owner. Otherwise reply exactly "NOTHING".
@@ -220,13 +312,27 @@ final class AutomationEngine {
             history: history,
             onStatus: { _ in },
             onToolCall: { call in
-                await toolRouter.execute(call, confirm: { _ in false }, onStatus: { _ in })
+                await toolRouter.execute(
+                    call,
+                    confirm: { _ in
+                        call.name == "write_terminal" && automation.terminalAccess
+                    },
+                    onStatus: { _ in }
+                )
             },
             onImages: { _ in },
             onToken: { buffer += $0 }
         )
         return buffer
     }
+}
+
+nonisolated struct AutomationNotice: Equatable, Sendable {
+    let automationID: String
+    let runID: String
+    let name: String
+    let chatID: UUID?
+    let message: String
 }
 
 nonisolated private enum AutomationRunError: LocalizedError {

@@ -149,7 +149,8 @@ struct AutomationBrowserView: View {
     }
 
     private func scheduleText(_ automation: AutomationRecord) -> String {
-        "Every \(TimerToolService.durationText(automation.intervalSeconds))"
+        (automation.isEnabled ? "" : "Paused · ")
+            + "Every \(TimerToolService.durationText(automation.intervalSeconds))"
             + (automation.schedule.map { " · \($0.text)" } ?? "")
     }
 
@@ -191,6 +192,7 @@ private struct AutomationEditorView: View {
     @State private var start: Date
     @State private var end: Date
     @State private var weekdays: Set<Int>
+    @State private var isEnabled: Bool
     @State private var error: String?
     @State private var confirmDelete = false
 
@@ -215,12 +217,16 @@ private struct AutomationEditorView: View {
         _start = State(initialValue: Self.date(minute: automation?.schedule?.startMinute ?? 540))
         _end = State(initialValue: Self.date(minute: automation?.schedule?.endMinute ?? 1_020))
         _weekdays = State(initialValue: Set(automation?.schedule?.weekdays ?? []))
+        _isEnabled = State(initialValue: automation?.isEnabled ?? true)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             Form {
                 Section("Automation") {
+                    if automation != nil {
+                        Toggle("Enabled", isOn: $isEnabled)
+                    }
                     TextField("Name", text: $name)
                     LabeledContent("Run every") {
                         HStack {
@@ -232,6 +238,18 @@ private struct AutomationEditorView: View {
                         .font(.body)
                         .frame(minHeight: 70)
                         .accessibilityLabel("Instruction")
+                    if let automation {
+                        LabeledContent(
+                            "Terminal",
+                            value: engine.terminalStatus(for: automation).replacingOccurrences(
+                                of: "_",
+                                with: " "
+                            ).capitalized
+                        )
+                        if let status = automation.lastDeliveryStatus {
+                            LabeledContent("Last handoff", value: status.capitalized)
+                        }
+                    }
                 }
 
                 Section("Schedule") {
@@ -328,7 +346,8 @@ private struct AutomationEditorView: View {
                 name: trimmedName,
                 intervalSeconds: seconds,
                 instruction: trimmedInstruction,
-                schedule: schedule
+                schedule: schedule,
+                isEnabled: isEnabled
             ) != nil else {
                 error = "This automation no longer exists."
                 return

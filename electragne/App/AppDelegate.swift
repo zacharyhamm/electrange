@@ -208,18 +208,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         return await appModel?.deliverCalendarReminder(event) ?? false
     }
 
-    func presentAutomationNotice(name: String, payload: String) {
+    func presentAutomationNotice(_ notice: AutomationNotice) async -> Bool {
         summonPetToChat()
-        Task { [weak self] in
-            await self?.appModel?.startProactiveConversation(ChatBubbleWindowController.ProactivePrompt(
-                title: name,
-                prompt: """
-                My background automation ‘\(name)’ flagged something. Its finding:
-                \(payload)
-                Relay this to me concisely and note anything I should do. Do not call any tools.
-                """
-            ))
-        }
+        return await appModel?.startProactiveConversation(ChatBubbleWindowController.ProactivePrompt(
+            title: notice.name,
+            prompt: """
+                \(notice.name) reported:
+                \(notice.message)
+
+                Summarize the important update in context and tell me what, if anything, I should do next.
+                """,
+            targetChatID: notice.chatID,
+            source: ChatMessageSource(
+                automationID: notice.automationID,
+                runID: notice.runID,
+                name: notice.name
+            )
+        )) ?? false
     }
 
     @objc func toggleVisibility() {
