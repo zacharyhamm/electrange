@@ -26,6 +26,7 @@ struct ChatStoreTests {
                         title: "Sheep"
                     ))]
                 ),
+                ChatMessage(role: "tool", content: "⚙ web_search {\"query\":\"sheep\"}\n→ ok"),
             ]
         )
         store.save(chat)
@@ -35,7 +36,8 @@ struct ChatStoreTests {
         #expect(loaded?.title == "Sheep talk")
         #expect(loaded?.messages == chat.messages)
         #expect(loaded?.messages.first?.toolCalls == nil)
-        #expect(loaded?.messages.last?.images?.first?.title == "Sheep")
+        #expect(loaded?.messages[1].images?.first?.title == "Sheep")
+        #expect(loaded?.messages.last?.role == "tool")
     }
 
     @Test func legacyStoredChatFixtureIsJSONCompatible() throws {

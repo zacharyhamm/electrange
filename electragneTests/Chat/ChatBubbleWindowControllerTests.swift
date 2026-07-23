@@ -84,6 +84,65 @@ struct ChatBubbleWindowControllerTests {
         #expect(saved.messages.last?.content == "Summary")
     }
 
+    @Test func shownToolCallsPersistAndStayOffTheWire() async throws {
+        UserDefaults.standard.set(true, forKey: UserPreferences.verboseToolCallsKey)
+        defer { UserDefaults.standard.removeObject(forKey: UserPreferences.verboseToolCallsKey) }
+        let store = makeTempStore()
+        defer { try? FileManager.default.removeItem(at: store.directory) }
+        let client = ControlledChatClient(attemptToolCall: true)
+        let controller = makeController(client: client, store: store)
+
+        controller.startStream(userMessage: "poke a tool")
+        await waitUntil { store.load(id: controller.currentChatID)?.messages.last?.role == "assistant" }
+
+        let saved = try #require(store.load(id: controller.currentChatID))
+        let toolMessage = try #require(saved.messages.first(where: { $0.role == "tool" }))
+        #expect(toolMessage.content.contains("⚙ untrusted_tool"))
+        #expect(toolMessage.content.contains("→"))
+
+        // Memory extraction also calls the client, so find the second turn's
+        // request by its user message rather than by index.
+        controller.startStream(userMessage: "again")
+        await waitUntil { client.histories.contains(where: { $0.last?.content == "again" }) }
+        let wire = try #require(client.histories.first(where: { $0.last?.content == "again" }))
+        #expect(wire.contains(where: { $0.role == "tool" }) == false)
+    }
+
+    @Test func confirmationDecisionIsRecordedInHistory() async throws {
+        let store = makeTempStore()
+        defer { try? FileManager.default.removeItem(at: store.directory) }
+        let reminders = MockReminderExecutor()
+        reminders.confirmation = ToolConfirmationDetails(
+            title: "Create reminder “Feed sheep”",
+            primaryText: "Feed sheep",
+            details: [],
+            actionLabel: "Create"
+        )
+        let client = ControlledChatClient(attemptToolCall: true)
+        client.injectedCall = ChatToolCall(
+            id: "r1", name: "create_reminder", arguments: ["title": .string("Feed sheep")]
+        )
+        let router = ChatToolRouter(
+            reminderExecutor: reminders,
+            notesExecutor: MockNotesExecutor(),
+            desktopExecutor: MockDesktopExecutor(),
+            timerExecutor: MockTimerExecutor(),
+            memoryExecutor: MemoryToolExecutor(engine: makeMemoryEngine())
+        )
+        let controller = makeController(client: client, store: store, router: router)
+
+        controller.startStream(userMessage: "remind me to feed the sheep")
+        await waitUntil { controller.model.pendingToolConfirmation != nil }
+        controller.resolveToolConfirmation(approved: true)
+        await waitUntil { store.load(id: controller.currentChatID)?.messages.last?.role == "assistant" }
+
+        let saved = try #require(store.load(id: controller.currentChatID))
+        #expect(saved.messages.contains(
+            where: { $0.role == "tool" && $0.content == "Create reminder “Feed sheep” — approved" }
+        ))
+        #expect(reminders.executed.count == 1)
+    }
+
     private func makeTempStore() -> ChatStore {
         ChatStore(directory: FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString))
@@ -143,6 +202,7 @@ private final class ControlledChatClient: ChatClient {
 
     var histories: [[ChatMessage]] = []
     var toolResultMessages: [String] = []
+    var injectedCall = ChatToolCall(id: "injected", name: "untrusted_tool", arguments: [:])
     var firstRequestWasCancelled = false
     var canResumeFirstRequest: Bool { firstContinuation != nil }
 
@@ -160,9 +220,7 @@ private final class ControlledChatClient: ChatClient {
     ) async throws {
         histories.append(history)
         if attemptToolCall {
-            let result = await onToolCall(ChatToolCall(
-                id: "injected", name: "untrusted_tool", arguments: [:]
-            ))
+            let result = await onToolCall(injectedCall)
             toolResultMessages.append(result.response["message"]?.stringValue ?? "")
         }
         if suspendFirstRequest && histories.count == 1 {

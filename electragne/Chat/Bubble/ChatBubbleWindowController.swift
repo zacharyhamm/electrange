@@ -477,10 +477,15 @@ final class ChatBubbleWindowController {
     /// appendToken keeps writing to the assistant entry.
     private func appendVerboseToolEntry(for call: ChatToolCall) -> UUID? {
         guard UserPreferences.verboseToolCalls(), streamIsForeground else { return nil }
-        let entry = ChatBubbleEntry(
-            role: .tool,
-            text: "⚙ \(call.name) \(Self.compactJSON(call.arguments, limit: 200))"
+        return insertToolEntry(
+            "⚙ \(call.name) \(Self.compactJSON(call.arguments, limit: 200))"
         )
+    }
+
+    /// Inserts a `.tool` transcript row before the trailing empty assistant
+    /// entry so appendToken keeps writing to the assistant entry.
+    private func insertToolEntry(_ text: String) -> UUID {
+        let entry = ChatBubbleEntry(role: .tool, text: text)
         if model.entries.last?.role == .assistant, model.entries.last?.text.isEmpty == true {
             model.entries.insert(entry, at: model.entries.count - 1)
         } else {
@@ -494,6 +499,9 @@ final class ChatBubbleWindowController {
         guard streamIsForeground,
               let index = model.entries.firstIndex(where: { $0.id == id }) else { return }
         model.entries[index].text += "\n→ \(Self.compactJSON(result.response, limit: 500))"
+        // Shown tool rows persist with the chat; filtered off the wire in
+        // startStream, rebuilt by entries(from:).
+        history.append(ChatMessage(role: "tool", content: model.entries[index].text))
     }
 
     private static func compactJSON(_ values: [String: ChatToolValue], limit: Int) -> String {
@@ -517,10 +525,16 @@ final class ChatBubbleWindowController {
         if model.pendingToolConfirmation?.id == id {
             model.pendingToolConfirmation = nil
         }
+        if streamIsForeground {
+            // The user's decision is always worth recording, verbose or not.
+            let record = "\(details.title) — \(approved ? "approved" : "denied")"
+            _ = insertToolEntry(record)
+            history.append(ChatMessage(role: "tool", content: record))
+        }
         return approved && !Task.isCancelled
     }
 
-    private func resolveToolConfirmation(approved: Bool) {
+    func resolveToolConfirmation(approved: Bool) {
         model.pendingToolConfirmation = nil
         confirmationBroker.resolve(approved: approved)
     }
